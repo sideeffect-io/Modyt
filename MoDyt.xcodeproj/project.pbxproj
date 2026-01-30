@@ -6,15 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		1A50E6E72F2D1A170072A200 /* DeltaDoreClient in Frameworks */ = {isa = PBXBuildFile; productRef = 1A50E6E62F2D1A170072A200 /* DeltaDoreClient */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		1A50E6C62F2D19650072A200 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 1A50E6B02F2D19640072A200 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 1A50E6B72F2D19640072A200;
-			remoteInfo = MoDyt;
-		};
-		1A50E6D02F2D19650072A200 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 1A50E6B02F2D19640072A200 /* Project object */;
 			proxyType = 1;
@@ -26,7 +23,6 @@
 /* Begin PBXFileReference section */
 		1A50E6B82F2D19640072A200 /* MoDyt.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MoDyt.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A50E6C52F2D19650072A200 /* MoDytTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MoDytTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		1A50E6CF2F2D19650072A200 /* MoDytUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MoDytUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -40,9 +36,9 @@
 			path = MoDytTests;
 			sourceTree = "<group>";
 		};
-		1A50E6D22F2D19650072A200 /* MoDytUITests */ = {
+		1A50E6E22F2D19B70072A200 /* Packages */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = MoDytUITests;
+			path = Packages;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -52,17 +48,11 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1A50E6E72F2D1A170072A200 /* DeltaDoreClient in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		1A50E6C22F2D19650072A200 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		1A50E6CC2F2D19650072A200 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -77,7 +67,7 @@
 			children = (
 				1A50E6BA2F2D19640072A200 /* MoDyt */,
 				1A50E6C82F2D19650072A200 /* MoDytTests */,
-				1A50E6D22F2D19650072A200 /* MoDytUITests */,
+				1A50E6E22F2D19B70072A200 /* Packages */,
 				1A50E6B92F2D19640072A200 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -87,7 +77,6 @@
 			children = (
 				1A50E6B82F2D19640072A200 /* MoDyt.app */,
 				1A50E6C52F2D19650072A200 /* MoDytTests.xctest */,
-				1A50E6CF2F2D19650072A200 /* MoDytUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -109,9 +98,11 @@
 			);
 			fileSystemSynchronizedGroups = (
 				1A50E6BA2F2D19640072A200 /* MoDyt */,
+				1A50E6E22F2D19B70072A200 /* Packages */,
 			);
 			name = MoDyt;
 			packageProductDependencies = (
+				1A50E6E62F2D1A170072A200 /* DeltaDoreClient */,
 			);
 			productName = MoDyt;
 			productReference = 1A50E6B82F2D19640072A200 /* MoDyt.app */;
@@ -140,29 +131,6 @@
 			productReference = 1A50E6C52F2D19650072A200 /* MoDytTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		1A50E6CE2F2D19650072A200 /* MoDytUITests */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 1A50E6DF2F2D19650072A200 /* Build configuration list for PBXNativeTarget "MoDytUITests" */;
-			buildPhases = (
-				1A50E6CB2F2D19650072A200 /* Sources */,
-				1A50E6CC2F2D19650072A200 /* Frameworks */,
-				1A50E6CD2F2D19650072A200 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				1A50E6D12F2D19650072A200 /* PBXTargetDependency */,
-			);
-			fileSystemSynchronizedGroups = (
-				1A50E6D22F2D19650072A200 /* MoDytUITests */,
-			);
-			name = MoDytUITests;
-			packageProductDependencies = (
-			);
-			productName = MoDytUITests;
-			productReference = 1A50E6CF2F2D19650072A200 /* MoDytUITests.xctest */;
-			productType = "com.apple.product-type.bundle.ui-testing";
-		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -180,10 +148,6 @@
 						CreatedOnToolsVersion = 26.2;
 						TestTargetID = 1A50E6B72F2D19640072A200;
 					};
-					1A50E6CE2F2D19650072A200 = {
-						CreatedOnToolsVersion = 26.2;
-						TestTargetID = 1A50E6B72F2D19640072A200;
-					};
 				};
 			};
 			buildConfigurationList = 1A50E6B32F2D19640072A200 /* Build configuration list for PBXProject "MoDyt" */;
@@ -195,6 +159,9 @@
 			);
 			mainGroup = 1A50E6AF2F2D19640072A200;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				1A50E6E52F2D1A170072A200 /* XCLocalSwiftPackageReference "Packages/DeltaDoreClient" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 1A50E6B92F2D19640072A200 /* Products */;
 			projectDirPath = "";
@@ -202,7 +169,6 @@
 			targets = (
 				1A50E6B72F2D19640072A200 /* MoDyt */,
 				1A50E6C42F2D19650072A200 /* MoDytTests */,
-				1A50E6CE2F2D19650072A200 /* MoDytUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -216,13 +182,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		1A50E6C32F2D19650072A200 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		1A50E6CD2F2D19650072A200 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -246,13 +205,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		1A50E6CB2F2D19650072A200 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -260,11 +212,6 @@
 			isa = PBXTargetDependency;
 			target = 1A50E6B72F2D19640072A200 /* MoDyt */;
 			targetProxy = 1A50E6C62F2D19650072A200 /* PBXContainerItemProxy */;
-		};
-		1A50E6D12F2D19650072A200 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 1A50E6B72F2D19640072A200 /* MoDyt */;
-			targetProxy = 1A50E6D02F2D19650072A200 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -517,54 +464,6 @@
 			};
 			name = Release;
 		};
-		1A50E6E02F2D19650072A200 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
-				MACOSX_DEPLOYMENT_TARGET = 26.2;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = io.sideeffect.MoDytUITests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = auto;
-				STRING_CATALOG_GENERATE_SYMBOLS = NO;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_TARGET_NAME = MoDyt;
-				XROS_DEPLOYMENT_TARGET = 26.2;
-			};
-			name = Debug;
-		};
-		1A50E6E12F2D19650072A200 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
-				MACOSX_DEPLOYMENT_TARGET = 26.2;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = io.sideeffect.MoDytUITests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = auto;
-				STRING_CATALOG_GENERATE_SYMBOLS = NO;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_TARGET_NAME = MoDyt;
-				XROS_DEPLOYMENT_TARGET = 26.2;
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -595,16 +494,21 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		1A50E6DF2F2D19650072A200 /* Build configuration list for PBXNativeTarget "MoDytUITests" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				1A50E6E02F2D19650072A200 /* Debug */,
-				1A50E6E12F2D19650072A200 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		1A50E6E52F2D1A170072A200 /* XCLocalSwiftPackageReference "Packages/DeltaDoreClient" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/DeltaDoreClient;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1A50E6E62F2D1A170072A200 /* DeltaDoreClient */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DeltaDoreClient;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 1A50E6B02F2D19640072A200 /* Project object */;
 }
