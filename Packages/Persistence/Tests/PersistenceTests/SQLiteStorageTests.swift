@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import DeltaDoreClient
+@testable import Persistence
 
 private struct User: Codable, Sendable, Equatable {
     let id: Int64

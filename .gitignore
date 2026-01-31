@@ -1,15 +1,8 @@
 .DS_Store
+**/.DS_Store
 /.build
 **/.build/
 **/.swiftpm/
-/Packages
-!/Packages
-/Packages/*
-!/Packages/DeltaDoreClient
-!/Packages/DeltaDoreClient/**
-/Packages/DeltaDoreClient/.build/
-/Packages/DeltaDoreClient/.swiftpm/
-/Packages/DeltaDoreClient/**/.DS_Store
 /*.xcodeproj
 xcuserdata/
 DerivedData/
