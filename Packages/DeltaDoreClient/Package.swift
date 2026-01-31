@@ -30,9 +30,6 @@ let package = Package(
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency=complete"),
                 .unsafeFlags(["-enable-testing"], .when(configuration: .debug))
-            ],
-            linkerSettings: [
-                .linkedLibrary("sqlite3")
             ]
         ),
         .executableTarget(

@@ -18,6 +18,7 @@ Agents working with this repo (AI assistants, automation tools, or new team memb
 - The project is an Xcode project with one production target `MoDyt` and one unit tests target `MoDytTests`.
 - All the local dependencies are Swift Packages in the `Packages` folder.
 - The Swift Package `Packages/DeltaDoreClient` should be used to interface with the home automation box. Read the `Packages/DeltaDoreClient/README.md` file for more context about it.
+- The Swift Package `Packages/Persistence` should be used when you need to persist data in a database like SQLite. Read the `Packages/Persistence/README.md` file for more context about it.
 
 ---
 

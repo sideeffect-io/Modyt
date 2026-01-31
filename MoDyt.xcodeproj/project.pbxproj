@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		1A50E6E72F2D1A170072A200 /* DeltaDoreClient in Frameworks */ = {isa = PBXBuildFile; productRef = 1A50E6E62F2D1A170072A200 /* DeltaDoreClient */; };
+		1AC7E9642F2E2AFE000E94E9 /* Persistence in Frameworks */ = {isa = PBXBuildFile; productRef = 1AC7E9632F2E2AFE000E94E9 /* Persistence */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -48,6 +49,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1AC7E9642F2E2AFE000E94E9 /* Persistence in Frameworks */,
 				1A50E6E72F2D1A170072A200 /* DeltaDoreClient in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -103,6 +105,7 @@
 			name = MoDyt;
 			packageProductDependencies = (
 				1A50E6E62F2D1A170072A200 /* DeltaDoreClient */,
+				1AC7E9632F2E2AFE000E94E9 /* Persistence */,
 			);
 			productName = MoDyt;
 			productReference = 1A50E6B82F2D19640072A200 /* MoDyt.app */;
@@ -161,6 +164,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				1A50E6E52F2D1A170072A200 /* XCLocalSwiftPackageReference "Packages/DeltaDoreClient" */,
+				1AC7E9622F2E2AFE000E94E9 /* XCLocalSwiftPackageReference "Packages/Persistence" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 1A50E6B92F2D19640072A200 /* Products */;
@@ -501,12 +505,20 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/DeltaDoreClient;
 		};
+		1AC7E9622F2E2AFE000E94E9 /* XCLocalSwiftPackageReference "Packages/Persistence" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Persistence;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		1A50E6E62F2D1A170072A200 /* DeltaDoreClient */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = DeltaDoreClient;
+		};
+		1AC7E9632F2E2AFE000E94E9 /* Persistence */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Persistence;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
