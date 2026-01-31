@@ -67,6 +67,7 @@ The live implementation wires platform-safe defaults:
 
 - **Credential store** → Keychain-backed (`TydomGatewayCredentialStore.liveKeychain`)
 - **Selected site store** → Keychain-backed (`TydomSelectedSiteStore.liveKeychain`)
+- **Cloud credentials store** → Keychain-backed (`TydomCloudCredentialStore.liveKeychain`)
 - **Discovery** → `TydomGatewayDiscovery` (Bonjour + subnet probes)
 - **Cloud** → `URLSession` for login/password fetch
 - **Probe connection** → create `TydomConnection`, `connect()`, then `disconnect()`
@@ -100,6 +101,11 @@ Using the selected site’s MAC:
 - If `options.password` is provided, it is persisted and used immediately.
 - Else, load from `TydomGatewayCredentialStore`.
 - Else, use cloud credentials to fetch the gateway password, persist it, and return.
+
+Cloud credentials resolution:
+- If `options.cloudCredentials` is provided, it is persisted to the cloud credentials store.
+- Else, if stored cloud credentials exist, they are reused automatically.
+- On `disconnect()`, stored cloud credentials are cleared.
 
 ### 3) Connection decision (local vs remote)
 
@@ -136,7 +142,13 @@ flowchart TD
 
     C -->|password provided| C1[Persist credentials]
     C -->|stored credentials| C2[Use keychain]
-    C -->|missing| C3[Fetch password via cloud]
+    C -->|missing| C3[Resolve cloud credentials]
+    C3 -->|provided| C3a[Persist cloud credentials]
+    C3 -->|stored| C3b[Use stored cloud credentials]
+    C3 -->|none| C3c[Missing cloud credentials]
+    C3a --> C4[Fetch password via cloud]
+    C3b --> C4
+    C4 --> C5[Persist gateway credentials]
 
     D -->|cached IP| D1[Probe local]
     D -->|no cached IP| D2[Discover local]
