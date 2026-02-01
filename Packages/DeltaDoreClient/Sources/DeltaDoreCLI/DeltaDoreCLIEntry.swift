@@ -16,26 +16,33 @@ struct DeltaDoreCLI {
             await stderr.writeLine(message)
             await stdout.writeLine(helpText())
             return
-        case .run(let options):
-            await runCLI(options: options, stdout: stdout, stderr: stderr)
         case .runAuto(let options):
-            guard let resolved = await resolveAutoConfiguration(
+            guard let connection = await connectAuto(
                 options: options,
                 stdout: stdout,
                 stderr: stderr
             ) else {
                 return
             }
-            await runCLI(options: resolved, stdout: stdout, stderr: stderr)
-        case .runResolved(let options):
-            guard let resolved = await resolveExplicitConfiguration(
+            await runCLI(connection: connection, stdout: stdout, stderr: stderr)
+        case .runStored(let options):
+            guard let connection = await connectStored(
                 options: options,
                 stdout: stdout,
                 stderr: stderr
             ) else {
                 return
             }
-            await runCLI(options: resolved, stdout: stdout, stderr: stderr)
+            await runCLI(connection: connection, stdout: stdout, stderr: stderr)
+        case .runNew(let options):
+            guard let connection = await connectNew(
+                options: options,
+                stdout: stdout,
+                stderr: stderr
+            ) else {
+                return
+            }
+            await runCLI(connection: connection, stdout: stdout, stderr: stderr)
         }
     }
 }

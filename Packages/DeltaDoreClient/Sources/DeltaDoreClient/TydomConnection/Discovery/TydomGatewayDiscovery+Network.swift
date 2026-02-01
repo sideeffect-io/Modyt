@@ -2,6 +2,7 @@ import Foundation
 
 #if canImport(Network)
 import Network
+import Security
 
 public extension TydomGatewayDiscovery.Dependencies {
     static func live() -> TydomGatewayDiscovery.Dependencies {
@@ -15,6 +16,15 @@ public extension TydomGatewayDiscovery.Dependencies {
             },
             probeHost: { host, port, timeout in
                 await NetworkProbe.tcpProbe(host: host, port: port, timeout: timeout)
+            },
+            probeWebSocketInfo: { host, mac, password, allowInsecureTLS, timeout in
+                await WebSocketProbe.probeInfo(
+                    host: host,
+                    mac: mac,
+                    password: password,
+                    allowInsecureTLS: allowInsecureTLS,
+                    timeout: timeout
+                )
             }
         )
     }
@@ -110,48 +120,10 @@ private enum NetworkProbe {
     }
 
     static func subnetHosts() -> [String] {
-        var addresses: [String] = []
-        var ifaddrPointer: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&ifaddrPointer) == 0 else { return [] }
-        defer { freeifaddrs(ifaddrPointer) }
-
-        var pointer = ifaddrPointer
-        while pointer != nil {
-            guard let ifaddr = pointer?.pointee else { break }
-            let flags = Int32(ifaddr.ifa_flags)
-            let isUp = (flags & IFF_UP) == IFF_UP
-            let isRunning = (flags & IFF_RUNNING) == IFF_RUNNING
-            let isLoopback = (flags & IFF_LOOPBACK) == IFF_LOOPBACK
-            guard isUp && isRunning && !isLoopback else {
-                pointer = ifaddr.ifa_next
-                continue
-            }
-
-            guard let addrPointer = ifaddr.ifa_addr, let maskPointer = ifaddr.ifa_netmask else {
-                pointer = ifaddr.ifa_next
-                continue
-            }
-
-            let addrFamily = addrPointer.pointee.sa_family
-            if addrFamily == UInt8(AF_INET) {
-                let addr = addrPointer.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee }
-                let mask = maskPointer.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee }
-                let ip = UInt32(bigEndian: addr.sin_addr.s_addr)
-                let netmask = UInt32(bigEndian: mask.sin_addr.s_addr)
-                let network = ip & netmask
-                let broadcast = network | ~netmask
-
-                if broadcast >= network + 2 {
-                    for host in (network + 1)..<broadcast {
-                        if host == ip { continue }
-                        addresses.append(ipv4String(host))
-                    }
-                }
-            }
-
-            pointer = ifaddr.ifa_next
+        if let network = IPv4Network.inferLocal() {
+            return network.hosts
         }
-        return addresses
+        return []
     }
 
     private static func ipv4String(_ value: UInt32) -> String {
@@ -159,6 +131,180 @@ private enum NetworkProbe {
         let b = (value >> 16) & 0xFF
         let c = (value >> 8) & 0xFF
         let d = value & 0xFF
+        return "\(a).\(b).\(c).\(d)"
+    }
+
+}
+
+private enum WebSocketProbe {
+    static func probeInfo(
+        host: String,
+        mac: String,
+        password: String,
+        allowInsecureTLS: Bool,
+        timeout: TimeInterval
+    ) async -> Bool {
+        let normalizedMac = TydomMac.normalize(mac)
+        let path = "/mediation/client?mac=\(normalizedMac)&appli=1"
+        guard let httpsURL = URL(string: "https://\(host):443\(path)"),
+              let wsURL = URL(string: "wss://\(host):443\(path)") else {
+            return false
+        }
+
+        let sessionConfig = URLSessionConfiguration.ephemeral
+        sessionConfig.timeoutIntervalForRequest = timeout
+        sessionConfig.timeoutIntervalForResource = timeout
+        let delegate = InsecureTLSDelegate(allowInsecureTLS: allowInsecureTLS, credential: nil)
+        let session = URLSession(configuration: sessionConfig, delegate: delegate, delegateQueue: nil)
+
+        do {
+            let challenge = try await fetchDigestChallenge(session: session, url: httpsURL, host: host, timeout: timeout)
+            let authorization = try DigestAuthorizationBuilder.build(
+                challenge: challenge,
+                username: normalizedMac,
+                password: password,
+                method: "GET",
+                uri: path,
+                randomBytes: { count in
+                    (0..<count).map { _ in UInt8.random(in: UInt8.min...UInt8.max) }
+                }
+            )
+
+            var request = URLRequest(url: wsURL)
+            request.timeoutInterval = timeout
+            request.setValue(authorization, forHTTPHeaderField: "Authorization")
+
+            let task = session.webSocketTask(with: request)
+            task.resume()
+
+            defer {
+                task.cancel(with: .goingAway, reason: nil)
+                session.finishTasksAndInvalidate()
+            }
+
+            let pingRequest = Data(TydomCommand.ping().request.utf8)
+            try await withTimeout(timeout) {
+                try await task.send(.data(pingRequest))
+            }
+
+            _ = try await withTimeout(timeout) {
+                try await task.receive()
+            }
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private static func fetchDigestChallenge(
+        session: URLSession,
+        url: URL,
+        host: String,
+        timeout: TimeInterval
+    ) async throws -> DigestChallenge {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = timeout
+        request.setValue("Upgrade", forHTTPHeaderField: "Connection")
+        request.setValue("websocket", forHTTPHeaderField: "Upgrade")
+        request.setValue("\(host):443", forHTTPHeaderField: "Host")
+        request.setValue("*/*", forHTTPHeaderField: "Accept")
+        request.setValue(WebSocketKeyGenerator.generate(), forHTTPHeaderField: "Sec-WebSocket-Key")
+        request.setValue("13", forHTTPHeaderField: "Sec-WebSocket-Version")
+
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw TydomConnection.ConnectionError.invalidResponse
+        }
+        guard let rawHeader = http.value(forHTTPHeaderField: "WWW-Authenticate") else {
+            throw TydomConnection.ConnectionError.missingChallenge
+        }
+        return try DigestChallenge.parse(from: rawHeader)
+    }
+
+    // Intentionally no response parsing; any reply is enough to validate connectivity.
+}
+
+private enum WebSocketKeyGenerator {
+    static func generate() -> String {
+        var bytes = [UInt8](repeating: 0, count: 16)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        return Data(bytes).base64EncodedString()
+    }
+}
+
+private func withTimeout<T: Sendable>(
+    _ seconds: TimeInterval,
+    operation: @Sendable @escaping () async throws -> T
+) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask {
+            try await operation()
+        }
+        group.addTask {
+            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            throw TydomConnection.ConnectionError.receiveFailed
+        }
+        let result = try await group.next()!
+        group.cancelAll()
+        return result
+    }
+}
+
+private struct IPv4Network {
+    let network: UInt32
+    let netmask: UInt32
+
+    static func inferLocal() -> IPv4Network? {
+        var addrs: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&addrs) == 0, let first = addrs else { return nil }
+        defer { freeifaddrs(addrs) }
+
+        var pointer: UnsafeMutablePointer<ifaddrs>? = first
+        while let current = pointer {
+            defer { pointer = current.pointee.ifa_next }
+            let flags = current.pointee.ifa_flags
+            if (flags & UInt32(IFF_LOOPBACK)) != 0 { continue }
+            guard let addr = current.pointee.ifa_addr else { continue }
+            guard addr.pointee.sa_family == sa_family_t(AF_INET) else { continue }
+            guard let netmask = current.pointee.ifa_netmask else { continue }
+
+            let sockaddr = addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee }
+            let maskaddr = netmask.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee }
+            let ip = UInt32(bigEndian: sockaddr.sin_addr.s_addr)
+            let mask = UInt32(bigEndian: maskaddr.sin_addr.s_addr)
+
+            if (ip & 0xFFFF0000) == 0xA9FE0000 { continue }
+
+            let network = ip & mask
+            return IPv4Network(network: network, netmask: mask)
+        }
+        return nil
+    }
+
+    var hosts: [String] {
+        let broadcast = network | ~netmask
+        if broadcast <= network {
+            return []
+        }
+        if broadcast - network <= 1 {
+            return [IPv4Network.formatIPv4(network)]
+        }
+
+        var result: [String] = []
+        var ip = network + 1
+        while ip < broadcast {
+            result.append(IPv4Network.formatIPv4(ip))
+            ip += 1
+        }
+        return result
+    }
+
+    private static func formatIPv4(_ value: UInt32) -> String {
+        let a = (value >> 24) & 0xff
+        let b = (value >> 16) & 0xff
+        let c = (value >> 8) & 0xff
+        let d = value & 0xff
         return "\(a).\(b).\(c).\(d)"
     }
 }

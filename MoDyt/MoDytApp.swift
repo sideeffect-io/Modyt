@@ -9,9 +9,11 @@ import SwiftUI
 
 @main
 struct MoDytApp: App {
+    @State private var store = AppStore()
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            AppRootView(store: store)
         }
     }
 }

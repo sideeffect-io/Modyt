@@ -31,6 +31,13 @@ extension TydomConnection {
                     let configuration = URLSessionConfiguration.default
                     configuration.timeoutIntervalForRequest = timeout
                     configuration.timeoutIntervalForResource = timeout
+                    if #available(iOS 13.0, macOS 10.15, tvOS 13.0, watchOS 6.0, *) {
+                        if allowInsecureTLS {
+                            configuration.tlsMinimumSupportedProtocolVersion = .TLSv12
+                            configuration.tlsMaximumSupportedProtocolVersion = .TLSv12
+                            DeltaDoreDebugLog.log("Session TLS range set to v1.2 (allowInsecureTLS)")
+                        }
+                    }
                     let delegate = InsecureTLSDelegate(
                         allowInsecureTLS: allowInsecureTLS,
                         credential: credential

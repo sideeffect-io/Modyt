@@ -18,19 +18,31 @@ public struct TydomGatewayDiscoveryConfig: Sendable, Equatable {
     public let probeConcurrency: Int
     public let probePorts: [Int]
     public let bonjourServiceTypes: [String]
+    public let infoTimeout: TimeInterval
+    public let infoConcurrency: Int
+    public let allowInsecureTLS: Bool
+    public let validateWithInfo: Bool
 
     public init(
         discoveryTimeout: TimeInterval = 4,
         probeTimeout: TimeInterval = 1.5,
         probeConcurrency: Int = 12,
         probePorts: [Int] = [443],
-        bonjourServiceTypes: [String] = []
+        bonjourServiceTypes: [String] = [],
+        infoTimeout: TimeInterval = 6,
+        infoConcurrency: Int = 16,
+        allowInsecureTLS: Bool = true,
+        validateWithInfo: Bool = true
     ) {
         self.discoveryTimeout = discoveryTimeout
         self.probeTimeout = probeTimeout
         self.probeConcurrency = probeConcurrency
         self.probePorts = probePorts
         self.bonjourServiceTypes = bonjourServiceTypes
+        self.infoTimeout = infoTimeout
+        self.infoConcurrency = infoConcurrency
+        self.allowInsecureTLS = allowInsecureTLS
+        self.validateWithInfo = validateWithInfo
     }
 }
 
@@ -39,6 +51,13 @@ public struct TydomGatewayDiscovery: Sendable {
         public let discoverBonjour: @Sendable (_ serviceTypes: [String], _ timeout: TimeInterval) async -> [String]
         public let subnetHosts: @Sendable () -> [String]
         public let probeHost: @Sendable (_ host: String, _ port: Int, _ timeout: TimeInterval) async -> Bool
+        public let probeWebSocketInfo: @Sendable (
+            _ host: String,
+            _ mac: String,
+            _ password: String,
+            _ allowInsecureTLS: Bool,
+            _ timeout: TimeInterval
+        ) async -> Bool
     }
 
     public let dependencies: Dependencies
@@ -48,38 +67,79 @@ public struct TydomGatewayDiscovery: Sendable {
     }
 
     public func discover(
-        mac: String,
+        credentials: TydomGatewayCredentials,
         cachedIP: String?,
         config: TydomGatewayDiscoveryConfig
     ) async -> [TydomLocalGateway] {
+        let normalizedMac = TydomMac.normalize(credentials.mac)
+        DeltaDoreDebugLog.log(
+            "Discovery start mac=\(normalizedMac) cachedIP=\(cachedIP ?? "nil") timeout=\(config.discoveryTimeout)s probeTimeout=\(config.probeTimeout)s ports=\(config.probePorts)"
+        )
         var candidates: [TydomLocalGateway] = []
 
         if let cachedIP, cachedIP.isEmpty == false {
             candidates.append(
-                TydomLocalGateway(mac: TydomMac.normalize(mac), host: cachedIP, method: .cachedIP)
+                TydomLocalGateway(mac: normalizedMac, host: cachedIP, method: .cachedIP)
             )
+            if config.validateWithInfo,
+               await probeInfo(host: cachedIP, credentials: credentials, config: config) {
+                DeltaDoreDebugLog.log("Discovery cached candidate validated via /info host=\(cachedIP)")
+                return candidates
+            }
+        }
+        if cachedIP?.isEmpty == false {
+            DeltaDoreDebugLog.log("Discovery cached candidate host=\(cachedIP ?? "")")
         }
 
-        let bonjourHosts = await dependencies.discoverBonjour(
-            config.bonjourServiceTypes,
-            config.discoveryTimeout
-        )
-        candidates.append(contentsOf: bonjourHosts.map {
-            TydomLocalGateway(mac: TydomMac.normalize(mac), host: $0, method: .bonjour)
-        })
+        let bonjourHosts: [String]
+        if config.bonjourServiceTypes.isEmpty == false {
+            bonjourHosts = await dependencies.discoverBonjour(
+                config.bonjourServiceTypes,
+                config.discoveryTimeout
+            )
+            if bonjourHosts.isEmpty {
+                DeltaDoreDebugLog.log("Discovery bonjour found 0 hosts")
+            } else {
+                DeltaDoreDebugLog.log("Discovery bonjour hosts=\(bonjourHosts)")
+            }
+            candidates.append(contentsOf: bonjourHosts.map {
+                TydomLocalGateway(mac: normalizedMac, host: $0, method: .bonjour)
+            })
+        } else {
+            bonjourHosts = []
+        }
 
-        let subnetHosts = dependencies.subnetHosts()
-        let probeHosts = await probeHosts(
-            subnetHosts,
-            ports: config.probePorts,
-            timeout: config.probeTimeout,
-            maxConcurrent: max(config.probeConcurrency, 1)
-        )
-        candidates.append(contentsOf: probeHosts.map {
-            TydomLocalGateway(mac: TydomMac.normalize(mac), host: $0, method: .subnetProbe)
-        })
+        if bonjourHosts.isEmpty {
+            let subnetHosts = dependencies.subnetHosts()
+            DeltaDoreDebugLog.log("Discovery subnet candidates count=\(subnetHosts.count)")
+            let probeHosts = await scanOpenPort(
+                subnetHosts,
+                ports: config.probePorts,
+                timeout: config.probeTimeout,
+                maxConcurrent: max(config.probeConcurrency, 1)
+            )
+            if probeHosts.isEmpty {
+                DeltaDoreDebugLog.log("Discovery subnet probe found 0 responsive hosts")
+            } else {
+                DeltaDoreDebugLog.log("Discovery subnet probe responsive hosts=\(probeHosts)")
+            }
+            candidates.append(contentsOf: probeHosts.map {
+                TydomLocalGateway(mac: normalizedMac, host: $0, method: .subnetProbe)
+            })
+        }
 
-        return uniqueCandidates(candidates)
+        let unique = uniqueCandidates(candidates)
+        DeltaDoreDebugLog.log("Discovery unique candidates=\(unique.map { "\($0.host)(\($0.method.rawValue))" })")
+        if config.validateWithInfo {
+            let validated = await validateCandidates(unique, credentials: credentials, config: config)
+            if validated.isEmpty == false {
+                DeltaDoreDebugLog.log("Discovery websocket validation ok hosts=\(validated.map { $0.host })")
+                return validated
+            }
+            DeltaDoreDebugLog.log("Discovery websocket validation found 0 hosts (falling back to unvalidated candidates)")
+        }
+        DeltaDoreDebugLog.log("Discovery returning candidates (no websocket verification step)")
+        return unique
     }
 
     private func uniqueCandidates(_ candidates: [TydomLocalGateway]) -> [TydomLocalGateway] {
@@ -94,36 +154,104 @@ public struct TydomGatewayDiscovery: Sendable {
         return result
     }
 
-    private func probeHosts(
+    private func probeInfo(
+        host: String,
+        credentials: TydomGatewayCredentials,
+        config: TydomGatewayDiscoveryConfig
+    ) async -> Bool {
+        await dependencies.probeWebSocketInfo(
+            host,
+            credentials.mac,
+            credentials.password,
+            config.allowInsecureTLS,
+            config.infoTimeout
+        )
+    }
+
+    private func validateCandidates(
+        _ candidates: [TydomLocalGateway],
+        credentials: TydomGatewayCredentials,
+        config: TydomGatewayDiscoveryConfig
+    ) async -> [TydomLocalGateway] {
+        guard candidates.isEmpty == false else { return [] }
+        let concurrency = max(config.infoConcurrency, 1)
+        var iterator = candidates.makeIterator()
+        return await withTaskGroup(of: TydomLocalGateway?.self) { group in
+            let initial = min(concurrency, candidates.count)
+            for _ in 0..<initial {
+                if let candidate = iterator.next() {
+                    group.addTask {
+                        let ok = await probeInfo(host: candidate.host, credentials: credentials, config: config)
+                        return ok ? candidate : nil
+                    }
+                }
+            }
+
+            while let result = await group.next() {
+                if let winner = result {
+                    group.cancelAll()
+                    return [winner]
+                }
+                if let candidate = iterator.next() {
+                    group.addTask {
+                        let ok = await probeInfo(host: candidate.host, credentials: credentials, config: config)
+                        return ok ? candidate : nil
+                    }
+                }
+            }
+
+            return []
+        }
+    }
+
+    private func scanOpenPort(
         _ hosts: [String],
         ports: [Int],
         timeout: TimeInterval,
         maxConcurrent: Int
     ) async -> [String] {
         guard hosts.isEmpty == false, ports.isEmpty == false else { return [] }
+        let portsToScan = ports
+        var results: [String] = []
+        var iterator = hosts.makeIterator()
 
-        let semaphore = AsyncSemaphore(value: maxConcurrent)
-        var matches: [String] = []
         await withTaskGroup(of: String?.self) { group in
-            for host in hosts {
-                for port in ports {
+            let initial = min(maxConcurrent, hosts.count)
+            for _ in 0..<initial {
+                if let host = iterator.next() {
                     group.addTask {
-                        await semaphore.acquire()
-                        let ok = await dependencies.probeHost(host, port, timeout)
-                        await semaphore.release()
-                        return ok ? host : nil
+                        for port in portsToScan {
+                            let open = await dependencies.probeHost(host, port, timeout)
+                            if open {
+                                return host
+                            }
+                        }
+                        return nil
                     }
                 }
             }
 
-            for await candidate in group {
-                if let candidate {
-                    matches.append(candidate)
+            while let result = await group.next() {
+                if let host = result {
+                    results.append(host)
+                }
+                if let host = iterator.next() {
+                    group.addTask {
+                        for port in portsToScan {
+                            let open = await dependencies.probeHost(host, port, timeout)
+                            if open {
+                                return host
+                            }
+                        }
+                        return nil
+                    }
                 }
             }
         }
-        return Array(Set(matches))
+
+        return Array(Set(results)).sorted()
     }
+
 }
 
 actor AsyncSemaphore {

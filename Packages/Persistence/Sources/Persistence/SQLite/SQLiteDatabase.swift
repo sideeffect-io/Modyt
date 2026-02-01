@@ -1,10 +1,10 @@
 import Foundation
 import SQLite3
 
-actor SQLiteDatabase {
+public actor SQLiteDatabase {
     private let handle: SQLiteHandle
 
-    init(path: String) async throws {
+    public init(path: String) async throws {
         var db: OpaquePointer?
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
         if sqlite3_open_v2(path, &db, flags, nil) != SQLITE_OK {
@@ -17,7 +17,7 @@ actor SQLiteDatabase {
         try await execute("PRAGMA foreign_keys = ON")
     }
 
-    func execute(_ sql: String, _ bindings: [SQLiteValue] = []) async throws {
+    public func execute(_ sql: String, _ bindings: [SQLiteValue] = []) async throws {
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
 
@@ -29,7 +29,7 @@ actor SQLiteDatabase {
         }
     }
 
-    func query(_ sql: String, _ bindings: [SQLiteValue] = []) async throws -> [Row] {
+    public func query(_ sql: String, _ bindings: [SQLiteValue] = []) async throws -> [Row] {
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
 
@@ -50,7 +50,7 @@ actor SQLiteDatabase {
         return rows
     }
 
-    func withTransaction<T: Sendable>(
+    public func withTransaction<T: Sendable>(
         _ work: @Sendable (SQLiteDatabase) async throws -> T
     ) async throws -> T {
         try await execute("BEGIN")

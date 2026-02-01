@@ -87,7 +87,11 @@ struct TydomHTTPParser: Sendable {
         }
 
         let headers = parseHeaders(from: headerLines.dropFirst())
-        let body = sliceBody(bodyData, contentLength: headers["content-length"].flatMap(Int.init))
+        let body = sliceBody(
+            bodyData,
+            contentLength: headers["content-length"].flatMap(Int.init),
+            transferEncoding: headers["transfer-encoding"]
+        )
 
         if startLine.hasPrefix("HTTP/") {
             let components = startLine.split(separator: " ", omittingEmptySubsequences: true)
@@ -119,11 +123,44 @@ struct TydomHTTPParser: Sendable {
         return headers
     }
 
-    private func sliceBody(_ bodyData: Data, contentLength: Int?) -> Data? {
+    private func sliceBody(_ bodyData: Data, contentLength: Int?, transferEncoding: String?) -> Data? {
         guard bodyData.isEmpty == false else { return nil }
+        if let transferEncoding, transferEncoding.lowercased().contains("chunked") {
+            return decodeChunked(bodyData) ?? bodyData
+        }
         if let contentLength, contentLength >= 0, bodyData.count >= contentLength {
             return bodyData.subdata(in: 0..<contentLength)
         }
         return bodyData
+    }
+
+    private func decodeChunked(_ data: Data) -> Data? {
+        var output = Data()
+        var index = data.startIndex
+        let end = data.endIndex
+
+        func rangeOfCRLF(from start: Data.Index) -> Range<Data.Index>? {
+            let crlf = Data([13, 10])
+            return data.range(of: crlf, options: [], in: start..<end)
+        }
+
+        while index < end {
+            guard let lineRange = rangeOfCRLF(from: index) else { return nil }
+            let lineData = data[index..<lineRange.lowerBound]
+            guard let line = String(data: lineData, encoding: .ascii) else { return nil }
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let size = Int(trimmed, radix: 16) else { return nil }
+            index = lineRange.upperBound
+            if size == 0 {
+                return output
+            }
+            guard end >= index + size else { return nil }
+            output.append(data[index..<index + size])
+            index += size
+            guard let chunkTerminator = rangeOfCRLF(from: index) else { return nil }
+            index = chunkTerminator.upperBound
+        }
+
+        return output
     }
 }

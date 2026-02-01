@@ -69,11 +69,11 @@ extension TydomConnection {
         }
 
         var digestUsername: String {
-            return isRemote ? normalizedMac : mac
+            return normalizedMac
         }
 
         var queryMac: String {
-            return isRemote ? normalizedMac : mac
+            return normalizedMac
         }
 
         var host: String {

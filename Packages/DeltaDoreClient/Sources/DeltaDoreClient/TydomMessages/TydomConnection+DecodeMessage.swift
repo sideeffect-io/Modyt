@@ -17,6 +17,11 @@ extension TydomConnection {
                 }
                 for await data in await self.messages() {
                     let raw = dependencies.dataToRawMessage(data)
+                    if let parseError = raw.parseError {
+                        let snippet = String(data: raw.payload.prefix(200), encoding: .isoLatin1)
+                            ?? String(decoding: raw.payload.prefix(200), as: UTF8.self)
+                        logger("Decode parse error=\(parseError) bytes=\(raw.payload.count) snippet=\(snippet)")
+                    }
                     let decoded = dependencies.rawMessageToEnvelope(raw)
                     let hydrated = await dependencies.hydrateFromCache(decoded)
                     Task { await dependencies.enqueueEffects(hydrated.effects) }

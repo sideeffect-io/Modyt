@@ -1,21 +1,21 @@
 import Foundation
 
-public struct TydomConnectionResolver: Sendable {
-    public typealias SiteIndexSelector = @Sendable (_ sites: [TydomCloudSitesProvider.Site]) async -> Int?
+struct TydomConnectionResolver: Sendable {
+    typealias SiteIndexSelector = @Sendable (_ sites: [TydomCloudSitesProvider.Site]) async -> Int?
 
-    public struct Environment: Sendable {
-        public var credentialStore: TydomGatewayCredentialStore
-        public var selectedSiteStore: TydomSelectedSiteStore
-        public var cloudCredentialStore: TydomCloudCredentialStore
-        public var discovery: TydomGatewayDiscovery
-        public var remoteHost: String
-        public var now: @Sendable () -> Date
-        public var makeSession: @Sendable () -> URLSession
-        public var probeConnection: @Sendable (_ configuration: TydomConnection.Configuration) async -> Bool
+    struct Environment: Sendable {
+        var credentialStore: TydomGatewayCredentialStore
+        var gatewayMacStore: TydomGatewayMacStore
+        var cloudCredentialStore: TydomCloudCredentialStore
+        var discovery: TydomGatewayDiscovery
+        var remoteHost: String
+        var now: @Sendable () -> Date
+        var makeSession: @Sendable () -> URLSession
+        var probeConnection: @Sendable (_ configuration: TydomConnection.Configuration) async -> Bool
 
-        public init(
+        init(
             credentialStore: TydomGatewayCredentialStore,
-            selectedSiteStore: TydomSelectedSiteStore,
+            gatewayMacStore: TydomGatewayMacStore,
             cloudCredentialStore: TydomCloudCredentialStore,
             discovery: TydomGatewayDiscovery,
             remoteHost: String,
@@ -24,7 +24,7 @@ public struct TydomConnectionResolver: Sendable {
             probeConnection: @escaping @Sendable (_ configuration: TydomConnection.Configuration) async -> Bool
         ) {
             self.credentialStore = credentialStore
-            self.selectedSiteStore = selectedSiteStore
+            self.gatewayMacStore = gatewayMacStore
             self.cloudCredentialStore = cloudCredentialStore
             self.discovery = discovery
             self.remoteHost = remoteHost
@@ -33,29 +33,49 @@ public struct TydomConnectionResolver: Sendable {
             self.probeConnection = probeConnection
         }
 
-        public static func live(
+        static func live(
             credentialService: String = "io.sideeffect.deltadoreclient.gateway",
-            selectedSiteService: String = "io.sideeffect.deltadoreclient.selected-site",
+            gatewayMacService: String = "io.sideeffect.deltadoreclient.gateway-mac",
             cloudCredentialService: String = "io.sideeffect.deltadoreclient.cloud-credentials",
             remoteHost: String = "mediation.tydom.com",
             now: @escaping @Sendable () -> Date = { Date() }
         ) -> Environment {
             Environment(
                 credentialStore: .liveKeychain(service: credentialService, now: now),
-                selectedSiteStore: .liveKeychain(service: selectedSiteService),
+                gatewayMacStore: .liveKeychain(service: gatewayMacService),
                 cloudCredentialStore: .liveKeychain(service: cloudCredentialService),
                 discovery: TydomGatewayDiscovery(dependencies: .live()),
                 remoteHost: remoteHost,
                 now: now,
                 makeSession: { URLSession(configuration: .default) },
                 probeConnection: { configuration in
-                    let connection = TydomConnection(configuration: configuration)
+                    DeltaDoreDebugLog.log(
+                        "Probe connection start host=\(configuration.host) mode=\(configuration.mode) mac=\(TydomMac.normalize(configuration.mac)) timeout=\(configuration.timeout)s"
+                    )
+                    let connection = TydomConnection(
+                        configuration: configuration,
+                        log: { message in
+                            DeltaDoreDebugLog.log(message)
+                        }
+                    )
                     do {
-                        try await connection.connect()
-                        await connection.disconnect()
-                        return true
+                        try await connection.connect(startReceiving: false)
+                        let verified = await verifyGateway(
+                            connection: connection,
+                            timeout: configuration.timeout
+                        )
+                        if verified == false {
+                            await connection.disconnect()
+                        }
+                        DeltaDoreDebugLog.log(
+                            "Probe connection result host=\(configuration.host) verified=\(verified)"
+                        )
+                        return verified
                     } catch {
                         await connection.disconnect()
+                        DeltaDoreDebugLog.log(
+                            "Probe connection error host=\(configuration.host) error=\(error)"
+                        )
                         return false
                     }
                 }
@@ -63,76 +83,62 @@ public struct TydomConnectionResolver: Sendable {
         }
     }
 
-    public struct Options: Sendable {
-        public enum Mode: Sendable {
+    struct Options: Sendable {
+        enum Mode: Sendable {
             case auto
             case local
             case remote
         }
 
-        public let mode: Mode
-        public let localHostOverride: String?
-        public let remoteHostOverride: String?
-        public let mac: String?
-        public let password: String?
-        public let cloudCredentials: TydomConnection.CloudCredentials?
-        public let siteIndex: Int?
-        public let resetSelectedSite: Bool
-        public let resetSelectedSiteOnDisconnect: Bool
-        public let selectedSiteAccount: String
-        public let allowInsecureTLS: Bool?
-        public let timeout: TimeInterval
-        public let polling: TydomConnection.Configuration.Polling
-        public let bonjourServices: [String]
-        public let forceRemote: Bool
-        public let onDecision: (@Sendable (TydomConnectionState.Decision) async -> Void)?
+        enum CredentialPolicy: Sendable {
+            case useStoredDataOnly
+            case allowCloudDataFetch
+        }
 
-        public init(
+        let mode: Mode
+        let credentialPolicy: CredentialPolicy
+        let localHostOverride: String?
+        let macOverride: String?
+        let cloudCredentials: TydomConnection.CloudCredentials?
+        let siteIndex: Int?
+        let allowInsecureTLS: Bool?
+        let timeout: TimeInterval
+        let polling: TydomConnection.Configuration.Polling
+        let onDecision: (@Sendable (TydomConnectionState.Decision) async -> Void)?
+
+        init(
             mode: Mode,
+            credentialPolicy: CredentialPolicy,
             localHostOverride: String? = nil,
-            remoteHostOverride: String? = nil,
-            mac: String? = nil,
-            password: String? = nil,
+            macOverride: String? = nil,
             cloudCredentials: TydomConnection.CloudCredentials? = nil,
             siteIndex: Int? = nil,
-            resetSelectedSite: Bool = false,
-            resetSelectedSiteOnDisconnect: Bool = true,
-            selectedSiteAccount: String = "default",
             allowInsecureTLS: Bool? = nil,
             timeout: TimeInterval = 10.0,
             polling: TydomConnection.Configuration.Polling = .init(),
-            bonjourServices: [String] = ["_tydom._tcp"],
-            forceRemote: Bool = false,
             onDecision: (@Sendable (TydomConnectionState.Decision) async -> Void)? = nil
         ) {
             self.mode = mode
+            self.credentialPolicy = credentialPolicy
             self.localHostOverride = localHostOverride
-            self.remoteHostOverride = remoteHostOverride
-            self.mac = mac
-            self.password = password
+            self.macOverride = macOverride
             self.cloudCredentials = cloudCredentials
             self.siteIndex = siteIndex
-            self.resetSelectedSite = resetSelectedSite
-            self.resetSelectedSiteOnDisconnect = resetSelectedSiteOnDisconnect
-            self.selectedSiteAccount = selectedSiteAccount
             self.allowInsecureTLS = allowInsecureTLS
             self.timeout = timeout
             self.polling = polling
-            self.bonjourServices = bonjourServices
-            self.forceRemote = forceRemote
             self.onDecision = onDecision
         }
     }
 
-    public struct Resolution: Sendable {
-        public let configuration: TydomConnection.Configuration
-        public let credentials: TydomGatewayCredentials
-        public let selectedSite: TydomSelectedSite?
-        public let decision: TydomConnectionState.Decision?
-        public let onDisconnect: (@Sendable () async -> Void)?
+    struct Resolution: Sendable {
+        let configuration: TydomConnection.Configuration
+        let credentials: TydomGatewayCredentials
+        let decision: TydomConnectionState.Decision?
+        let onDisconnect: (@Sendable () async -> Void)?
     }
 
-    public enum ResolverError: Error, Sendable {
+    enum ResolverError: Error, Sendable {
         case missingCloudCredentials
         case missingSiteSelection
         case invalidSiteIndex(Int, siteCount: Int)
@@ -141,15 +147,16 @@ public struct TydomConnectionResolver: Sendable {
         case missingGatewayCredentials
         case missingGatewayMac
         case invalidConfiguration
+        case remoteFailed
     }
 
     private let environment: Environment
 
-    public init(environment: Environment = .live()) {
+    init(environment: Environment = .live()) {
         self.environment = environment
     }
 
-    public func listSites(
+    func listSites(
         cloudCredentials: TydomConnection.CloudCredentials
     ) async throws -> [TydomCloudSitesProvider.Site] {
         try? await environment.cloudCredentialStore.save(cloudCredentials)
@@ -162,7 +169,7 @@ public struct TydomConnectionResolver: Sendable {
         )
     }
 
-    public func listSitesPayload(
+    func listSitesPayload(
         cloudCredentials: TydomConnection.CloudCredentials
     ) async throws -> Data {
         try? await environment.cloudCredentialStore.save(cloudCredentials)
@@ -175,43 +182,41 @@ public struct TydomConnectionResolver: Sendable {
         )
     }
 
-    public func makeOnDisconnect(selectedSiteAccount: String?) -> @Sendable () async -> Void {
-        { [selectedSiteStore = environment.selectedSiteStore,
-           cloudCredentialStore = environment.cloudCredentialStore] in
-            if let selectedSiteAccount {
-                try? await selectedSiteStore.delete(selectedSiteAccount)
-            }
-            try? await cloudCredentialStore.deleteAll()
+    func makeOnDisconnect() -> @Sendable () async -> Void {
+        { [self] in
+            await clearPersistedData()
         }
     }
 
-    public func resetSelectedSite(selectedSiteAccount: String) async throws {
-        try await environment.selectedSiteStore.delete(selectedSiteAccount)
+    func clearPersistedData() async {
+        if let mac = try? await environment.gatewayMacStore.load() {
+            let gatewayId = TydomMac.normalize(mac)
+            try? await environment.credentialStore.delete(gatewayId)
+        }
+        try? await environment.gatewayMacStore.delete()
+        try? await environment.cloudCredentialStore.deleteAll()
     }
 
-    public func resolve(
+    func resolve(
         _ options: Options,
         selectSiteIndex: SiteIndexSelector? = nil
     ) async throws -> Resolution {
-        if options.resetSelectedSite {
-            try? await environment.selectedSiteStore.delete(options.selectedSiteAccount)
-        }
         if let cloudCredentials = options.cloudCredentials {
             try? await environment.cloudCredentialStore.save(cloudCredentials)
         }
 
-        let resolved = try await resolveGatewayCredentials(
+        let credentials = try await resolveGatewayCredentials(
             options: options,
             selectSiteIndex: selectSiteIndex
         )
 
-        let cache = CredentialsCache(initial: resolved.credentials)
+        let cache = CredentialsCache(initial: credentials)
         let dependencies = makeOrchestratorDependencies(
             options: options,
             cache: cache
         )
         var state = TydomConnectionState(
-            override: overrideMode(for: options.mode, forceRemote: options.forceRemote)
+            override: overrideMode(for: options.mode)
         )
         let orchestrator = TydomConnectionOrchestrator(dependencies: dependencies)
         await orchestrator.handle(event: .start, state: &state)
@@ -219,6 +224,14 @@ public struct TydomConnectionResolver: Sendable {
         let cachedCredentials = await cache.get()
         guard let decision = state.lastDecision,
               let latestCredentials = state.credentials ?? cachedCredentials else {
+            throw ResolverError.invalidConfiguration
+        }
+
+        if state.phase == .failed {
+            if decision.reason == .remoteFailed {
+                await clearPersistedData()
+                throw ResolverError.remoteFailed
+            }
             throw ResolverError.invalidConfiguration
         }
 
@@ -230,24 +243,16 @@ public struct TydomConnectionResolver: Sendable {
             throw ResolverError.invalidConfiguration
         }
 
-        let onDisconnect = makeOnDisconnect(
-            selectedSiteAccount: options.resetSelectedSiteOnDisconnect ? options.selectedSiteAccount : nil
-        )
-
+        let onDisconnect = makeOnDisconnect()
         return Resolution(
             configuration: configuration,
             credentials: latestCredentials,
-            selectedSite: resolved.selectedSite,
             decision: decision,
             onDisconnect: onDisconnect
         )
     }
 
-    private func overrideMode(
-        for mode: Options.Mode,
-        forceRemote: Bool
-    ) -> TydomConnectionState.ModeOverride {
-        if forceRemote { return .forceRemote }
+    private func overrideMode(for mode: Options.Mode) -> TydomConnectionState.ModeOverride {
         switch mode {
         case .auto:
             return .none
@@ -261,30 +266,22 @@ public struct TydomConnectionResolver: Sendable {
     private func resolveGatewayCredentials(
         options: Options,
         selectSiteIndex: SiteIndexSelector?
-    ) async throws -> ResolvedCredentials {
-        let selectedSite = try await resolveSelectedSite(
+    ) async throws -> TydomGatewayCredentials {
+        let selectedMac = try await resolveSelectedMac(
             options: options,
             selectSiteIndex: selectSiteIndex
         )
-        guard let selectedMac = selectedSite?.gatewayMac ?? options.mac else {
-            throw ResolverError.missingGatewayMac
-        }
-
-        if let password = options.password {
-            let credentials = TydomGatewayCredentials(
-                mac: selectedMac,
-                password: password,
-                cachedLocalIP: nil,
-                updatedAt: environment.now()
-            )
-            let gatewayId = TydomMac.normalize(selectedMac)
-            try? await environment.credentialStore.save(gatewayId, credentials)
-            return ResolvedCredentials(credentials: credentials, selectedSite: selectedSite)
-        }
+        DeltaDoreDebugLog.log(
+            "Resolve credentials selectedMac=\(TydomMac.normalize(selectedMac)) mode=\(options.mode)"
+        )
 
         let gatewayId = TydomMac.normalize(selectedMac)
         if let stored = try? await environment.credentialStore.load(gatewayId) {
-            return ResolvedCredentials(credentials: stored, selectedSite: selectedSite)
+            return stored
+        }
+
+        guard options.credentialPolicy == .allowCloudDataFetch else {
+            throw ResolverError.missingGatewayCredentials
         }
 
         let cloudCredentials: TydomConnection.CloudCredentials
@@ -318,26 +315,23 @@ public struct TydomConnectionResolver: Sendable {
             gatewayMac: selectedMac,
             cloudCredentials: cloudCredentials
         )
-        return ResolvedCredentials(credentials: credentials, selectedSite: selectedSite)
+        return credentials
     }
 
-    private func resolveSelectedSite(
+    private func resolveSelectedMac(
         options: Options,
         selectSiteIndex: SiteIndexSelector?
-    ) async throws -> TydomSelectedSite? {
-        if let mac = options.mac,
-           options.siteIndex == nil,
-           selectSiteIndex == nil {
-            let manual = TydomSelectedSite(id: "manual", name: "Manual selection", gatewayMac: mac)
-            try? await environment.selectedSiteStore.save(options.selectedSiteAccount, manual)
-            return manual
+    ) async throws -> String {
+        if let macOverride = options.macOverride, macOverride.isEmpty == false {
+            try? await environment.gatewayMacStore.save(macOverride)
+            return macOverride
         }
 
-        if options.resetSelectedSite == false,
-           options.siteIndex == nil,
-           selectSiteIndex == nil,
-           let stored = try? await environment.selectedSiteStore.load(options.selectedSiteAccount) {
-            return stored
+        if options.credentialPolicy == .useStoredDataOnly {
+            if let storedMac = try? await environment.gatewayMacStore.load() {
+                return storedMac
+            }
+            throw ResolverError.missingGatewayMac
         }
 
         let cloudCredentials: TydomConnection.CloudCredentials
@@ -355,7 +349,9 @@ public struct TydomConnectionResolver: Sendable {
         }
 
         let chosenIndex: Int?
-        if let providedIndex = options.siteIndex {
+        if sites.count == 1 {
+            chosenIndex = 0
+        } else if let providedIndex = options.siteIndex {
             chosenIndex = providedIndex
         } else if let selectSiteIndex {
             chosenIndex = await selectSiteIndex(sites)
@@ -367,19 +363,20 @@ public struct TydomConnectionResolver: Sendable {
             throw ResolverError.missingSiteSelection
         }
 
-        let selected = try selectSite(from: sites, index: chosenIndex)
-        try? await environment.selectedSiteStore.save(options.selectedSiteAccount, selected)
-        return selected
+        let selectedMac = try selectMac(from: sites, index: chosenIndex)
+        try? await environment.gatewayMacStore.save(selectedMac)
+        DeltaDoreDebugLog.log("Resolve site selected index=\(chosenIndex) mac=\(selectedMac)")
+        return selectedMac
     }
 
     private func loadStoredCloudCredentials() async -> TydomConnection.CloudCredentials? {
         try? await environment.cloudCredentialStore.load()
     }
 
-    private func selectSite(
+    private func selectMac(
         from sites: [TydomCloudSitesProvider.Site],
         index: Int
-    ) throws -> TydomSelectedSite {
+    ) throws -> String {
         guard sites.indices.contains(index) else {
             throw ResolverError.invalidSiteIndex(index, siteCount: sites.count)
         }
@@ -387,7 +384,7 @@ public struct TydomConnectionResolver: Sendable {
         guard let gateway = site.gateways.first else {
             throw ResolverError.missingGateway(site.name)
         }
-        return TydomSelectedSite(id: site.id, name: site.name, gatewayMac: gateway.mac)
+        return gateway.mac
     }
 
     private func makeOrchestratorDependencies(
@@ -397,9 +394,8 @@ public struct TydomConnectionResolver: Sendable {
         let discovery = environment.discovery
         let allowInsecureTLS = options.allowInsecureTLS
         let timeout = options.timeout
-        let bonjourServices = options.bonjourServices
         let localHostOverride = options.localHostOverride
-        let remoteHostOverride = options.remoteHostOverride ?? environment.remoteHost
+        let remoteHost = environment.remoteHost
 
         let connect: @Sendable (String, TydomGatewayCredentials?, TydomConnection.Configuration.Mode) async -> Bool = { host, credentials, mode in
             guard let credentials else { return false }
@@ -422,18 +418,31 @@ public struct TydomConnectionResolver: Sendable {
             saveCredentials: { credentials in
                 let gatewayId = TydomMac.normalize(credentials.mac)
                 try? await self.environment.credentialStore.save(gatewayId, credentials)
+                try? await self.environment.gatewayMacStore.save(credentials.mac)
                 await cache.set(credentials)
             },
             discoverLocal: {
                 guard let credentials = await cache.get() else { return [] }
-                let config = TydomGatewayDiscoveryConfig(
-                    discoveryTimeout: min(timeout, 6),
-                    probeTimeout: min(timeout, 2),
-                    probeConcurrency: 12,
-                    probePorts: [443],
-                    bonjourServiceTypes: bonjourServices
+                DeltaDoreDebugLog.log(
+                    "Discovery request mac=\(credentials.mac) cachedIP=\(credentials.cachedLocalIP ?? "nil")"
                 )
-                return await discovery.discover(mac: credentials.mac, cachedIP: credentials.cachedLocalIP, config: config)
+                let config = TydomGatewayDiscoveryConfig(
+                    discoveryTimeout: min(timeout, 10),
+                    probeTimeout: min(timeout, 0.6),
+                    probeConcurrency: 256,
+                    probePorts: [443],
+                    bonjourServiceTypes: [],
+                    infoTimeout: min(timeout, 10),
+                    infoConcurrency: 32,
+                    allowInsecureTLS: allowInsecureTLS ?? true,
+                    validateWithInfo: true
+                )
+                let candidates = await discovery.discover(
+                    credentials: credentials,
+                    cachedIP: credentials.cachedLocalIP,
+                    config: config
+                )
+                return candidates
             },
             connectLocal: { host in
                 let credentials = await cache.get()
@@ -444,7 +453,7 @@ public struct TydomConnectionResolver: Sendable {
             },
             connectRemote: {
                 let credentials = await cache.get()
-                return await connect(remoteHostOverride, credentials, .remote(host: remoteHostOverride))
+                return await connect(remoteHost, credentials, .remote(host: remoteHost))
             },
             emitDecision: { decision in
                 if let onDecision = options.onDecision {
@@ -474,9 +483,7 @@ public struct TydomConnectionResolver: Sendable {
                 polling: options.polling
             )
         case .remote(let host):
-            let resolvedHost = (options.remoteHostOverride?.isEmpty == false)
-                ? options.remoteHostOverride!
-                : host
+            let resolvedHost = environment.remoteHost.isEmpty == false ? environment.remoteHost : host
             return TydomConnection.Configuration(
                 mode: .remote(host: resolvedHost),
                 mac: credentials.mac,
@@ -491,7 +498,7 @@ public struct TydomConnectionResolver: Sendable {
 }
 
 extension TydomConnectionResolver.ResolverError: LocalizedError {
-    public var errorDescription: String? {
+    var errorDescription: String? {
         switch self {
         case .missingCloudCredentials:
             return "Missing cloud credentials."
@@ -509,13 +516,25 @@ extension TydomConnectionResolver.ResolverError: LocalizedError {
             return "Missing gateway MAC."
         case .invalidConfiguration:
             return "Unable to build a valid connection configuration."
+        case .remoteFailed:
+            return "Remote connection failed."
         }
     }
 }
 
-private struct ResolvedCredentials: Sendable {
-    let credentials: TydomGatewayCredentials
-    let selectedSite: TydomSelectedSite?
+private func verifyGateway(
+    connection: TydomConnection,
+    timeout: TimeInterval
+) async -> Bool {
+    do {
+        return try await connection.pingAndWaitForResponse(
+            timeout: timeout,
+            closeAfterSuccess: true
+        )
+    } catch {
+        DeltaDoreDebugLog.log("Verify gateway ping failed error=\(error)")
+        return false
+    }
 }
 
 private actor CredentialsCache {
