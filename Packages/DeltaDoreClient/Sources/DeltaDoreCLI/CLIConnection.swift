@@ -2,25 +2,11 @@ import Foundation
 import DeltaDoreClient
 
 func runCLI(
-    options: CLIOptions,
+    connection: TydomConnection,
     stdout: ConsoleWriter,
     stderr: ConsoleWriter
 ) async {
-    let connection = TydomConnection(
-        configuration: options.configuration,
-        log: { message in
-            Task { await stderr.writeLine("[connection] \(message)") }
-        },
-        onDisconnect: options.onDisconnect
-    )
     await connection.setAppActive(true)
-
-    do {
-        try await connection.connect()
-    } catch {
-        await stderr.writeLine("Failed to connect: \(error)")
-        return
-    }
 
     let initialPingOk = await send(command: .ping(), connection: connection, stderr: stderr)
     guard initialPingOk else {
@@ -76,12 +62,16 @@ func runCLI(
     await stdout.writeLine("Disconnected.")
 }
 
-func resolveAutoConfiguration(
+func connectAuto(
     options: AutoOptions,
     stdout: ConsoleWriter,
     stderr: ConsoleWriter
-) async -> CLIOptions? {
+) async -> TydomConnection? {
     let client = makeClient()
+    if options.clearStorage {
+        await client.clearStoredData()
+        await stderr.writeLine("Cleared stored data.")
+    }
     if await handleSiteListingIfNeeded(
         listSites: options.listSites,
         dumpSitesResponse: options.dumpSitesResponse,
@@ -93,48 +83,102 @@ func resolveAutoConfiguration(
         return nil
     }
 
-    let polling = TydomConnection.Configuration.Polling(
-        intervalSeconds: options.pollInterval,
-        onlyWhenActive: options.pollOnlyActive
-    )
-    let resolverOptions = DeltaDoreClient.Options(
-        mode: .auto,
-        remoteHostOverride: options.remoteHost,
-        mac: options.mac,
-        cloudCredentials: options.cloudCredentials,
-        siteIndex: options.siteIndex,
-        resetSelectedSite: options.resetSite,
-        selectedSiteAccount: "default",
-        allowInsecureTLS: options.allowInsecureTLS,
-        timeout: options.timeout,
-        polling: polling,
-        bonjourServices: options.bonjourServices,
-        forceRemote: options.forceRemote
-    )
+    if options.forceLocal && options.forceRemote {
+        await stderr.writeLine("Cannot use --force-local and --force-remote together.")
+        return nil
+    }
 
-    do {
-        let resolution = try await client.resolve(
-            options: resolverOptions,
-            selectSiteIndex: { sites in
-                await chooseSiteIndex(sites, stdout: stdout, stderr: stderr)
+    let flow = await client.inspectConnectionFlow()
+    switch flow {
+    case .connectWithStoredCredentials:
+        let mode = storedMode(forceLocal: options.forceLocal, forceRemote: options.forceRemote)
+        do {
+            let session = try await client.connectWithStoredCredentials(
+                options: .init(mode: mode)
+            )
+            return session.connection
+        } catch {
+            await stderr.writeLine("Failed to connect with stored credentials: \(error.localizedDescription)")
+            return nil
+        }
+    case .connectWithNewCredentials:
+        guard let cloudCredentials = options.cloudCredentials else {
+            await stderr.writeLine("Missing cloud credentials to start new credential flow.")
+            return nil
+        }
+        let mode: DeltaDoreClient.NewCredentialsFlowOptions.Mode
+        if options.forceLocal {
+            guard let localIP = options.localIP, let localMAC = options.localMAC else {
+                await stderr.writeLine("--force-local requires --local-ip and --local-mac.")
+                return nil
             }
+            mode = .forceLocal(
+                cloudCredentials: cloudCredentials,
+                localIP: localIP,
+                localMAC: localMAC
+            )
+        } else if options.forceRemote {
+            mode = .forceRemote(cloudCredentials: cloudCredentials)
+        } else {
+            mode = .auto(cloudCredentials: cloudCredentials)
+        }
+
+        let selector = siteIndexSelector(
+            siteIndex: options.siteIndex,
+            stdout: stdout,
+            stderr: stderr
         )
-        return CLIOptions(
-            configuration: resolution.configuration,
-            onDisconnect: resolution.onDisconnect
+
+        do {
+            let session = try await client.connectWithNewCredentials(
+                options: .init(mode: mode),
+                selectSiteIndex: selector
+            )
+            return session.connection
+        } catch {
+            await stderr.writeLine("Failed to connect with new credentials: \(error.localizedDescription)")
+            return nil
+        }
+    }
+}
+
+func connectStored(
+    options: StoredOptions,
+    stdout: ConsoleWriter,
+    stderr: ConsoleWriter
+) async -> TydomConnection? {
+    let client = makeClient()
+    if options.clearStorage {
+        await client.clearStoredData()
+        await stderr.writeLine("Cleared stored data.")
+    }
+    if options.forceLocal && options.forceRemote {
+        await stderr.writeLine("Cannot use --force-local and --force-remote together.")
+        return nil
+    }
+
+    let mode = storedMode(forceLocal: options.forceLocal, forceRemote: options.forceRemote)
+    do {
+        let session = try await client.connectWithStoredCredentials(
+            options: .init(mode: mode)
         )
+        return session.connection
     } catch {
-        await stderr.writeLine("Failed to resolve connection: \(error.localizedDescription)")
+        await stderr.writeLine("Failed to connect with stored credentials: \(error.localizedDescription)")
         return nil
     }
 }
 
-func resolveExplicitConfiguration(
-    options: ResolveOptions,
+func connectNew(
+    options: NewOptions,
     stdout: ConsoleWriter,
     stderr: ConsoleWriter
-) async -> CLIOptions? {
+) async -> TydomConnection? {
     let client = makeClient()
+    if options.clearStorage {
+        await client.clearStoredData()
+        await stderr.writeLine("Cleared stored data.")
+    }
     if await handleSiteListingIfNeeded(
         listSites: options.listSites,
         dumpSitesResponse: options.dumpSitesResponse,
@@ -146,51 +190,78 @@ func resolveExplicitConfiguration(
         return nil
     }
 
-    let mode: DeltaDoreClient.Options.Mode = options.mode == "remote" ? .remote : .local
-    let polling = TydomConnection.Configuration.Polling(
-        intervalSeconds: options.pollInterval,
-        onlyWhenActive: options.pollOnlyActive
-    )
-    let resolverOptions = DeltaDoreClient.Options(
-        mode: mode,
-        localHostOverride: options.mode == "local" ? options.host : nil,
-        remoteHostOverride: options.mode == "remote" ? options.host : nil,
-        mac: options.mac,
-        password: options.password,
-        cloudCredentials: options.cloudCredentials,
-        siteIndex: options.siteIndex,
-        resetSelectedSite: options.resetSite,
-        selectedSiteAccount: "default",
-        allowInsecureTLS: options.allowInsecureTLS,
-        timeout: options.timeout,
-        polling: polling,
-        bonjourServices: options.bonjourServices,
-        onDecision: { decision in
-            await stderr.writeLine("Decision: \(decision.reason.rawValue) -> \(decision.mode)")
+    guard let cloudCredentials = options.cloudCredentials else {
+        await stderr.writeLine("Missing cloud credentials to start new credential flow.")
+        return nil
+    }
+
+    if options.forceLocal && options.forceRemote {
+        await stderr.writeLine("Cannot use --force-local and --force-remote together.")
+        return nil
+    }
+
+    let mode: DeltaDoreClient.NewCredentialsFlowOptions.Mode
+    if options.forceLocal {
+        guard let localIP = options.localIP, let localMAC = options.localMAC else {
+            await stderr.writeLine("--force-local requires --local-ip and --local-mac.")
+            return nil
         }
+        mode = .forceLocal(
+            cloudCredentials: cloudCredentials,
+            localIP: localIP,
+            localMAC: localMAC
+        )
+    } else if options.forceRemote {
+        mode = .forceRemote(cloudCredentials: cloudCredentials)
+    } else {
+        mode = .auto(cloudCredentials: cloudCredentials)
+    }
+
+    let selector = siteIndexSelector(
+        siteIndex: options.siteIndex,
+        stdout: stdout,
+        stderr: stderr
     )
 
     do {
-        let resolution = try await client.resolve(
-            options: resolverOptions,
-            selectSiteIndex: { sites in
-                await chooseSiteIndex(sites, stdout: stdout, stderr: stderr)
-            }
+        let session = try await client.connectWithNewCredentials(
+            options: .init(mode: mode),
+            selectSiteIndex: selector
         )
-        return CLIOptions(
-            configuration: resolution.configuration,
-            onDisconnect: resolution.onDisconnect
-        )
+        return session.connection
     } catch {
-        await stderr.writeLine("Failed to resolve connection: \(error.localizedDescription)")
+        await stderr.writeLine("Failed to connect with new credentials: \(error.localizedDescription)")
         return nil
+    }
+}
+
+private func storedMode(
+    forceLocal: Bool,
+    forceRemote: Bool
+) -> DeltaDoreClient.StoredCredentialsFlowOptions.Mode {
+    if forceLocal { return .forceLocal }
+    if forceRemote { return .forceRemote }
+    return .auto
+}
+
+private func siteIndexSelector(
+    siteIndex: Int?,
+    stdout: ConsoleWriter,
+    stderr: ConsoleWriter
+) -> DeltaDoreClient.SiteIndexSelector? {
+    if let siteIndex {
+        return { _ in siteIndex }
+    }
+    return { sites in
+        await chooseSiteIndex(sites, stdout: stdout, stderr: stderr)
     }
 }
 
 private func makeClient() -> DeltaDoreClient {
     DeltaDoreClient.live(
         credentialService: "io.sideeffect.deltadoreclient.cli",
-        selectedSiteService: "io.sideeffect.deltadoreclient.cli.site-selection"
+        gatewayMacService: "io.sideeffect.deltadoreclient.cli.gateway-mac",
+        cloudCredentialService: "io.sideeffect.deltadoreclient.cli.cloud-credentials"
     )
 }
 
@@ -261,20 +332,15 @@ private func stdinLines() -> AsyncStream<String> {
                             continuation.yield(line)
                         }
                         buffer.removeAll(keepingCapacity: true)
-                        continue
-                    }
-                    if byte != 13 { // ignore \r
+                    } else {
                         buffer.append(byte)
                     }
                 }
             } catch {
-                // stdin stream failed; fall through to finalize
+                continuation.finish()
             }
-            if buffer.isEmpty == false, let line = String(data: buffer, encoding: .utf8) {
-                continuation.yield(line)
-            }
-            continuation.finish()
         }
+
         continuation.onTermination = { _ in
             task.cancel()
         }

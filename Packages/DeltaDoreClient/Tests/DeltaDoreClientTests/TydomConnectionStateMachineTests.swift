@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import DeltaDoreClient
 
-@Test func stateMachine_missingCredentialsForcesRemote() async {
+@Test func stateMachine_missingCredentialsFails() async {
     // Given
     let state = TydomConnectionState(phase: .idle, override: .none, credentials: nil)
 
@@ -13,8 +13,8 @@ import Testing
     )
 
     // Then
-    #expect(next.phase == .connectingRemote)
-    #expect(actions.contains(.connectRemote))
+    #expect(next.phase == .failed)
+    #expect(actions.contains(.connectRemote) == false)
 }
 
 @Test func stateMachine_cachedIPFailureTriggersDiscovery() async {

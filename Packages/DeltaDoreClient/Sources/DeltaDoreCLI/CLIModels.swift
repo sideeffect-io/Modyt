@@ -2,49 +2,41 @@ import Foundation
 import DeltaDoreClient
 
 enum StartupAction: Sendable {
-    case run(CLIOptions)
     case runAuto(AutoOptions)
-    case runResolved(ResolveOptions)
+    case runStored(StoredOptions)
+    case runNew(NewOptions)
     case help(String)
     case failure(String)
 }
 
-struct CLIOptions: Sendable {
-    let configuration: TydomConnection.Configuration
-    let onDisconnect: (@Sendable () async -> Void)?
-}
-
 struct AutoOptions: Sendable {
-    let mac: String?
     let cloudCredentials: TydomConnection.CloudCredentials?
     let siteIndex: Int?
-    let bonjourServices: [String]
-    let timeout: TimeInterval
-    let pollInterval: Int
-    let pollOnlyActive: Bool
-    let allowInsecureTLS: Bool?
-    let remoteHost: String?
-    let listSites: Bool
+    let forceLocal: Bool
     let forceRemote: Bool
+    let localIP: String?
+    let localMAC: String?
+    let listSites: Bool
     let dumpSitesResponse: Bool
-    let resetSite: Bool
+    let clearStorage: Bool
 }
 
-struct ResolveOptions: Sendable {
-    let mode: String
-    let host: String?
-    let mac: String?
-    let password: String?
+struct StoredOptions: Sendable {
+    let forceLocal: Bool
+    let forceRemote: Bool
+    let clearStorage: Bool
+}
+
+struct NewOptions: Sendable {
     let cloudCredentials: TydomConnection.CloudCredentials?
     let siteIndex: Int?
+    let forceLocal: Bool
+    let forceRemote: Bool
+    let localIP: String?
+    let localMAC: String?
     let listSites: Bool
-    let resetSite: Bool
-    let timeout: TimeInterval
-    let pollInterval: Int
-    let pollOnlyActive: Bool
-    let allowInsecureTLS: Bool?
     let dumpSitesResponse: Bool
-    let bonjourServices: [String]
+    let clearStorage: Bool
 }
 
 enum CLICommand: Sendable {

@@ -22,16 +22,20 @@ import Testing
     #expect(deleted == nil)
 }
 
-@Test func resolver_onDisconnectClearsSelectedSiteAndCloudCredentials() async throws {
+@Test func resolver_onDisconnectClearsStoredData() async throws {
     // Given
-    let selectedSite = TydomSelectedSite(
-        id: "site-1",
-        name: "Home",
-        gatewayMac: "AA:BB:CC:DD:EE:FF"
+    let gatewayMac = "AA:BB:CC:DD:EE:FF"
+    let credentials = TydomGatewayCredentials(
+        mac: gatewayMac,
+        password: "secret",
+        cachedLocalIP: "192.168.1.10",
+        updatedAt: Date()
     )
-    let selectedSiteStore = TydomSelectedSiteStore.inMemory(initial: [
-        "default": selectedSite
+    let gatewayId = TydomMac.normalize(gatewayMac)
+    let credentialStore = TydomGatewayCredentialStore.inMemory(initial: [
+        gatewayId: credentials
     ])
+    let gatewayMacStore = TydomGatewayMacStore.inMemory(initial: gatewayMac)
     let cloudCredentials = TydomConnection.CloudCredentials(
         email: "user@example.com",
         password: "secret"
@@ -41,12 +45,13 @@ import Testing
         dependencies: .init(
             discoverBonjour: { _, _ in [] },
             subnetHosts: { [] },
-            probeHost: { _, _, _ in false }
+            probeHost: { _, _, _ in false },
+            probeWebSocketInfo: { _, _, _, _, _ in false }
         )
     )
     let environment = TydomConnectionResolver.Environment(
-        credentialStore: .inMemory(),
-        selectedSiteStore: selectedSiteStore,
+        credentialStore: credentialStore,
+        gatewayMacStore: gatewayMacStore,
         cloudCredentialStore: cloudCredentialStore,
         discovery: discovery,
         remoteHost: "mediation.tydom.com",
@@ -55,14 +60,16 @@ import Testing
         probeConnection: { _ in false }
     )
     let resolver = TydomConnectionResolver(environment: environment)
-    let onDisconnect = resolver.makeOnDisconnect(selectedSiteAccount: "default")
+    let onDisconnect = resolver.makeOnDisconnect()
 
     // When
     await onDisconnect()
 
     // Then
-    let storedSite = try await selectedSiteStore.load("default")
-    let storedCredentials = try await cloudCredentialStore.load()
-    #expect(storedSite == nil)
+    let storedMac = try await gatewayMacStore.load()
+    let storedCredentials = try await credentialStore.load(gatewayId)
+    let storedCloud = try await cloudCredentialStore.load()
+    #expect(storedMac == nil)
     #expect(storedCredentials == nil)
+    #expect(storedCloud == nil)
 }

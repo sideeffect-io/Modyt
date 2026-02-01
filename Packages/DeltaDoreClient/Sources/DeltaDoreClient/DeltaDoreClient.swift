@@ -1,80 +1,123 @@
 import Foundation
 
-/// High-level entry point that wires the connection resolver and connection factory.
-///
-/// This keeps app code minimal while still allowing dependency injection for tests
-/// or platform-specific customization.
-///
-/// Example:
-/// ```swift
-/// let client = DeltaDoreClient.live()
-/// let options = DeltaDoreClient.Options(
-///     mode: .auto,
-///     cloudCredentials: .init(email: "user@example.com", password: "secret")
-/// )
-/// let session = try await client.connect(
-///     options: options,
-///     selectSiteIndex: { sites in
-///         // Present UI and return the chosen index.
-///         return 0
-///     }
-/// )
-/// let connection = session.connection
-/// ```
 public struct DeltaDoreClient: Sendable {
-    public typealias Options = TydomConnectionResolver.Options
-    public typealias SiteIndexSelector = TydomConnectionResolver.SiteIndexSelector
-    public typealias Resolution = TydomConnectionResolver.Resolution
+    public enum ConnectionFlowStatus: Sendable {
+        case connectWithStoredCredentials
+        case connectWithNewCredentials
+    }
+
+    public struct StoredCredentialsFlowOptions: Sendable {
+        public enum Mode: Sendable { case auto, forceLocal, forceRemote }
+        public let mode: Mode
+
+        public init(mode: Mode = .auto) {
+            self.mode = mode
+        }
+    }
+
+    public struct NewCredentialsFlowOptions: Sendable {
+        public enum Mode: Sendable {
+            case auto(cloudCredentials: TydomConnection.CloudCredentials)
+            case forceLocal(cloudCredentials: TydomConnection.CloudCredentials, localIP: String, localMAC: String)
+            case forceRemote(cloudCredentials: TydomConnection.CloudCredentials)
+        }
+
+        public let mode: Mode
+
+        public init(mode: Mode) {
+            self.mode = mode
+        }
+    }
+
+    public typealias SiteIndexSelector = @Sendable (_ sites: [TydomCloudSitesProvider.Site]) async -> Int?
     public typealias Site = TydomCloudSitesProvider.Site
 
     public struct ConnectionSession: Sendable {
         public let connection: TydomConnection
-        public let resolution: Resolution
     }
 
     public struct Dependencies: Sendable {
-        public var resolve: @Sendable (Options, SiteIndexSelector?) async throws -> Resolution
+        public var inspectFlow: @Sendable () async -> ConnectionFlowStatus
+        public var connectStored: @Sendable (StoredCredentialsFlowOptions) async throws -> ConnectionSession
+        public var connectNew: @Sendable (NewCredentialsFlowOptions, SiteIndexSelector?) async throws -> ConnectionSession
         public var listSites: @Sendable (TydomConnection.CloudCredentials) async throws -> [Site]
         public var listSitesPayload: @Sendable (TydomConnection.CloudCredentials) async throws -> Data
-        public var resetSelectedSite: @Sendable (String) async throws -> Void
-        public var makeConnection: @Sendable (Resolution) -> TydomConnection
-        public var connect: @Sendable (TydomConnection) async throws -> Void
+        public var clearStoredData: @Sendable () async -> Void
 
         public init(
-            resolve: @escaping @Sendable (Options, SiteIndexSelector?) async throws -> Resolution,
+            inspectFlow: @escaping @Sendable () async -> ConnectionFlowStatus,
+            connectStored: @escaping @Sendable (StoredCredentialsFlowOptions) async throws -> ConnectionSession,
+            connectNew: @escaping @Sendable (NewCredentialsFlowOptions, SiteIndexSelector?) async throws -> ConnectionSession,
             listSites: @escaping @Sendable (TydomConnection.CloudCredentials) async throws -> [Site],
             listSitesPayload: @escaping @Sendable (TydomConnection.CloudCredentials) async throws -> Data,
-            resetSelectedSite: @escaping @Sendable (String) async throws -> Void,
-            makeConnection: @escaping @Sendable (Resolution) -> TydomConnection,
-            connect: @escaping @Sendable (TydomConnection) async throws -> Void
+            clearStoredData: @escaping @Sendable () async -> Void
         ) {
-            self.resolve = resolve
+            self.inspectFlow = inspectFlow
+            self.connectStored = connectStored
+            self.connectNew = connectNew
             self.listSites = listSites
             self.listSitesPayload = listSitesPayload
-            self.resetSelectedSite = resetSelectedSite
-            self.makeConnection = makeConnection
-            self.connect = connect
+            self.clearStoredData = clearStoredData
         }
 
         public static func live(
             credentialService: String = "io.sideeffect.deltadoreclient.gateway",
-            selectedSiteService: String = "io.sideeffect.deltadoreclient.selected-site",
+            gatewayMacService: String = "io.sideeffect.deltadoreclient.gateway-mac",
             cloudCredentialService: String = "io.sideeffect.deltadoreclient.cloud-credentials",
             remoteHost: String = "mediation.tydom.com",
             now: @escaping @Sendable () -> Date = { Date() }
         ) -> Dependencies {
-            let resolver = TydomConnectionResolver(
-                environment: .live(
-                    credentialService: credentialService,
-                    selectedSiteService: selectedSiteService,
-                    cloudCredentialService: cloudCredentialService,
-                    remoteHost: remoteHost,
-                    now: now
-                )
+            let environment = TydomConnectionResolver.Environment.live(
+                credentialService: credentialService,
+                gatewayMacService: gatewayMacService,
+                cloudCredentialService: cloudCredentialService,
+                remoteHost: remoteHost,
+                now: now
             )
+            let resolver = TydomConnectionResolver(environment: environment)
+
+            let buildSession: @Sendable (TydomConnectionResolver.Resolution) async throws -> ConnectionSession = { resolution in
+                let connection = TydomConnection(
+                    configuration: resolution.configuration,
+                    onDisconnect: resolution.onDisconnect
+                )
+                try await connection.connect()
+                return ConnectionSession(connection: connection)
+            }
+
             return Dependencies(
-                resolve: { options, selectSiteIndex in
-                    try await resolver.resolve(options, selectSiteIndex: selectSiteIndex)
+                inspectFlow: {
+                    guard let mac = try? await environment.gatewayMacStore.load() else {
+                        return .connectWithNewCredentials
+                    }
+                    let gatewayId = TydomMac.normalize(mac)
+                    if let _ = try? await environment.credentialStore.load(gatewayId) {
+                        return .connectWithStoredCredentials
+                    }
+                    return .connectWithNewCredentials
+                },
+                connectStored: { options in
+                    let resolverOptions = TydomConnectionResolver.Options(
+                        mode: mapStoredMode(options.mode),
+                        credentialPolicy: .useStoredDataOnly
+                    )
+                    let resolution = try await resolver.resolve(resolverOptions)
+                    return try await buildSession(resolution)
+                },
+                connectNew: { options, selectSiteIndex in
+                    let (mode, cloudCredentials, localHostOverride, macOverride) = mapNewMode(options.mode)
+                    let resolverOptions = TydomConnectionResolver.Options(
+                        mode: mode,
+                        credentialPolicy: .allowCloudDataFetch,
+                        localHostOverride: localHostOverride,
+                        macOverride: macOverride,
+                        cloudCredentials: cloudCredentials
+                    )
+                    let resolution = try await resolver.resolve(
+                        resolverOptions,
+                        selectSiteIndex: selectSiteIndex
+                    )
+                    return try await buildSession(resolution)
                 },
                 listSites: { credentials in
                     try await resolver.listSites(cloudCredentials: credentials)
@@ -82,17 +125,8 @@ public struct DeltaDoreClient: Sendable {
                 listSitesPayload: { credentials in
                     try await resolver.listSitesPayload(cloudCredentials: credentials)
                 },
-                resetSelectedSite: { account in
-                    try await resolver.resetSelectedSite(selectedSiteAccount: account)
-                },
-                makeConnection: { resolution in
-                    TydomConnection(
-                        configuration: resolution.configuration,
-                        onDisconnect: resolution.onDisconnect
-                    )
-                },
-                connect: { connection in
-                    try await connection.connect()
+                clearStoredData: {
+                    await resolver.clearPersistedData()
                 }
             )
         }
@@ -106,7 +140,7 @@ public struct DeltaDoreClient: Sendable {
 
     public static func live(
         credentialService: String = "io.sideeffect.deltadoreclient.gateway",
-        selectedSiteService: String = "io.sideeffect.deltadoreclient.selected-site",
+        gatewayMacService: String = "io.sideeffect.deltadoreclient.gateway-mac",
         cloudCredentialService: String = "io.sideeffect.deltadoreclient.cloud-credentials",
         remoteHost: String = "mediation.tydom.com",
         now: @escaping @Sendable () -> Date = { Date() }
@@ -114,7 +148,7 @@ public struct DeltaDoreClient: Sendable {
         DeltaDoreClient(
             dependencies: .live(
                 credentialService: credentialService,
-                selectedSiteService: selectedSiteService,
+                gatewayMacService: gatewayMacService,
                 cloudCredentialService: cloudCredentialService,
                 remoteHost: remoteHost,
                 now: now
@@ -122,50 +156,67 @@ public struct DeltaDoreClient: Sendable {
         )
     }
 
-    /// Resolves the connection configuration and credentials, using the stored site selection when available.
-    public func resolve(
-        options: Options,
-        selectSiteIndex: SiteIndexSelector? = nil
-    ) async throws -> Resolution {
-        try await dependencies.resolve(options, selectSiteIndex)
+    public func inspectConnectionFlow() async -> ConnectionFlowStatus {
+        await dependencies.inspectFlow()
     }
 
-    /// Lists cloud sites for the provided credentials.
+    public func connectWithStoredCredentials(
+        options: StoredCredentialsFlowOptions
+    ) async throws -> ConnectionSession {
+        try await dependencies.connectStored(options)
+    }
+
+    public func connectWithNewCredentials(
+        options: NewCredentialsFlowOptions,
+        selectSiteIndex: SiteIndexSelector? = nil
+    ) async throws -> ConnectionSession {
+        try await dependencies.connectNew(options, selectSiteIndex)
+    }
+
     public func listSites(
         cloudCredentials: TydomConnection.CloudCredentials
     ) async throws -> [Site] {
         try await dependencies.listSites(cloudCredentials)
     }
 
-    /// Returns the raw JSON payload from the cloud site list endpoint.
     public func listSitesPayload(
         cloudCredentials: TydomConnection.CloudCredentials
     ) async throws -> Data {
         try await dependencies.listSitesPayload(cloudCredentials)
     }
 
-    /// Deletes the stored site selection for the given account.
-    public func resetSelectedSite(selectedSiteAccount: String) async throws {
-        try await dependencies.resetSelectedSite(selectedSiteAccount)
+    public func clearStoredData() async {
+        await dependencies.clearStoredData()
     }
+}
 
-    /// Resolves the connection configuration and creates a `TydomConnection` without connecting.
-    public func makeConnection(
-        options: Options,
-        selectSiteIndex: SiteIndexSelector? = nil
-    ) async throws -> ConnectionSession {
-        let resolution = try await resolve(options: options, selectSiteIndex: selectSiteIndex)
-        let connection = dependencies.makeConnection(resolution)
-        return ConnectionSession(connection: connection, resolution: resolution)
+private func mapStoredMode(
+    _ mode: DeltaDoreClient.StoredCredentialsFlowOptions.Mode
+) -> TydomConnectionResolver.Options.Mode {
+    switch mode {
+    case .auto:
+        return .auto
+    case .forceLocal:
+        return .local
+    case .forceRemote:
+        return .remote
     }
+}
 
-    /// Resolves, creates, and connects a `TydomConnection`.
-    public func connect(
-        options: Options,
-        selectSiteIndex: SiteIndexSelector? = nil
-    ) async throws -> ConnectionSession {
-        let session = try await makeConnection(options: options, selectSiteIndex: selectSiteIndex)
-        try await dependencies.connect(session.connection)
-        return session
+private func mapNewMode(
+    _ mode: DeltaDoreClient.NewCredentialsFlowOptions.Mode
+) -> (
+    mode: TydomConnectionResolver.Options.Mode,
+    cloudCredentials: TydomConnection.CloudCredentials,
+    localHostOverride: String?,
+    macOverride: String?
+) {
+    switch mode {
+    case .auto(let cloudCredentials):
+        return (.auto, cloudCredentials, nil, nil)
+    case .forceLocal(let cloudCredentials, let localIP, let localMAC):
+        return (.local, cloudCredentials, localIP, localMAC)
+    case .forceRemote(let cloudCredentials):
+        return (.remote, cloudCredentials, nil, nil)
     }
 }

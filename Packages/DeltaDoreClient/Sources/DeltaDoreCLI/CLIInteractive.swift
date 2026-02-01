@@ -170,3 +170,14 @@ func commandHelpText() -> String {
     }
     return lines.joined(separator: "\n")
 }
+
+private func parseBool(_ value: String) -> Bool? {
+    switch value.lowercased() {
+    case "true", "1", "yes":
+        return true
+    case "false", "0", "no":
+        return false
+    default:
+        return nil
+    }
+}

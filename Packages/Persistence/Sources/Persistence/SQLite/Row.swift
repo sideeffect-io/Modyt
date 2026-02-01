@@ -1,13 +1,13 @@
 import Foundation
 
-struct Row: Sendable, Equatable {
-    let columns: [String: SQLiteValue]
+public struct Row: Sendable, Equatable {
+    public let columns: [String: SQLiteValue]
 
-    init(columns: [String: SQLiteValue]) {
+    public init(columns: [String: SQLiteValue]) {
         self.columns = columns
     }
 
-    func value(_ name: String) -> SQLiteValue? {
+    public func value(_ name: String) -> SQLiteValue? {
         columns[name]
     }
 }
