@@ -5,7 +5,6 @@ import Testing
 @Test func gatewayDiscovery_includesCachedIPFirst() async {
     // Given
     let dependencies = TydomGatewayDiscovery.Dependencies(
-        discoverBonjour: { _, _ in [] },
         subnetHosts: { [] },
         probeHost: { _, _, _ in false },
         probeWebSocketInfo: { _, _, _, _, _ in false }

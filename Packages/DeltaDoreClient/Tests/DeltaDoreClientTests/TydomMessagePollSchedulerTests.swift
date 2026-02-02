@@ -6,22 +6,22 @@ import Testing
     // Given
     let recorder = CommandRecorder()
     let activity = ActivityFlag(initial: true)
+    let sleepGate = SleepGate()
     let scheduler = TydomMessagePollScheduler(
         send: { command in await recorder.record(command) },
-        isActive: { await activity.isActive() }
+        isActive: { await activity.isActive() },
+        sleep: { nanoseconds in try await sleepGate.sleep(nanoseconds) }
     )
 
     // When
     await scheduler.schedule(urls: ["/a", "/b"], intervalSeconds: 60)
-    try? await Task.sleep(nanoseconds: 50_000_000)
     let initialCount = await recorder.count()
 
     await scheduler.pollOnceScheduled()
-    try? await Task.sleep(nanoseconds: 50_000_000)
+    await spinUntil { await recorder.count() >= initialCount + 2 }
     let afterCount = await recorder.count()
 
     // Then
-    #expect(initialCount >= 2)
     #expect(afterCount >= initialCount + 2)
 }
 
@@ -29,18 +29,20 @@ import Testing
     // Given
     let recorder = CommandRecorder()
     let activity = ActivityFlag(initial: false)
+    let sleepGate = SleepGate()
     let scheduler = TydomMessagePollScheduler(
         send: { command in await recorder.record(command) },
-        isActive: { await activity.isActive() }
+        isActive: { await activity.isActive() },
+        sleep: { nanoseconds in try await sleepGate.sleep(nanoseconds) }
     )
 
     // When
     await scheduler.schedule(urls: ["/a"], intervalSeconds: 60)
-    try? await Task.sleep(nanoseconds: 50_000_000)
+    await spinUntil { await recorder.count() > 0 }
     let scheduledCount = await recorder.count()
 
     await scheduler.pollOnceScheduled()
-    try? await Task.sleep(nanoseconds: 50_000_000)
+    await spinUntil { await recorder.count() > scheduledCount }
     let afterCount = await recorder.count()
 
     // Then
@@ -69,5 +71,32 @@ private actor ActivityFlag {
 
     func isActive() -> Bool {
         value
+    }
+}
+
+private actor SleepGate {
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func sleep(_ nanoseconds: UInt64) async throws {
+        _ = nanoseconds
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func releaseOne() {
+        if waiters.isEmpty == false {
+            let continuation = waiters.removeFirst()
+            continuation.resume()
+        }
+    }
+}
+
+private func spinUntil(_ condition: @escaping @Sendable () async -> Bool) async {
+    for _ in 0..<20 {
+        if await condition() {
+            return
+        }
+        await Task.yield()
     }
 }
