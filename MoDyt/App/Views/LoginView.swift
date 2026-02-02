@@ -38,7 +38,9 @@ struct LoginView: View {
                     set: { store.send(.loginEmailChanged($0)) }
                 )
             )
+#if os(iOS)
             .textInputAutocapitalization(.never)
+#endif
             .textFieldStyle(.roundedBorder)
 
             SecureField(
