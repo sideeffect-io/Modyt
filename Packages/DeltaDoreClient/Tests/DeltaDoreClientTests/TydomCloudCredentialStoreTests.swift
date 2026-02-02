@@ -43,7 +43,6 @@ import Testing
     let cloudCredentialStore = TydomCloudCredentialStore.inMemory(initial: cloudCredentials)
     let discovery = TydomGatewayDiscovery(
         dependencies: .init(
-            discoverBonjour: { _, _ in [] },
             subnetHosts: { [] },
             probeHost: { _, _, _ in false },
             probeWebSocketInfo: { _, _, _, _, _ in false }
@@ -57,7 +56,11 @@ import Testing
         remoteHost: "mediation.tydom.com",
         now: { Date() },
         makeSession: { URLSession(configuration: .ephemeral) },
-        probeConnection: { _ in false }
+        fetchSites: { _, _ in [] },
+        fetchSitesPayload: { _, _ in Data() },
+        fetchGatewayPassword: { _, _, _, _ in "secret" },
+        probeConnection: { _ in false },
+        log: { _ in }
     )
     let resolver = TydomConnectionResolver(environment: environment)
     let onDisconnect = resolver.makeOnDisconnect()

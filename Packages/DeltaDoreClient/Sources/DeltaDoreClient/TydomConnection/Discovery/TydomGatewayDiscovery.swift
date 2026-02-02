@@ -3,7 +3,6 @@ import Foundation
 public struct TydomLocalGateway: Sendable, Equatable {
     public enum Method: String, Sendable, Equatable {
         case cachedIP
-        case bonjour
         case subnetProbe
     }
 
@@ -17,7 +16,6 @@ public struct TydomGatewayDiscoveryConfig: Sendable, Equatable {
     public let probeTimeout: TimeInterval
     public let probeConcurrency: Int
     public let probePorts: [Int]
-    public let bonjourServiceTypes: [String]
     public let infoTimeout: TimeInterval
     public let infoConcurrency: Int
     public let allowInsecureTLS: Bool
@@ -28,7 +26,6 @@ public struct TydomGatewayDiscoveryConfig: Sendable, Equatable {
         probeTimeout: TimeInterval = 1.5,
         probeConcurrency: Int = 12,
         probePorts: [Int] = [443],
-        bonjourServiceTypes: [String] = [],
         infoTimeout: TimeInterval = 6,
         infoConcurrency: Int = 16,
         allowInsecureTLS: Bool = true,
@@ -38,7 +35,6 @@ public struct TydomGatewayDiscoveryConfig: Sendable, Equatable {
         self.probeTimeout = probeTimeout
         self.probeConcurrency = probeConcurrency
         self.probePorts = probePorts
-        self.bonjourServiceTypes = bonjourServiceTypes
         self.infoTimeout = infoTimeout
         self.infoConcurrency = infoConcurrency
         self.allowInsecureTLS = allowInsecureTLS
@@ -48,7 +44,6 @@ public struct TydomGatewayDiscoveryConfig: Sendable, Equatable {
 
 public struct TydomGatewayDiscovery: Sendable {
     public struct Dependencies: Sendable {
-        public let discoverBonjour: @Sendable (_ serviceTypes: [String], _ timeout: TimeInterval) async -> [String]
         public let subnetHosts: @Sendable () -> [String]
         public let probeHost: @Sendable (_ host: String, _ port: Int, _ timeout: TimeInterval) async -> Bool
         public let probeWebSocketInfo: @Sendable (
@@ -58,6 +53,25 @@ public struct TydomGatewayDiscovery: Sendable {
             _ allowInsecureTLS: Bool,
             _ timeout: TimeInterval
         ) async -> Bool
+        public let log: @Sendable (String) -> Void
+
+        public init(
+            subnetHosts: @escaping @Sendable () -> [String],
+            probeHost: @escaping @Sendable (_ host: String, _ port: Int, _ timeout: TimeInterval) async -> Bool,
+            probeWebSocketInfo: @escaping @Sendable (
+                _ host: String,
+                _ mac: String,
+                _ password: String,
+                _ allowInsecureTLS: Bool,
+                _ timeout: TimeInterval
+            ) async -> Bool,
+            log: @escaping @Sendable (String) -> Void = { _ in }
+        ) {
+            self.subnetHosts = subnetHosts
+            self.probeHost = probeHost
+            self.probeWebSocketInfo = probeWebSocketInfo
+            self.log = log
+        }
     }
 
     public let dependencies: Dependencies
@@ -72,7 +86,7 @@ public struct TydomGatewayDiscovery: Sendable {
         config: TydomGatewayDiscoveryConfig
     ) async -> [TydomLocalGateway] {
         let normalizedMac = TydomMac.normalize(credentials.mac)
-        DeltaDoreDebugLog.log(
+        dependencies.log(
             "Discovery start mac=\(normalizedMac) cachedIP=\(cachedIP ?? "nil") timeout=\(config.discoveryTimeout)s probeTimeout=\(config.probeTimeout)s ports=\(config.probePorts)"
         )
         var candidates: [TydomLocalGateway] = []
@@ -83,62 +97,42 @@ public struct TydomGatewayDiscovery: Sendable {
             )
             if config.validateWithInfo,
                await probeInfo(host: cachedIP, credentials: credentials, config: config) {
-                DeltaDoreDebugLog.log("Discovery cached candidate validated via /info host=\(cachedIP)")
+                dependencies.log("Discovery cached candidate validated via /info host=\(cachedIP)")
                 return candidates
             }
         }
         if cachedIP?.isEmpty == false {
-            DeltaDoreDebugLog.log("Discovery cached candidate host=\(cachedIP ?? "")")
+            dependencies.log("Discovery cached candidate host=\(cachedIP ?? "")")
         }
 
-        let bonjourHosts: [String]
-        if config.bonjourServiceTypes.isEmpty == false {
-            bonjourHosts = await dependencies.discoverBonjour(
-                config.bonjourServiceTypes,
-                config.discoveryTimeout
-            )
-            if bonjourHosts.isEmpty {
-                DeltaDoreDebugLog.log("Discovery bonjour found 0 hosts")
-            } else {
-                DeltaDoreDebugLog.log("Discovery bonjour hosts=\(bonjourHosts)")
-            }
-            candidates.append(contentsOf: bonjourHosts.map {
-                TydomLocalGateway(mac: normalizedMac, host: $0, method: .bonjour)
-            })
+        let subnetHosts = dependencies.subnetHosts()
+        dependencies.log("Discovery subnet candidates count=\(subnetHosts.count)")
+        let probeHosts = await scanOpenPort(
+            subnetHosts,
+            ports: config.probePorts,
+            timeout: config.probeTimeout,
+            maxConcurrent: max(config.probeConcurrency, 1)
+        )
+        if probeHosts.isEmpty {
+            dependencies.log("Discovery subnet probe found 0 responsive hosts")
         } else {
-            bonjourHosts = []
+            dependencies.log("Discovery subnet probe responsive hosts=\(probeHosts)")
         }
-
-        if bonjourHosts.isEmpty {
-            let subnetHosts = dependencies.subnetHosts()
-            DeltaDoreDebugLog.log("Discovery subnet candidates count=\(subnetHosts.count)")
-            let probeHosts = await scanOpenPort(
-                subnetHosts,
-                ports: config.probePorts,
-                timeout: config.probeTimeout,
-                maxConcurrent: max(config.probeConcurrency, 1)
-            )
-            if probeHosts.isEmpty {
-                DeltaDoreDebugLog.log("Discovery subnet probe found 0 responsive hosts")
-            } else {
-                DeltaDoreDebugLog.log("Discovery subnet probe responsive hosts=\(probeHosts)")
-            }
-            candidates.append(contentsOf: probeHosts.map {
-                TydomLocalGateway(mac: normalizedMac, host: $0, method: .subnetProbe)
-            })
-        }
+        candidates.append(contentsOf: probeHosts.map {
+            TydomLocalGateway(mac: normalizedMac, host: $0, method: .subnetProbe)
+        })
 
         let unique = uniqueCandidates(candidates)
-        DeltaDoreDebugLog.log("Discovery unique candidates=\(unique.map { "\($0.host)(\($0.method.rawValue))" })")
+        dependencies.log("Discovery unique candidates=\(unique.map { "\($0.host)(\($0.method.rawValue))" })")
         if config.validateWithInfo {
             let validated = await validateCandidates(unique, credentials: credentials, config: config)
             if validated.isEmpty == false {
-                DeltaDoreDebugLog.log("Discovery websocket validation ok hosts=\(validated.map { $0.host })")
+                dependencies.log("Discovery websocket validation ok hosts=\(validated.map { $0.host })")
                 return validated
             }
-            DeltaDoreDebugLog.log("Discovery websocket validation found 0 hosts (falling back to unvalidated candidates)")
+            dependencies.log("Discovery websocket validation found 0 hosts (falling back to unvalidated candidates)")
         }
-        DeltaDoreDebugLog.log("Discovery returning candidates (no websocket verification step)")
+        dependencies.log("Discovery returning candidates (no websocket verification step)")
         return unique
     }
 

@@ -11,7 +11,11 @@ struct TydomConnectionResolver: Sendable {
         var remoteHost: String
         var now: @Sendable () -> Date
         var makeSession: @Sendable () -> URLSession
+        var fetchSites: @Sendable (_ credentials: TydomConnection.CloudCredentials, _ session: URLSession) async throws -> [TydomCloudSitesProvider.Site]
+        var fetchSitesPayload: @Sendable (_ credentials: TydomConnection.CloudCredentials, _ session: URLSession) async throws -> Data
+        var fetchGatewayPassword: @Sendable (_ email: String, _ password: String, _ mac: String, _ session: URLSession) async throws -> String
         var probeConnection: @Sendable (_ configuration: TydomConnection.Configuration) async -> Bool
+        var log: @Sendable (String) -> Void
 
         init(
             credentialStore: TydomGatewayCredentialStore,
@@ -21,7 +25,11 @@ struct TydomConnectionResolver: Sendable {
             remoteHost: String,
             now: @escaping @Sendable () -> Date,
             makeSession: @escaping @Sendable () -> URLSession,
-            probeConnection: @escaping @Sendable (_ configuration: TydomConnection.Configuration) async -> Bool
+            fetchSites: @escaping @Sendable (_ credentials: TydomConnection.CloudCredentials, _ session: URLSession) async throws -> [TydomCloudSitesProvider.Site],
+            fetchSitesPayload: @escaping @Sendable (_ credentials: TydomConnection.CloudCredentials, _ session: URLSession) async throws -> Data,
+            fetchGatewayPassword: @escaping @Sendable (_ email: String, _ password: String, _ mac: String, _ session: URLSession) async throws -> String,
+            probeConnection: @escaping @Sendable (_ configuration: TydomConnection.Configuration) async -> Bool,
+            log: @escaping @Sendable (String) -> Void
         ) {
             self.credentialStore = credentialStore
             self.gatewayMacStore = gatewayMacStore
@@ -30,56 +38,11 @@ struct TydomConnectionResolver: Sendable {
             self.remoteHost = remoteHost
             self.now = now
             self.makeSession = makeSession
+            self.fetchSites = fetchSites
+            self.fetchSitesPayload = fetchSitesPayload
+            self.fetchGatewayPassword = fetchGatewayPassword
             self.probeConnection = probeConnection
-        }
-
-        static func live(
-            credentialService: String = "io.sideeffect.deltadoreclient.gateway",
-            gatewayMacService: String = "io.sideeffect.deltadoreclient.gateway-mac",
-            cloudCredentialService: String = "io.sideeffect.deltadoreclient.cloud-credentials",
-            remoteHost: String = "mediation.tydom.com",
-            now: @escaping @Sendable () -> Date = { Date() }
-        ) -> Environment {
-            Environment(
-                credentialStore: .liveKeychain(service: credentialService, now: now),
-                gatewayMacStore: .liveKeychain(service: gatewayMacService),
-                cloudCredentialStore: .liveKeychain(service: cloudCredentialService),
-                discovery: TydomGatewayDiscovery(dependencies: .live()),
-                remoteHost: remoteHost,
-                now: now,
-                makeSession: { URLSession(configuration: .default) },
-                probeConnection: { configuration in
-                    DeltaDoreDebugLog.log(
-                        "Probe connection start host=\(configuration.host) mode=\(configuration.mode) mac=\(TydomMac.normalize(configuration.mac)) timeout=\(configuration.timeout)s"
-                    )
-                    let connection = TydomConnection(
-                        configuration: configuration,
-                        log: { message in
-                            DeltaDoreDebugLog.log(message)
-                        }
-                    )
-                    do {
-                        try await connection.connect(startReceiving: false)
-                        let verified = await verifyGateway(
-                            connection: connection,
-                            timeout: configuration.timeout
-                        )
-                        if verified == false {
-                            await connection.disconnect()
-                        }
-                        DeltaDoreDebugLog.log(
-                            "Probe connection result host=\(configuration.host) verified=\(verified)"
-                        )
-                        return verified
-                    } catch {
-                        await connection.disconnect()
-                        DeltaDoreDebugLog.log(
-                            "Probe connection error host=\(configuration.host) error=\(error)"
-                        )
-                        return false
-                    }
-                }
-            )
+            self.log = log
         }
     }
 
@@ -162,11 +125,7 @@ struct TydomConnectionResolver: Sendable {
         try? await environment.cloudCredentialStore.save(cloudCredentials)
         let session = environment.makeSession()
         defer { session.invalidateAndCancel() }
-        return try await TydomCloudSitesProvider.fetchSites(
-            email: cloudCredentials.email,
-            password: cloudCredentials.password,
-            session: session
-        )
+        return try await environment.fetchSites(cloudCredentials, session)
     }
 
     func listSitesPayload(
@@ -175,11 +134,7 @@ struct TydomConnectionResolver: Sendable {
         try? await environment.cloudCredentialStore.save(cloudCredentials)
         let session = environment.makeSession()
         defer { session.invalidateAndCancel() }
-        return try await TydomCloudSitesProvider.fetchSitesPayload(
-            email: cloudCredentials.email,
-            password: cloudCredentials.password,
-            session: session
-        )
+        return try await environment.fetchSitesPayload(cloudCredentials, session)
     }
 
     func makeOnDisconnect() -> @Sendable () async -> Void {
@@ -271,7 +226,7 @@ struct TydomConnectionResolver: Sendable {
             options: options,
             selectSiteIndex: selectSiteIndex
         )
-        DeltaDoreDebugLog.log(
+        environment.log(
             "Resolve credentials selectedMac=\(TydomMac.normalize(selectedMac)) mode=\(options.mode)"
         )
 
@@ -297,12 +252,7 @@ struct TydomConnectionResolver: Sendable {
             dependencies: .init(
                 makeSession: environment.makeSession,
                 fetchPassword: { email, password, mac, session in
-                    try await TydomCloudPasswordProvider.fetchGatewayPassword(
-                        email: email,
-                        password: password,
-                        mac: mac,
-                        session: session
-                    )
+                    try await environment.fetchGatewayPassword(email, password, mac, session)
                 },
                 now: environment.now,
                 save: { gatewayId, credentials in
@@ -365,7 +315,7 @@ struct TydomConnectionResolver: Sendable {
 
         let selectedMac = try selectMac(from: sites, index: chosenIndex)
         try? await environment.gatewayMacStore.save(selectedMac)
-        DeltaDoreDebugLog.log("Resolve site selected index=\(chosenIndex) mac=\(selectedMac)")
+        environment.log("Resolve site selected index=\(chosenIndex) mac=\(selectedMac)")
         return selectedMac
     }
 
@@ -423,7 +373,7 @@ struct TydomConnectionResolver: Sendable {
             },
             discoverLocal: {
                 guard let credentials = await cache.get() else { return [] }
-                DeltaDoreDebugLog.log(
+                self.environment.log(
                     "Discovery request mac=\(credentials.mac) cachedIP=\(credentials.cachedLocalIP ?? "nil")"
                 )
                 let config = TydomGatewayDiscoveryConfig(
@@ -431,7 +381,6 @@ struct TydomConnectionResolver: Sendable {
                     probeTimeout: min(timeout, 0.6),
                     probeConcurrency: 256,
                     probePorts: [443],
-                    bonjourServiceTypes: [],
                     infoTimeout: min(timeout, 10),
                     infoConcurrency: 32,
                     allowInsecureTLS: allowInsecureTLS ?? true,
@@ -519,21 +468,6 @@ extension TydomConnectionResolver.ResolverError: LocalizedError {
         case .remoteFailed:
             return "Remote connection failed."
         }
-    }
-}
-
-private func verifyGateway(
-    connection: TydomConnection,
-    timeout: TimeInterval
-) async -> Bool {
-    do {
-        return try await connection.pingAndWaitForResponse(
-            timeout: timeout,
-            closeAfterSuccess: true
-        )
-    } catch {
-        DeltaDoreDebugLog.log("Verify gateway ping failed error=\(error)")
-        return false
     }
 }
 

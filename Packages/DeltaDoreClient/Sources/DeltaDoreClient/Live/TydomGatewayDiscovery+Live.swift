@@ -5,12 +5,10 @@ import Network
 import Security
 
 public extension TydomGatewayDiscovery.Dependencies {
-    static func live() -> TydomGatewayDiscovery.Dependencies {
+    static func live(
+        log: @escaping @Sendable (String) -> Void = { _ in }
+    ) -> TydomGatewayDiscovery.Dependencies {
         TydomGatewayDiscovery.Dependencies(
-            discoverBonjour: { serviceTypes, timeout in
-                guard serviceTypes.isEmpty == false else { return [] }
-                return await BonjourDiscovery.discover(serviceTypes: serviceTypes, timeout: timeout)
-            },
             subnetHosts: {
                 NetworkProbe.subnetHosts()
             },
@@ -25,59 +23,9 @@ public extension TydomGatewayDiscovery.Dependencies {
                     allowInsecureTLS: allowInsecureTLS,
                     timeout: timeout
                 )
-            }
+            },
+            log: log
         )
-    }
-}
-
-private enum BonjourDiscovery {
-    static func discover(serviceTypes: [String], timeout: TimeInterval) async -> [String] {
-        await withTaskGroup(of: [String].self) { group in
-            for serviceType in serviceTypes {
-                group.addTask {
-                    await browse(serviceType: serviceType, timeout: timeout)
-                }
-            }
-            var hosts: [String] = []
-            for await result in group {
-                hosts.append(contentsOf: result)
-            }
-            return Array(Set(hosts))
-        }
-    }
-
-    private static func browse(serviceType: String, timeout: TimeInterval) async -> [String] {
-        await withCheckedContinuation { continuation in
-            let browser = NWBrowser(for: .bonjour(type: serviceType, domain: nil), using: .init())
-            let hosts = LockedHosts()
-            let gate = ContinuationGate()
-            let queue = DispatchQueue(label: "tydom.bonjour.browser")
-
-            browser.browseResultsChangedHandler = { results, _ in
-                for result in results {
-                    switch result.endpoint {
-                    case .hostPort(let host, _):
-                        hosts.append(host.debugDescription)
-                    default:
-                        continue
-                    }
-                }
-            }
-
-            browser.stateUpdateHandler = { state in
-                if case .failed = state {
-                    browser.cancel()
-                    gate.resumeOnce(continuation, value: [])
-                }
-            }
-
-            browser.start(queue: queue)
-
-            queue.asyncAfter(deadline: .now() + timeout) {
-                browser.cancel()
-                gate.resumeOnce(continuation, value: hosts.snapshot())
-            }
-        }
     }
 }
 

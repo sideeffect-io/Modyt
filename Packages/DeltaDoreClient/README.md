@@ -90,6 +90,15 @@ Behavior:
 - Attempts local connection first, then remote fallback.
 - If remote fails, stored data is cleared and an error is returned.
 
+## Local discovery (no Bonjour)
+
+Local gateway discovery relies on:
+- Cached local IP (if present).
+- Subnet probe (TCP scan on configured ports).
+- Optional WebSocket `/info` validation.
+
+Bonjour/mDNS is not used.
+
 ## Listing sites
 
 ```swift
@@ -103,6 +112,11 @@ let sites = try await client.listSites(
 - Stored data includes: gateway MAC + gateway credentials + cloud credentials.
 - Selected site is not persisted.
 - Stored data is cleared on explicit disconnect and when remote connection fails.
+
+## Live implementations
+
+Live implementations are provided as extensions under `Sources/DeltaDoreClient/Live`.
+Core types keep pure logic and dependencies are injected via closures or capability structs.
 
 ## Custom services and hosts
 

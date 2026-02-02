@@ -13,14 +13,17 @@ actor TydomMessagePollScheduler {
 
     private let send: @Sendable (TydomCommand) async throws -> Void
     private let isActive: @Sendable () async -> Bool
+    private let sleep: @Sendable (UInt64) async throws -> Void
     private var tasks: [Entry: Task<Void, Never>] = [:]
 
     init(
         send: @escaping @Sendable (TydomCommand) async throws -> Void,
-        isActive: @escaping @Sendable () async -> Bool = { true }
+        isActive: @escaping @Sendable () async -> Bool = { true },
+        sleep: @escaping @Sendable (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) }
     ) {
         self.send = send
         self.isActive = isActive
+        self.sleep = sleep
     }
 
     deinit {
@@ -66,7 +69,7 @@ actor TydomMessagePollScheduler {
                     }
                 }
                 do {
-                    try await Task.sleep(nanoseconds: sleepNanoseconds)
+                    try await sleep(sleepNanoseconds)
                 } catch {
                     break
                 }

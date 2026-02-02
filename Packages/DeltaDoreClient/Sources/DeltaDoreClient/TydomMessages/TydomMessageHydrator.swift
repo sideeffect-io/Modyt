@@ -4,39 +4,18 @@ struct TydomMessageHydratorDependencies: Sendable {
     let deviceInfo: @Sendable (String) async -> TydomDeviceInfo?
     let scenarioMetadata: @Sendable (Int) async -> TydomScenarioMetadata?
     let applyCacheMutation: @Sendable (TydomCacheMutation) async -> Void
+    let log: @Sendable (String) -> Void
 
     init(
         deviceInfo: @escaping @Sendable (String) async -> TydomDeviceInfo?,
         scenarioMetadata: @escaping @Sendable (Int) async -> TydomScenarioMetadata?,
-        applyCacheMutation: @escaping @Sendable (TydomCacheMutation) async -> Void
+        applyCacheMutation: @escaping @Sendable (TydomCacheMutation) async -> Void,
+        log: @escaping @Sendable (String) -> Void = { _ in }
     ) {
         self.deviceInfo = deviceInfo
         self.scenarioMetadata = scenarioMetadata
         self.applyCacheMutation = applyCacheMutation
-    }
-}
-
-extension TydomMessageHydratorDependencies {
-    static func live(
-        _ cache: TydomDeviceCacheStore = TydomDeviceCacheStore(),
-        scenarioStore: TydomScenarioMetadataStore = TydomScenarioMetadataStore()
-    ) -> TydomMessageHydratorDependencies {
-        TydomMessageHydratorDependencies(
-            deviceInfo: { uniqueId in
-                await cache.deviceInfo(for: uniqueId)
-            },
-            scenarioMetadata: { scenarioId in
-                await scenarioStore.metadata(for: scenarioId)
-            },
-            applyCacheMutation: { mutation in
-                switch mutation {
-                case .deviceEntry(let entry):
-                    await cache.upsert(entry)
-                case .scenarioMetadata(let metadata):
-                    await scenarioStore.upsert(metadata)
-                }
-            }
-        )
+        self.log = log
     }
 }
 
@@ -157,7 +136,7 @@ struct TydomMessageHydrator: Sendable {
                 metadata: info.metadata ?? update.metadata
             ))
         }
-        DeltaDoreDebugLog.log(
+        dependencies.log(
             "Hydrate device updates total=\(updates.count) devices=\(devices.count) missingInfo=\(missingInfo) skippedCData=\(skippedCData) emptyData=\(emptyData) missingInfoSample=\(missingInfoSamples)"
         )
         return (devices, effects)
@@ -184,14 +163,6 @@ struct TydomMessageHydrator: Sendable {
     }
 }
 
-extension TydomMessageHydrator {
-    static func live(
-        cache: TydomDeviceCacheStore = TydomDeviceCacheStore(),
-        scenarioStore: TydomScenarioMetadataStore = TydomScenarioMetadataStore()
-    ) -> TydomMessageHydrator {
-        TydomMessageHydrator(dependencies: .live(cache, scenarioStore: scenarioStore))
-    }
-}
 
 struct TydomHydratedEnvelope: Sendable, Equatable {
     let message: TydomMessage
