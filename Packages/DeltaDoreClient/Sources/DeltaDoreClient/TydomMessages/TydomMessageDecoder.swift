@@ -65,8 +65,15 @@ enum TydomMessageDecoder {
 
         if isDevicesData(uriOrigin) {
             if let updates = decodeDevicesData(body) {
+                let withData = updates.filter { $0.data.isEmpty == false }.count
+                DeltaDoreDebugLog.log(
+                    "Decode devices data updates=\(updates.count) withData=\(withData)"
+                )
                 return TydomDecodedEnvelope(raw: raw, payload: .deviceUpdates(updates))
             }
+            DeltaDoreDebugLog.log(
+                "Decode devices data failed bytes=\(body.count)"
+            )
             return TydomDecodedEnvelope(raw: raw, payload: .none)
         }
 

@@ -107,8 +107,18 @@ struct TydomMessageHydrator: Sendable {
     ) async -> (devices: [TydomDevice], effects: [TydomMessageEffect]) {
         var devices: [TydomDevice] = []
         var effects: [TydomMessageEffect] = []
+        var missingInfo = 0
+        var skippedCData = 0
+        var emptyData = 0
+        var missingInfoSamples: [String] = []
         for update in updates {
-            guard let info = await dependencies.deviceInfo(update.uniqueId) else { continue }
+            guard let info = await dependencies.deviceInfo(update.uniqueId) else {
+                missingInfo += 1
+                if missingInfoSamples.count < 5 {
+                    missingInfoSamples.append(update.uniqueId)
+                }
+                continue
+            }
             if update.source == .cdata {
                 if info.usage == "alarm" {
                     if let transactionId, let entries = update.cdataEntries, entries.isEmpty == false {
@@ -121,14 +131,20 @@ struct TydomMessageHydrator: Sendable {
                             done: done
                         )))
                     }
+                    skippedCData += 1
                     continue
                 }
                 if info.usage != "conso" {
+                    skippedCData += 1
                     continue
                 }
                 if update.data.isEmpty {
+                    emptyData += 1
                     continue
                 }
+            }
+            if update.data.isEmpty {
+                emptyData += 1
             }
             devices.append(TydomDevice(
                 id: update.id,
@@ -141,6 +157,9 @@ struct TydomMessageHydrator: Sendable {
                 metadata: info.metadata ?? update.metadata
             ))
         }
+        DeltaDoreDebugLog.log(
+            "Hydrate device updates total=\(updates.count) devices=\(devices.count) missingInfo=\(missingInfo) skippedCData=\(skippedCData) emptyData=\(emptyData) missingInfoSample=\(missingInfoSamples)"
+        )
         return (devices, effects)
     }
 
