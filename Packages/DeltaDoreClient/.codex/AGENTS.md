@@ -10,7 +10,7 @@ Agents working with this repo (AI assistants, automation tools, or new team memb
 - Testability via injecting functions and capabilities
 - Our Git workflow (linear history, feature branches, fast-forward merges)
 
-> This high-level overview provides context. Read the doc and find detailed procedural steps and examples through dedicated **Agent Skills** in `skills/`.
+> This high-level overview provides context. Read the doc and find detailed procedural steps and examples through dedicated **Agent Skills**.
 
 ---
 
@@ -95,14 +95,3 @@ If this is a full Xcode project, we can use the XCodeBuildMCP server.
 ## Swift documentation
 
 When needed use the Cupertino MCP server to access the officiel Swift documentation and Apple coding guides.
-
---
-
-## Docs index
-
-Add new documentation references here going forward.
-
-- `docs/sqlite-persistence.md` — SQLite persistence overview, usage, and extension notes
-- `docs/tydom-connection.md` — TydomConnection execution plan, behavior, and usage
-- `docs/tydom-commands.md` — TydomCommand mechanism, legacy factory list, and usage
-- `docs/tydom-decoding.md` — Message decoding pipeline, cache dependencies, and usage
