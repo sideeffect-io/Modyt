@@ -86,7 +86,7 @@ struct DeviceRow: View {
     let onControlChange: (String, JSONValue) -> Void
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(alignment: .top, spacing: 14) {
             Image(systemName: device.group.symbolName)
                 .font(.system(size: 20, weight: .semibold))
                 .frame(width: 36, height: 36)
@@ -100,20 +100,20 @@ struct DeviceRow: View {
                     .foregroundStyle(.secondary)
             }
 
-            Spacer()
+            Spacer(minLength: 12)
 
-            Button(action: onToggleFavorite) {
-                Image(systemName: device.isFavorite ? "star.fill" : "star")
-                    .foregroundStyle(device.isFavorite ? .yellow : .secondary)
+            VStack(alignment: .trailing, spacing: 8) {
+                Button(action: onToggleFavorite) {
+                    Image(systemName: device.isFavorite ? "star.fill" : "star")
+                        .foregroundStyle(device.isFavorite ? .yellow : .secondary)
+                }
+                .buttonStyle(.plain)
+
+                DeviceControlView(descriptor: device.primaryControlDescriptor(), onChange: onControlChange)
             }
-            .buttonStyle(.plain)
         }
         .padding(12)
         .glassCard(cornerRadius: 18)
-        .overlay(alignment: .trailing) {
-            DeviceControlView(descriptor: device.primaryControlDescriptor(), onChange: onControlChange)
-                .padding(.trailing, 12)
-        }
     }
 }
 
