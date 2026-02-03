@@ -5,16 +5,16 @@ public struct TydomConnectionOrchestrator: Sendable {
         public let loadCredentials: @Sendable () async -> TydomGatewayCredentials?
         public let saveCredentials: @Sendable (_ credentials: TydomGatewayCredentials) async -> Void
         public let discoverLocal: @Sendable () async -> [TydomLocalGateway]
-        public let connectLocal: @Sendable (_ host: String) async -> Bool
-        public let connectRemote: @Sendable () async -> Bool
+        public let connectLocal: @Sendable (_ host: String) async -> TydomConnection?
+        public let connectRemote: @Sendable () async -> TydomConnection?
         public let emitDecision: @Sendable (_ decision: TydomConnectionState.Decision) async -> Void
 
         public init(
             loadCredentials: @escaping @Sendable () async -> TydomGatewayCredentials?,
             saveCredentials: @escaping @Sendable (_ credentials: TydomGatewayCredentials) async -> Void,
             discoverLocal: @escaping @Sendable () async -> [TydomLocalGateway],
-            connectLocal: @escaping @Sendable (_ host: String) async -> Bool,
-            connectRemote: @escaping @Sendable () async -> Bool,
+            connectLocal: @escaping @Sendable (_ host: String) async -> TydomConnection?,
+            connectRemote: @escaping @Sendable () async -> TydomConnection?,
             emitDecision: @escaping @Sendable (_ decision: TydomConnectionState.Decision) async -> Void
         ) {
             self.loadCredentials = loadCredentials
@@ -55,9 +55,9 @@ public struct TydomConnectionOrchestrator: Sendable {
                 await dependencies.saveCredentials(credentials)
                 await handle(event: .credentialsSaved(credentials), state: &state)
             case .tryCachedIP(let host):
-                let success = await dependencies.connectLocal(host)
-                if success {
-                    await handle(event: .localConnectResult(success: true, host: host), state: &state)
+                let connection = await dependencies.connectLocal(host)
+                if let connection {
+                    await handle(event: .localConnectResult(success: true, host: host, connection: connection), state: &state)
                 } else {
                     await handle(event: .cachedIPFailed, state: &state)
                 }
@@ -65,11 +65,13 @@ public struct TydomConnectionOrchestrator: Sendable {
                 let candidates = await dependencies.discoverLocal()
                 await handle(event: .localDiscoveryFound(candidates), state: &state)
             case .connectLocal(let host):
-                let success = await dependencies.connectLocal(host)
-                await handle(event: .localConnectResult(success: success, host: host), state: &state)
+                let connection = await dependencies.connectLocal(host)
+                let success = connection != nil
+                await handle(event: .localConnectResult(success: success, host: host, connection: connection), state: &state)
             case .connectRemote:
-                let success = await dependencies.connectRemote()
-                await handle(event: .remoteConnectResult(success: success), state: &state)
+                let connection = await dependencies.connectRemote()
+                let success = connection != nil
+                await handle(event: .remoteConnectResult(success: success, connection: connection), state: &state)
             case .emitDecision(let decision):
                 await dependencies.emitDecision(decision)
             }

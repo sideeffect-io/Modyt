@@ -51,7 +51,7 @@ import Testing
     // When
     let (next, actions) = TydomConnectionStateMachine.reduce(
         state: state,
-        event: .localConnectResult(success: false, host: nil)
+        event: .localConnectResult(success: false, host: nil, connection: nil)
     )
 
     // Then

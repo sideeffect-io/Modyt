@@ -18,6 +18,9 @@ public extension DeltaDoreClient.Dependencies {
         let resolver = TydomConnectionResolver(environment: environment)
 
         let buildSession: @Sendable (TydomConnectionResolver.Resolution) async throws -> DeltaDoreClient.ConnectionSession = { resolution in
+            if let connection = resolution.connection {
+                return DeltaDoreClient.ConnectionSession(connection: connection)
+            }
             let connection = TydomConnection(
                 configuration: resolution.configuration,
                 onDisconnect: resolution.onDisconnect

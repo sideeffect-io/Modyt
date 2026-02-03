@@ -44,7 +44,9 @@ import Testing
             await fetchPasswordCalls.increment()
             return "secret"
         },
-        probeConnection: { _ in true },
+        connect: { configuration, onDisconnect in
+            TydomConnection(configuration: configuration, onDisconnect: onDisconnect)
+        },
         log: { _ in }
     )
     let resolver = TydomConnectionResolver(environment: environment)
@@ -83,7 +85,7 @@ import Testing
         fetchSites: { _, _ in [] },
         fetchSitesPayload: { _, _ in Data() },
         fetchGatewayPassword: { _, _, _, _ in "secret" },
-        probeConnection: { _ in false },
+        connect: { _, _ in nil },
         log: { _ in }
     )
     let resolver = TydomConnectionResolver(environment: environment)
@@ -148,7 +150,9 @@ import Testing
             await fetchPasswordCalls.increment()
             return "secret"
         },
-        probeConnection: { _ in true },
+        connect: { configuration, onDisconnect in
+            TydomConnection(configuration: configuration, onDisconnect: onDisconnect)
+        },
         log: { _ in }
     )
     let resolver = TydomConnectionResolver(environment: environment)
