@@ -44,6 +44,7 @@ public struct TydomConnectionState: Sendable, Equatable {
     public let lastDecision: Decision?
     public let lastError: String?
     public let pendingLocalCandidates: [TydomLocalGateway]
+    public let connectedConnection: TydomConnection?
 
     public init(
         phase: Phase = .idle,
@@ -52,7 +53,8 @@ public struct TydomConnectionState: Sendable, Equatable {
         selectedGatewayMac: String? = nil,
         lastDecision: Decision? = nil,
         lastError: String? = nil,
-        pendingLocalCandidates: [TydomLocalGateway] = []
+        pendingLocalCandidates: [TydomLocalGateway] = [],
+        connectedConnection: TydomConnection? = nil
     ) {
         self.phase = phase
         self.override = override
@@ -61,6 +63,17 @@ public struct TydomConnectionState: Sendable, Equatable {
         self.lastDecision = lastDecision
         self.lastError = lastError
         self.pendingLocalCandidates = pendingLocalCandidates
+        self.connectedConnection = connectedConnection
+    }
+
+    public static func == (lhs: TydomConnectionState, rhs: TydomConnectionState) -> Bool {
+        lhs.phase == rhs.phase &&
+        lhs.override == rhs.override &&
+        lhs.credentials == rhs.credentials &&
+        lhs.selectedGatewayMac == rhs.selectedGatewayMac &&
+        lhs.lastDecision == rhs.lastDecision &&
+        lhs.lastError == rhs.lastError &&
+        lhs.pendingLocalCandidates == rhs.pendingLocalCandidates
     }
 }
 
@@ -73,9 +86,37 @@ public enum TydomConnectionEvent: Sendable, Equatable {
     case credentialsSaved(TydomGatewayCredentials)
     case cachedIPFailed
     case localDiscoveryFound([TydomLocalGateway])
-    case localConnectResult(success: Bool, host: String?)
-    case remoteConnectResult(success: Bool)
+    case localConnectResult(success: Bool, host: String?, connection: TydomConnection?)
+    case remoteConnectResult(success: Bool, connection: TydomConnection?)
     case failure(String)
+
+    public static func == (lhs: TydomConnectionEvent, rhs: TydomConnectionEvent) -> Bool {
+        switch (lhs, rhs) {
+        case (.start, .start),
+             (.overrideLocal, .overrideLocal),
+             (.overrideRemote, .overrideRemote),
+             (.clearOverride, .clearOverride):
+            return true
+        case (.credentialsLoaded(let a), .credentialsLoaded(let b)):
+            return a == b
+        case (.credentialsSaved(let a), .credentialsSaved(let b)):
+            return a == b
+        case (.cachedIPFailed, .cachedIPFailed):
+            return true
+        case (.localDiscoveryFound(let a), .localDiscoveryFound(let b)):
+            return a == b
+        case (.localConnectResult(let successA, let hostA, _),
+              .localConnectResult(let successB, let hostB, _)):
+            return successA == successB && hostA == hostB
+        case (.remoteConnectResult(let successA, _),
+              .remoteConnectResult(let successB, _)):
+            return successA == successB
+        case (.failure(let a), .failure(let b)):
+            return a == b
+        default:
+            return false
+        }
+    }
 }
 
 public enum TydomConnectionAction: Sendable, Equatable {
@@ -103,7 +144,8 @@ public struct TydomConnectionStateMachine {
                     selectedGatewayMac: state.selectedGatewayMac,
                     lastDecision: state.lastDecision,
                     lastError: nil,
-                    pendingLocalCandidates: []
+                    pendingLocalCandidates: [],
+                    connectedConnection: state.connectedConnection
                 ),
                 [.loadCredentials]
             )
@@ -116,7 +158,8 @@ public struct TydomConnectionStateMachine {
                 selectedGatewayMac: state.selectedGatewayMac,
                 lastDecision: state.lastDecision,
                 lastError: nil,
-                pendingLocalCandidates: state.pendingLocalCandidates
+                pendingLocalCandidates: state.pendingLocalCandidates,
+                connectedConnection: state.connectedConnection
             )
             return (next, [])
 
@@ -128,7 +171,8 @@ public struct TydomConnectionStateMachine {
                 selectedGatewayMac: state.selectedGatewayMac,
                 lastDecision: state.lastDecision,
                 lastError: nil,
-                pendingLocalCandidates: state.pendingLocalCandidates
+                pendingLocalCandidates: state.pendingLocalCandidates,
+                connectedConnection: state.connectedConnection
             )
             return (next, [.connectRemote])
 
@@ -140,7 +184,8 @@ public struct TydomConnectionStateMachine {
                 selectedGatewayMac: state.selectedGatewayMac,
                 lastDecision: state.lastDecision,
                 lastError: nil,
-                pendingLocalCandidates: state.pendingLocalCandidates
+                pendingLocalCandidates: state.pendingLocalCandidates,
+                connectedConnection: state.connectedConnection
             )
             return (next, [])
 
@@ -157,7 +202,8 @@ public struct TydomConnectionStateMachine {
                         credentials: nil,
                         selectedGatewayMac: state.selectedGatewayMac,
                         lastDecision: decision,
-                        lastError: "Missing gateway credentials"
+                        lastError: "Missing gateway credentials",
+                        connectedConnection: state.connectedConnection
                     ),
                     [.emitDecision(decision)]
                 )
@@ -175,7 +221,8 @@ public struct TydomConnectionStateMachine {
                         credentials: credentials,
                         selectedGatewayMac: credentials.mac,
                         lastDecision: decision,
-                        lastError: nil
+                        lastError: nil,
+                        connectedConnection: state.connectedConnection
                     ),
                     [.emitDecision(decision), .connectRemote]
                 )
@@ -194,7 +241,8 @@ public struct TydomConnectionStateMachine {
                             credentials: credentials,
                             selectedGatewayMac: credentials.mac,
                             lastDecision: decision,
-                            lastError: nil
+                            lastError: nil,
+                            connectedConnection: state.connectedConnection
                         ),
                         [.emitDecision(decision), .tryCachedIP(cached)]
                     )
@@ -206,7 +254,8 @@ public struct TydomConnectionStateMachine {
                         credentials: credentials,
                         selectedGatewayMac: credentials.mac,
                         lastDecision: decision,
-                        lastError: nil
+                        lastError: nil,
+                        connectedConnection: state.connectedConnection
                     ),
                     [.emitDecision(decision), .discoverLocal]
                 )
@@ -224,7 +273,8 @@ public struct TydomConnectionStateMachine {
                         credentials: credentials,
                         selectedGatewayMac: credentials.mac,
                         lastDecision: decision,
-                        lastError: nil
+                        lastError: nil,
+                        connectedConnection: state.connectedConnection
                     ),
                     [.emitDecision(decision), .tryCachedIP(cached)]
                 )
@@ -237,7 +287,8 @@ public struct TydomConnectionStateMachine {
                     credentials: credentials,
                     selectedGatewayMac: credentials.mac,
                     lastDecision: state.lastDecision,
-                    lastError: nil
+                    lastError: nil,
+                    connectedConnection: state.connectedConnection
                 ),
                 [.discoverLocal]
             )
@@ -255,7 +306,8 @@ public struct TydomConnectionStateMachine {
                         credentials: nil,
                         selectedGatewayMac: state.selectedGatewayMac,
                         lastDecision: decision,
-                        lastError: "Missing gateway credentials"
+                        lastError: "Missing gateway credentials",
+                        connectedConnection: state.connectedConnection
                     ),
                     [.emitDecision(decision)]
                 )
@@ -267,7 +319,8 @@ public struct TydomConnectionStateMachine {
                     credentials: credentials,
                     selectedGatewayMac: credentials.mac,
                     lastDecision: state.lastDecision,
-                    lastError: nil
+                    lastError: nil,
+                    connectedConnection: state.connectedConnection
                 ),
                 [.discoverLocal]
             )
@@ -286,7 +339,8 @@ public struct TydomConnectionStateMachine {
                         selectedGatewayMac: state.selectedGatewayMac,
                         lastDecision: decision,
                         lastError: "Missing gateway credentials",
-                        pendingLocalCandidates: []
+                        pendingLocalCandidates: [],
+                        connectedConnection: state.connectedConnection
                     ),
                     [.emitDecision(decision)]
                 )
@@ -305,7 +359,8 @@ public struct TydomConnectionStateMachine {
                         selectedGatewayMac: credentials.mac,
                         lastDecision: decision,
                         lastError: nil,
-                        pendingLocalCandidates: []
+                        pendingLocalCandidates: [],
+                        connectedConnection: state.connectedConnection
                     ),
                     [.emitDecision(decision), .connectRemote]
                 )
@@ -324,12 +379,13 @@ public struct TydomConnectionStateMachine {
                     selectedGatewayMac: credentials.mac,
                     lastDecision: decision,
                     lastError: nil,
-                    pendingLocalCandidates: remaining
+                    pendingLocalCandidates: remaining,
+                    connectedConnection: state.connectedConnection
                 ),
                 [.emitDecision(decision), .connectLocal(first.host)]
             )
 
-        case .localConnectResult(let success, let host):
+        case .localConnectResult(let success, let host, let connection):
             if success, let host {
                 guard let credentials = state.credentials else {
                     return (
@@ -340,7 +396,8 @@ public struct TydomConnectionStateMachine {
                             selectedGatewayMac: state.selectedGatewayMac,
                             lastDecision: state.lastDecision,
                             lastError: nil,
-                            pendingLocalCandidates: []
+                            pendingLocalCandidates: [],
+                            connectedConnection: connection ?? state.connectedConnection
                         ),
                         []
                     )
@@ -359,7 +416,8 @@ public struct TydomConnectionStateMachine {
                         selectedGatewayMac: credentials.mac,
                         lastDecision: state.lastDecision,
                         lastError: nil,
-                        pendingLocalCandidates: []
+                        pendingLocalCandidates: [],
+                        connectedConnection: connection ?? state.connectedConnection
                     ),
                     [.saveCredentials(updated)]
                 )
@@ -379,7 +437,8 @@ public struct TydomConnectionStateMachine {
                         selectedGatewayMac: credentials.mac,
                         lastDecision: decision,
                         lastError: nil,
-                        pendingLocalCandidates: remaining
+                        pendingLocalCandidates: remaining,
+                        connectedConnection: state.connectedConnection
                     ),
                     [.emitDecision(decision), .connectLocal(next.host)]
                 )
@@ -397,12 +456,13 @@ public struct TydomConnectionStateMachine {
                     selectedGatewayMac: state.selectedGatewayMac,
                     lastDecision: decision,
                     lastError: nil,
-                    pendingLocalCandidates: []
+                    pendingLocalCandidates: [],
+                    connectedConnection: state.connectedConnection
                 ),
                 [.emitDecision(decision), .connectRemote]
             )
 
-        case .remoteConnectResult(let success):
+        case .remoteConnectResult(let success, let connection):
             if success {
                 return (
                     TydomConnectionState(
@@ -411,7 +471,8 @@ public struct TydomConnectionStateMachine {
                         credentials: state.credentials,
                         selectedGatewayMac: state.selectedGatewayMac,
                         lastDecision: state.lastDecision,
-                        lastError: nil
+                        lastError: nil,
+                        connectedConnection: connection ?? state.connectedConnection
                     ),
                     []
                 )
@@ -427,7 +488,8 @@ public struct TydomConnectionStateMachine {
                     credentials: state.credentials,
                     selectedGatewayMac: state.selectedGatewayMac,
                     lastDecision: decision,
-                    lastError: "Remote connection failed"
+                    lastError: "Remote connection failed",
+                    connectedConnection: state.connectedConnection
                 ),
                 [.emitDecision(decision)]
             )
@@ -440,7 +502,8 @@ public struct TydomConnectionStateMachine {
                     credentials: credentials,
                     selectedGatewayMac: credentials.mac,
                     lastDecision: state.lastDecision,
-                    lastError: nil
+                    lastError: nil,
+                    connectedConnection: state.connectedConnection
                 ),
                 []
             )
@@ -453,7 +516,8 @@ public struct TydomConnectionStateMachine {
                     credentials: state.credentials,
                     selectedGatewayMac: state.selectedGatewayMac,
                     lastDecision: state.lastDecision,
-                    lastError: message
+                    lastError: message,
+                    connectedConnection: state.connectedConnection
                 ),
                 []
             )

@@ -14,7 +14,7 @@ struct TydomConnectionResolver: Sendable {
         var fetchSites: @Sendable (_ credentials: TydomConnection.CloudCredentials, _ session: URLSession) async throws -> [TydomCloudSitesProvider.Site]
         var fetchSitesPayload: @Sendable (_ credentials: TydomConnection.CloudCredentials, _ session: URLSession) async throws -> Data
         var fetchGatewayPassword: @Sendable (_ email: String, _ password: String, _ mac: String, _ session: URLSession) async throws -> String
-        var probeConnection: @Sendable (_ configuration: TydomConnection.Configuration) async -> Bool
+        var connect: @Sendable (_ configuration: TydomConnection.Configuration, _ onDisconnect: @escaping @Sendable () async -> Void) async -> TydomConnection?
         var log: @Sendable (String) -> Void
 
         init(
@@ -28,7 +28,7 @@ struct TydomConnectionResolver: Sendable {
             fetchSites: @escaping @Sendable (_ credentials: TydomConnection.CloudCredentials, _ session: URLSession) async throws -> [TydomCloudSitesProvider.Site],
             fetchSitesPayload: @escaping @Sendable (_ credentials: TydomConnection.CloudCredentials, _ session: URLSession) async throws -> Data,
             fetchGatewayPassword: @escaping @Sendable (_ email: String, _ password: String, _ mac: String, _ session: URLSession) async throws -> String,
-            probeConnection: @escaping @Sendable (_ configuration: TydomConnection.Configuration) async -> Bool,
+            connect: @escaping @Sendable (_ configuration: TydomConnection.Configuration, _ onDisconnect: @escaping @Sendable () async -> Void) async -> TydomConnection?,
             log: @escaping @Sendable (String) -> Void
         ) {
             self.credentialStore = credentialStore
@@ -41,7 +41,7 @@ struct TydomConnectionResolver: Sendable {
             self.fetchSites = fetchSites
             self.fetchSitesPayload = fetchSitesPayload
             self.fetchGatewayPassword = fetchGatewayPassword
-            self.probeConnection = probeConnection
+            self.connect = connect
             self.log = log
         }
     }
@@ -99,6 +99,7 @@ struct TydomConnectionResolver: Sendable {
         let credentials: TydomGatewayCredentials
         let decision: TydomConnectionState.Decision?
         let onDisconnect: (@Sendable () async -> Void)?
+        let connection: TydomConnection?
     }
 
     enum ResolverError: Error, Sendable {
@@ -166,9 +167,11 @@ struct TydomConnectionResolver: Sendable {
         )
 
         let cache = CredentialsCache(initial: credentials)
+        let onDisconnect = makeOnDisconnect()
         let dependencies = makeOrchestratorDependencies(
             options: options,
-            cache: cache
+            cache: cache,
+            onDisconnect: onDisconnect
         )
         var state = TydomConnectionState(
             override: overrideMode(for: options.mode)
@@ -198,12 +201,12 @@ struct TydomConnectionResolver: Sendable {
             throw ResolverError.invalidConfiguration
         }
 
-        let onDisconnect = makeOnDisconnect()
         return Resolution(
             configuration: configuration,
             credentials: latestCredentials,
             decision: decision,
-            onDisconnect: onDisconnect
+            onDisconnect: onDisconnect,
+            connection: state.connectedConnection
         )
     }
 
@@ -339,7 +342,8 @@ struct TydomConnectionResolver: Sendable {
 
     private func makeOrchestratorDependencies(
         options: Options,
-        cache: CredentialsCache
+        cache: CredentialsCache,
+        onDisconnect: @escaping @Sendable () async -> Void
     ) -> TydomConnectionOrchestrator.Dependencies {
         let discovery = environment.discovery
         let allowInsecureTLS = options.allowInsecureTLS
@@ -347,8 +351,9 @@ struct TydomConnectionResolver: Sendable {
         let localHostOverride = options.localHostOverride
         let remoteHost = environment.remoteHost
 
-        let connect: @Sendable (String, TydomGatewayCredentials?, TydomConnection.Configuration.Mode) async -> Bool = { host, credentials, mode in
-            guard let credentials else { return false }
+        let connect: @Sendable (String, TydomGatewayCredentials?, TydomConnection.Configuration.Mode) async -> TydomConnection? = { host, credentials, mode in
+            guard let credentials else { return nil }
+            let disconnectGate = ConnectionDisconnectGate()
             let config = TydomConnection.Configuration(
                 mode: mode,
                 mac: credentials.mac,
@@ -356,9 +361,20 @@ struct TydomConnectionResolver: Sendable {
                 cloudCredentials: nil,
                 allowInsecureTLS: allowInsecureTLS,
                 timeout: timeout,
-                polling: TydomConnection.Configuration.Polling(intervalSeconds: 0, onlyWhenActive: false)
+                polling: options.polling
             )
-            return await self.environment.probeConnection(config)
+            let connection = await self.environment.connect(
+                config,
+                {
+                    if await disconnectGate.shouldClearPersistedData() {
+                        await onDisconnect()
+                    }
+                }
+            )
+            if connection != nil {
+                await disconnectGate.markConnected()
+            }
+            return connection
         }
 
         return TydomConnectionOrchestrator.Dependencies(
@@ -480,4 +496,16 @@ private actor CredentialsCache {
 
     func get() -> TydomGatewayCredentials? { cached }
     func set(_ value: TydomGatewayCredentials?) { cached = value }
+}
+
+private actor ConnectionDisconnectGate {
+    private var connected = false
+
+    func markConnected() {
+        connected = true
+    }
+
+    func shouldClearPersistedData() -> Bool {
+        connected
+    }
 }

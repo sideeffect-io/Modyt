@@ -39,53 +39,26 @@ extension TydomConnectionResolver.Environment {
                     session: session
                 )
             },
-            probeConnection: { configuration in
+            connect: { configuration, onDisconnect in
                 log(
-                    "Probe connection start host=\(configuration.host) mode=\(configuration.mode) mac=\(TydomMac.normalize(configuration.mac)) timeout=\(configuration.timeout)s"
+                    "Connect start host=\(configuration.host) mode=\(configuration.mode) mac=\(TydomMac.normalize(configuration.mac)) timeout=\(configuration.timeout)s"
                 )
                 let connection = TydomConnection(
                     configuration: configuration,
-                    log: log
+                    log: log,
+                    onDisconnect: onDisconnect
                 )
                 do {
-                    try await connection.connect(startReceiving: false)
-                    let verified = await verifyGateway(
-                        connection: connection,
-                        timeout: configuration.timeout,
-                        log: log
-                    )
-                    if verified == false {
-                        await connection.disconnect()
-                    }
-                    log(
-                        "Probe connection result host=\(configuration.host) verified=\(verified)"
-                    )
-                    return verified
+                    try await connection.connect()
+                    log("Connect success host=\(configuration.host)")
+                    return connection
                 } catch {
                     await connection.disconnect()
-                    log(
-                        "Probe connection error host=\(configuration.host) error=\(error)"
-                    )
-                    return false
+                    log("Connect error host=\(configuration.host) error=\(error)")
+                    return nil
                 }
             },
             log: log
         )
-    }
-}
-
-private func verifyGateway(
-    connection: TydomConnection,
-    timeout: TimeInterval,
-    log: @escaping @Sendable (String) -> Void
-) async -> Bool {
-    do {
-        return try await connection.pingAndWaitForResponse(
-            timeout: timeout,
-            closeAfterSuccess: true
-        )
-    } catch {
-        log("Verify gateway ping failed error=\(error)")
-        return false
     }
 }
