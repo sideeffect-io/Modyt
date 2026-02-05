@@ -6,10 +6,8 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            if store.state.phase != .connected {
-                AppBackgroundView()
-                    .ignoresSafeArea()
-            }
+            AppBackgroundView()
+                .ignoresSafeArea()
             content
         }
         .task {

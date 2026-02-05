@@ -11,7 +11,6 @@ struct DashboardView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
-                summaryCard
                 favoritesSection
             }
             .padding(.horizontal, 20)
@@ -21,49 +20,6 @@ struct DashboardView: View {
         .refreshable {
             store.send(.refreshRequested)
         }
-    }
-
-    private var summaryCard: some View {
-        let total = store.state.devices.count
-        let favoriteCount = store.state.favorites.count
-        let groupCount = store.state.groupedDevices.count
-
-        return VStack(alignment: .leading, spacing: 16) {
-            Text("Home Overview")
-                .font(.system(.title2, design: .rounded).weight(.semibold))
-
-            HStack(spacing: 16) {
-                summaryPill(title: "Devices", value: "\(total)")
-                summaryPill(title: "Favorites", value: "\(favoriteCount)")
-                summaryPill(title: "Types", value: "\(groupCount)")
-            }
-
-            Button {
-                store.send(.refreshRequested)
-            } label: {
-                HStack {
-                    Image(systemName: "arrow.clockwise")
-                    Text("Refresh All")
-                }
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-        }
-        .padding(20)
-        .glassCard(cornerRadius: 26)
-    }
-
-    private func summaryPill(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.system(.caption, design: .rounded))
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.system(.title3, design: .rounded).weight(.semibold))
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .glassCard(cornerRadius: 16, interactive: false)
     }
 
     @ViewBuilder
