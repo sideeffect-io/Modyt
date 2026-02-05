@@ -2,15 +2,68 @@ import Foundation
 import Observation
 import DeltaDoreClient
 
+enum ShutterStep: Int, CaseIterable, Identifiable, Sendable {
+    case open = 100
+    case threeQuarter = 75
+    case half = 50
+    case quarter = 25
+    case closed = 0
+
+    var id: Int { rawValue }
+
+    var accessibilityLabel: String {
+        switch self {
+        case .open: return "Open"
+        case .threeQuarter: return "Three quarters open"
+        case .half: return "Half open"
+        case .quarter: return "Quarter open"
+        case .closed: return "Closed"
+        }
+    }
+
+    func mappedValue(in range: ClosedRange<Double>) -> Double {
+        guard range.upperBound > range.lowerBound else { return range.lowerBound }
+        let normalized = Double(rawValue) / 100
+        return range.lowerBound + (range.upperBound - range.lowerBound) * normalized
+    }
+
+    static func nearestStep(for value: Double, in range: ClosedRange<Double>) -> ShutterStep {
+        guard range.upperBound > range.lowerBound else { return .closed }
+        let normalized = ((value - range.lowerBound) / (range.upperBound - range.lowerBound)) * 100
+        let clamped = min(max(normalized, 0), 100)
+        let snapped = (clamped / 25).rounded() * 25
+        let intValue = Int(snapped)
+        switch intValue {
+        case 100: return .open
+        case 75: return .threeQuarter
+        case 50: return .half
+        case 25: return .quarter
+        default: return .closed
+        }
+    }
+}
+
 struct AppState: Sendable, Equatable {
     var phase: Phase
     var devices: [DeviceRecord]
+    var groupedDevices: [DeviceGroupSection]
+    var favorites: [DeviceRecord]
     var isAppActive: Bool
+    var shutterTargets: [String: ShutterStep]
+    var shutterActualSteps: [String: ShutterStep]
+    var shutterTargetOrigins: [String: ShutterStep]
+    var shutterTargetIgnoredEcho: [String: Bool]
 
     static let initial = AppState(
         phase: .bootstrapping,
         devices: [],
-        isAppActive: true
+        groupedDevices: [],
+        favorites: [],
+        isAppActive: true,
+        shutterTargets: [:],
+        shutterActualSteps: [:],
+        shutterTargetOrigins: [:],
+        shutterTargetIgnoredEcho: [:]
     )
 
     enum Phase: Sendable, Equatable {
@@ -20,6 +73,13 @@ struct AppState: Sendable, Equatable {
         case connected
         case error(String)
     }
+}
+
+struct DeviceGroupSection: Sendable, Equatable, Identifiable {
+    let group: DeviceGroup
+    let devices: [DeviceRecord]
+
+    var id: DeviceGroup { group }
 }
 
 struct LoginState: Sendable, Equatable {
@@ -39,6 +99,84 @@ struct LoginState: Sendable, Equatable {
     var canConnect: Bool {
         selectedSiteIndex != nil && !isConnecting
     }
+}
+
+extension AppState {
+    func shutterTargetStep(for device: DeviceRecord) -> ShutterStep? {
+        shutterTargets[device.uniqueId]
+    }
+
+    func shutterActualStep(for device: DeviceRecord) -> ShutterStep? {
+        shutterActualSteps[device.uniqueId]
+    }
+}
+
+private func deriveDeviceCollections(
+    from devices: [DeviceRecord]
+) -> (grouped: [DeviceGroupSection], favorites: [DeviceRecord]) {
+    let grouped = Dictionary(grouping: devices, by: { $0.group })
+    let groupedDevices = DeviceGroup.allCases.compactMap { group -> DeviceGroupSection? in
+        guard let devices = grouped[group] else { return nil }
+        let sorted = devices.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        return DeviceGroupSection(group: group, devices: sorted)
+    }
+    let favorites = devices
+        .filter { $0.isFavorite }
+        .sorted { ($0.dashboardOrder ?? Int.max) < ($1.dashboardOrder ?? Int.max) }
+    return (groupedDevices, favorites)
+}
+
+private func reduceShutterDisplayState(
+    devices: [DeviceRecord],
+    currentActual: [String: ShutterStep],
+    targets: [String: ShutterStep],
+    origins: [String: ShutterStep],
+    ignoredEcho: [String: Bool]
+) -> (
+    actual: [String: ShutterStep],
+    targets: [String: ShutterStep],
+    origins: [String: ShutterStep],
+    ignoredEcho: [String: Bool]
+) {
+    var nextActualSteps: [String: ShutterStep] = [:]
+    var nextTargets = targets
+    var nextOrigins = origins
+    var nextIgnoredEcho = ignoredEcho
+
+    for device in devices where device.group == .shutter {
+        guard let descriptor = device.primaryControlDescriptor(),
+              descriptor.kind == .slider else { continue }
+        let newStep = ShutterStep.nearestStep(for: descriptor.value, in: descriptor.range)
+        let uniqueId = device.uniqueId
+        let previousDisplayed = currentActual[uniqueId] ?? newStep
+        if let target = targets[uniqueId] {
+            let origin = origins[uniqueId] ?? previousDisplayed
+            let hasIgnoredEcho = ignoredEcho[uniqueId] ?? false
+
+            if newStep == target && !hasIgnoredEcho && previousDisplayed == origin {
+                nextActualSteps[uniqueId] = previousDisplayed
+                nextIgnoredEcho[uniqueId] = true
+            } else {
+                nextActualSteps[uniqueId] = newStep
+                if newStep == target {
+                    nextTargets.removeValue(forKey: uniqueId)
+                    nextOrigins.removeValue(forKey: uniqueId)
+                    nextIgnoredEcho.removeValue(forKey: uniqueId)
+                }
+            }
+        } else {
+            nextActualSteps[uniqueId] = newStep
+            nextOrigins.removeValue(forKey: uniqueId)
+            nextIgnoredEcho.removeValue(forKey: uniqueId)
+        }
+    }
+
+    return (
+        actual: nextActualSteps,
+        targets: nextTargets,
+        origins: nextOrigins,
+        ignoredEcho: nextIgnoredEcho
+    )
 }
 
 enum AppAction: Sendable {
@@ -166,6 +304,20 @@ enum AppReducer {
 
         case .devicesUpdated(let devices):
             state.devices = devices
+            let derived = deriveDeviceCollections(from: devices)
+            state.groupedDevices = derived.grouped
+            state.favorites = derived.favorites
+            let shutterState = reduceShutterDisplayState(
+                devices: devices,
+                currentActual: state.shutterActualSteps,
+                targets: state.shutterTargets,
+                origins: state.shutterTargetOrigins,
+                ignoredEcho: state.shutterTargetIgnoredEcho
+            )
+            state.shutterActualSteps = shutterState.actual
+            state.shutterTargets = shutterState.targets
+            state.shutterTargetOrigins = shutterState.origins
+            state.shutterTargetIgnoredEcho = shutterState.ignoredEcho
 
         case .setAppActive(let isActive):
             state.isAppActive = isActive
@@ -181,13 +333,42 @@ enum AppReducer {
             effects = [.reorderFavorite(from: fromId, to: toId)]
 
         case .deviceControlChanged(let uniqueId, let key, let value):
-            effects = [
-                .applyOptimisticUpdate(uniqueId: uniqueId, key: key, value: value),
-                .sendDeviceCommand(uniqueId: uniqueId, key: key, value: value)
-            ]
+            let shutterDescriptor = state.devices.first(where: { $0.uniqueId == uniqueId })
+                .flatMap { device -> DeviceControlDescriptor? in
+                    guard device.group == .shutter else { return nil }
+                    guard let descriptor = device.primaryControlDescriptor(), descriptor.kind == .slider else { return nil }
+                    return descriptor.key == key ? descriptor : nil
+                }
+
+            if let shutterDescriptor,
+               let numberValue = value.numberValue {
+                let step = ShutterStep.nearestStep(for: numberValue, in: shutterDescriptor.range)
+                state.shutterTargets[uniqueId] = step
+                let origin = state.shutterActualSteps[uniqueId]
+                    ?? ShutterStep.nearestStep(for: shutterDescriptor.value, in: shutterDescriptor.range)
+                state.shutterTargetOrigins[uniqueId] = origin
+                state.shutterTargetIgnoredEcho[uniqueId] = false
+            }
+
+            if shutterDescriptor != nil {
+                effects = [
+                    .sendDeviceCommand(uniqueId: uniqueId, key: key, value: value)
+                ]
+            } else {
+                effects = [
+                    .applyOptimisticUpdate(uniqueId: uniqueId, key: key, value: value),
+                    .sendDeviceCommand(uniqueId: uniqueId, key: key, value: value)
+                ]
+            }
 
         case .disconnectTapped:
             state.devices = []
+            state.groupedDevices = []
+            state.favorites = []
+            state.shutterTargets = [:]
+            state.shutterActualSteps = [:]
+            state.shutterTargetOrigins = [:]
+            state.shutterTargetIgnoredEcho = [:]
             state.phase = .bootstrapping
             effects = [.disconnect]
 
@@ -387,6 +568,8 @@ final class AppStore {
     private func disconnect() async {
         messageTask?.cancel()
         messageTask = nil
+        deviceObserverTask?.cancel()
+        deviceObserverTask = nil
         await connection?.disconnect()
         connection = nil
     }

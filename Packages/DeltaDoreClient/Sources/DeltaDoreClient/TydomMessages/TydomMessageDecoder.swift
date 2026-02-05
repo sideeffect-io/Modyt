@@ -57,7 +57,7 @@ enum TydomMessageDecoder {
                     raw: raw,
                     payload: .none,
                     cacheMutations: result.mutations,
-                    effects: result.urls.isEmpty ? [] : [.schedulePoll(urls: result.urls, intervalSeconds: 60)]
+                    effects: result.urls.isEmpty ? [] : [.schedulePoll(urls: result.urls, intervalSeconds: 10)]
                 )
             }
             return TydomDecodedEnvelope(raw: raw, payload: .none)

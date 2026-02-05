@@ -65,6 +65,7 @@ public actor TydomConnection {
         let streamResult = AsyncStream<Data>.makeStream()
         self.messageStream = streamResult.stream
         self.messageContinuation = streamResult.continuation
+
     }
 
     deinit {
@@ -648,6 +649,7 @@ public actor TydomConnection {
         guard data.first == prefix else { return data }
         return Data(data.dropFirst())
     }
+
 
     nonisolated private func preview(_ data: Data, limit: Int = 120) -> String {
         let prefix = data.prefix(limit)

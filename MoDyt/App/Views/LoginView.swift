@@ -93,8 +93,7 @@ struct LoginView: View {
                     .font(.system(.footnote, design: .rounded))
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(loginState.sites.indices, id: \.self) { index in
-                    let site = loginState.sites[index]
+                ForEach(Array(loginState.sites.enumerated()), id: \.element.id) { index, site in
                     Button {
                         store.send(.siteSelected(index))
                     } label: {

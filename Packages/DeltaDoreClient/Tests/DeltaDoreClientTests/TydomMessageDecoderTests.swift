@@ -240,7 +240,7 @@ import Testing
     // Then
     #expect(envelope.effects.count == 1)
     if case .schedulePoll(let urls, let intervalSeconds) = envelope.effects[0] {
-        #expect(intervalSeconds == 60)
+        #expect(intervalSeconds == 10)
         #expect(urls.contains("/devices/1/endpoints/2/cdata?name=energyIndex&dest=ELEC&reset=false"))
         #expect(urls.contains("/devices/1/endpoints/2/cdata?name=energyIndex&dest=GAS&reset=false"))
         #expect(urls.contains("/devices/1/endpoints/2/cdata?name=energyInstant&unit=ELEC_A&reset=false"))

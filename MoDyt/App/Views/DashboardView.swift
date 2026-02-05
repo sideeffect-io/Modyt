@@ -5,9 +5,7 @@ struct DashboardView: View {
     @State private var draggedId: String?
 
     private var favorites: [DeviceRecord] {
-        store.state.devices
-            .filter { $0.isFavorite }
-            .sorted { ($0.dashboardOrder ?? Int.max) < ($1.dashboardOrder ?? Int.max) }
+        store.state.favorites
     }
 
     var body: some View {
@@ -27,9 +25,8 @@ struct DashboardView: View {
 
     private var summaryCard: some View {
         let total = store.state.devices.count
-        let favoriteCount = favorites.count
-        let groups = Dictionary(grouping: store.state.devices, by: { $0.group })
-        let groupCount = groups.keys.count
+        let favoriteCount = store.state.favorites.count
+        let groupCount = store.state.groupedDevices.count
 
         return VStack(alignment: .leading, spacing: 16) {
             Text("Home Overview")
@@ -101,8 +98,12 @@ struct DashboardView: View {
 
     private var favoritesGrid: some View {
         ForEach(favorites) { device in
+            let targetStep = store.state.shutterTargetStep(for: device)
+            let actualStep = store.state.shutterActualStep(for: device)
             DeviceTile(
                 device: device,
+                shutterTargetStep: targetStep,
+                shutterActualStep: actualStep,
                 onToggleFavorite: { store.send(.toggleFavorite(device.uniqueId)) },
                 onControlChange: { key, value in
                     store.send(.deviceControlChanged(uniqueId: device.uniqueId, key: key, value: value))

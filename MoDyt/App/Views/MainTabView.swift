@@ -7,22 +7,60 @@ struct MainTabView: View {
         TabView {
             Tab("Dashboard", systemImage: "square.grid.2x2") {
                 NavigationStack {
-                    DashboardView(store: store)
+                    TabBackgroundContainer {
+                        DashboardView(store: store)
+                            .toolbarBackground(.hidden, for: .navigationBar)
+                            .toolbarBackground(.hidden, for: .tabBar)
+                    }
                 }
+                .clearNavigationContainerBackground()
             }
 
             Tab("Devices", systemImage: "square.stack.3d.up") {
                 NavigationStack {
-                    DevicesView(store: store)
+                    TabBackgroundContainer {
+                        DevicesView(store: store)
+                            .toolbarBackground(.hidden, for: .navigationBar)
+                            .toolbarBackground(.hidden, for: .tabBar)
+                    }
                 }
+                .clearNavigationContainerBackground()
             }
 
             Tab("Settings", systemImage: "gearshape") {
                 NavigationStack {
-                    SettingsView(store: store)
-                        .navigationTitle("Settings")
+                    TabBackgroundContainer {
+                        SettingsView(store: store)
+                            .navigationTitle("Settings")
+                            .toolbarBackground(.hidden, for: .navigationBar)
+                            .toolbarBackground(.hidden, for: .tabBar)
+                    }
                 }
+                .clearNavigationContainerBackground()
             }
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func clearNavigationContainerBackground() -> some View {
+        if #available(iOS 17.0, *) {
+            containerBackground(.clear, for: .navigation)
+        } else {
+            self
+        }
+    }
+
+}
+
+private struct TabBackgroundContainer<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        ZStack {
+            AppBackgroundView()
+            content
         }
     }
 }
