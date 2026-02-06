@@ -103,3 +103,14 @@ If this is a full Xcode project, we can use the XCodeBuildMCP server.
 ## Swift documentation
 
 When needed use the Cupertino MCP server to access the officiel Swift documentation and Apple coding guides.
+
+---
+
+## Lessons Learned
+
+- Shutter UI: build with a dual-layer track (background + foreground) and invert values when the visual direction is reversed; keep mask/handle/progress indicator in the same coordinate space to avoid drift.
+- Devices list: keep a consistent row layout with SF Symbol icon treatment and spacing; support dark mode and subtle texture rather than flat white backgrounds.
+- DeltaDore discovery: use `/ping` then stop on first success; normalize MAC addresses; avoid Bonjour; close the connection after probing.
+- Connection resolution: keep a fast-path for an already-known working connection before running full discovery.
+- Logging: add message-pipeline logs that include the config file path and `devices-meta` details for supportability.
+- Tooling: use XcodeBuildMCP for full Xcode project builds/tests; reserve `swift build`/`swift test` for Swift packages.
