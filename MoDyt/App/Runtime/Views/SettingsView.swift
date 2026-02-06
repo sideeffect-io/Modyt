@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @Bindable var store: AppStore
+    @Bindable var store: RuntimeStore
 
     var body: some View {
         VStack(spacing: 20) {

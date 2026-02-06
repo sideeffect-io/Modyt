@@ -1,20 +1,34 @@
 import SwiftUI
 
 struct DashboardView: View {
-    @Bindable var store: AppStore
+    @Bindable var store: RuntimeStore
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var draggedId: String?
 
     private var favorites: [DeviceRecord] {
         store.state.favorites
     }
 
+    private var gridColumns: [GridItem] {
+        if horizontalSizeClass == .compact {
+            return [
+                GridItem(.flexible(minimum: 0), spacing: 18),
+                GridItem(.flexible(minimum: 0), spacing: 18)
+            ]
+        }
+        return [GridItem(.adaptive(minimum: 220), spacing: 18)]
+    }
+
     var body: some View {
         ScrollView {
-            VStack(spacing: 20) {
+            VStack(spacing: 22) {
                 favoritesSection
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, 18)
             .padding(.vertical, 24)
+        }
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: 74)
         }
         .navigationTitle("Dashboard")
         .refreshable {
@@ -36,17 +50,8 @@ struct DashboardView: View {
                 )
                 .padding(.vertical, 24)
             } else {
-                let columns = [GridItem(.adaptive(minimum: 170), spacing: 16)]
-                if #available(iOS 26.0, macOS 26.0, *) {
-                    GlassEffectContainer(spacing: 18) {
-                        LazyVGrid(columns: columns, spacing: 16) {
-                            favoritesGrid
-                        }
-                    }
-                } else {
-                    LazyVGrid(columns: columns, spacing: 16) {
-                        favoritesGrid
-                    }
+                LazyVGrid(columns: gridColumns, spacing: 18) {
+                    favoritesGrid
                 }
             }
         }
@@ -54,17 +59,15 @@ struct DashboardView: View {
 
     private var favoritesGrid: some View {
         ForEach(favorites) { device in
-            let targetStep = store.state.shutterTargetStep(for: device)
-            let actualStep = store.state.shutterActualStep(for: device)
             DeviceTile(
                 device: device,
-                shutterTargetStep: targetStep,
-                shutterActualStep: actualStep,
+                shutterRepository: store.shutterRepository,
                 onToggleFavorite: { store.send(.toggleFavorite(device.uniqueId)) },
                 onControlChange: { key, value in
                     store.send(.deviceControlChanged(uniqueId: device.uniqueId, key: key, value: value))
                 }
             )
+            .padding(1)
             .overlay {
                 if draggedId == device.uniqueId {
                     RoundedRectangle(cornerRadius: 22)

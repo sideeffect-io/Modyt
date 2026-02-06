@@ -2,7 +2,7 @@ import SwiftUI
 import DeltaDoreClient
 
 struct LoginView: View {
-    @Bindable var store: AppStore
+    @Bindable var store: AuthenticationStore
     let loginState: LoginState
 
     var body: some View {

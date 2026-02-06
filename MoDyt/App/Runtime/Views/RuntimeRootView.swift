@@ -1,7 +1,7 @@
 import SwiftUI
 
-struct MainTabView: View {
-    @Bindable var store: AppStore
+struct RuntimeRootView: View {
+    @Bindable var store: RuntimeStore
 
     var body: some View {
         TabView {

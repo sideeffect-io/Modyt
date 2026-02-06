@@ -1,21 +1,10 @@
 import SwiftUI
 
-struct RootView: View {
-    @Bindable var store: AppStore
-    @Environment(\.scenePhase) private var scenePhase
+struct AuthenticationRootView: View {
+    @Bindable var store: AuthenticationStore
 
     var body: some View {
-        ZStack {
-            AppBackgroundView()
-                .ignoresSafeArea()
-            content
-        }
-        .task {
-            store.send(.onAppear)
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            store.send(.setAppActive(newPhase == .active))
-        }
+        content
     }
 
     @ViewBuilder
@@ -27,11 +16,9 @@ struct RootView: View {
             LoginView(store: store, loginState: loginState)
         case .connecting:
             ConnectingView()
-        case .connected:
-            MainTabView(store: store)
         case .error(let message):
             ErrorView(message: message) {
-                store.send(.onAppear)
+                store.send(.retryTapped)
             }
         }
     }

@@ -4,6 +4,7 @@ import DeltaDoreClient
 struct AppEnvironment: Sendable {
     let client: DeltaDoreClient
     let repository: DeviceRepository
+    let shutterRepository: ShutterRepository
     let now: @Sendable () -> Date
     let log: @Sendable (String) -> Void
 
@@ -15,9 +16,15 @@ struct AppEnvironment: Sendable {
             #endif
         }
         let repository = DeviceRepository(databasePath: databaseURL.path, log: log)
+        let shutterRepository = ShutterRepository(
+            databasePath: databaseURL.path,
+            deviceRepository: repository,
+            log: log
+        )
         return AppEnvironment(
             client: .live(),
             repository: repository,
+            shutterRepository: shutterRepository,
             now: Date.init,
             log: log
         )
