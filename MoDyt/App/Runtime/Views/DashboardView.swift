@@ -9,6 +9,10 @@ struct DashboardView: View {
         store.state.favorites
     }
 
+    private var favoriteIDs: [String] {
+        favorites.map(\.uniqueId)
+    }
+
     private var gridColumns: [GridItem] {
         if horizontalSizeClass == .compact {
             return [
@@ -39,9 +43,6 @@ struct DashboardView: View {
     @ViewBuilder
     private var favoritesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Favorites")
-                .font(.system(.title3, design: .rounded).weight(.semibold))
-
             if favorites.isEmpty {
                 ContentUnavailableView(
                     "No Favorites Yet",
@@ -53,21 +54,35 @@ struct DashboardView: View {
                 LazyVGrid(columns: gridColumns, spacing: 18) {
                     favoritesGrid
                 }
+                .animation(.easeInOut(duration: 0.28), value: favoriteIDs)
             }
         }
     }
 
     private var favoritesGrid: some View {
         ForEach(favorites) { device in
-            DeviceTile(
-                device: device,
-                shutterRepository: store.shutterRepository,
-                onToggleFavorite: { store.send(.toggleFavorite(device.uniqueId)) },
-                onControlChange: { key, value in
-                    store.send(.deviceControlChanged(uniqueId: device.uniqueId, key: key, value: value))
-                }
-            )
+            favoriteTile(for: device)
+        }
+    }
+
+    private func favoriteTile(for device: DeviceRecord) -> some View {
+        let tile = DeviceTile(
+            device: device,
+            shutterRepository: store.shutterRepository,
+            onToggleFavorite: { store.send(.toggleFavorite(device.uniqueId)) },
+            onControlChange: { key, value in
+                store.send(.deviceControlChanged(uniqueId: device.uniqueId, key: key, value: value))
+            }
+        )
+
+        return tile
             .padding(1)
+            .transition(
+                AnyTransition.asymmetric(
+                    insertion: .identity,
+                    removal: .opacity.combined(with: .scale(scale: 0.92))
+                )
+            )
             .overlay {
                 if draggedId == device.uniqueId {
                     RoundedRectangle(cornerRadius: 22)
@@ -82,6 +97,5 @@ struct DashboardView: View {
             } isTargeted: { isTargeted in
                 draggedId = isTargeted ? device.uniqueId : nil
             }
-        }
     }
 }

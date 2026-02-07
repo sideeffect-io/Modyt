@@ -7,17 +7,20 @@ struct DeviceTile: View {
     let onToggleFavorite: () -> Void
     let onControlChange: (String, JSONValue) -> Void
 
+    private let dashboardCardHeight: CGFloat = 194
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top) {
+            HStack(alignment: .center) {
                 Image(systemName: device.group.symbolName)
                     .font(.system(size: 22, weight: .semibold))
+                    .frame(width: 36, height: 36)
                 Spacer()
-                Button(action: onToggleFavorite) {
-                    Image(systemName: device.isFavorite ? "star.fill" : "star")
-                        .foregroundStyle(device.isFavorite ? .yellow : .secondary)
-                }
-                .buttonStyle(.plain)
+                FavoriteOrbButton(
+                    isFavorite: device.isFavorite,
+                    size: 32,
+                    action: onToggleFavorite
+                )
             }
 
             Text(device.name)
@@ -38,6 +41,7 @@ struct DeviceTile: View {
             )
         }
         .padding(16)
+        .frame(height: dashboardCardHeight, alignment: .top)
         .glassCard(cornerRadius: 22)
     }
 }
