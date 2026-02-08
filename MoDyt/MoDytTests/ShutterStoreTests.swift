@@ -5,167 +5,212 @@ import DeltaDoreClient
 @MainActor
 struct ShutterStoreTests {
     @Test
-    func selectEmitsMappedNumericCommand() async {
-        let device = makeShutterDevice(value: 0)
-        let repository = makeRepository()
-        await repository.syncDevices([device])
-
-        var receivedKey: String?
-        var receivedValue: JSONValue?
+    func selectEmitsMappedNumericCommandAndSetsTarget() async {
+        let setTargetRecorder = TestRecorder<(String, ShutterStep, ShutterStep)>()
+        let commandRecorder = TestRecorder<(String, String, JSONValue)>()
 
         let store = ShutterStore(
-            device: device,
-            shutterRepository: repository
-        ) { key, value in
-            receivedKey = key
-            receivedValue = value
-        }
+            uniqueId: "shutter-1",
+            initialDevice: makeShutterDevice(uniqueId: "shutter-1", value: 0),
+            dependencies: .init(
+                observeShutter: { _ in
+                    AsyncStream { continuation in
+                        continuation.finish()
+                    }
+                },
+                setTarget: { uniqueId, targetStep, originStep in
+                    await setTargetRecorder.record((uniqueId, targetStep, originStep))
+                },
+                sendCommand: { uniqueId, key, value in
+                    await commandRecorder.record((uniqueId, key, value))
+                }
+            )
+        )
 
         store.select(.half)
+        await settleAsyncState()
 
-        #expect(receivedKey == "level")
-        #expect(receivedValue?.numberValue == 50)
         #expect(store.effectiveTargetStep == .half)
         #expect(store.isInFlight)
-    }
+        let targetUpdates = await setTargetRecorder.values
+        #expect(targetUpdates.count == 1)
+        #expect(targetUpdates[0].0 == "shutter-1")
+        #expect(targetUpdates[0].1 == .half)
+        #expect(targetUpdates[0].2 == .closed)
 
-    @Test
-    func repositoryStateSyncsAcrossStoreAndConvergesAfterEcho() async {
-        let initial = makeShutterDevice(value: 0)
-        let updated = makeShutterDevice(value: 50)
-        let repository = makeRepository()
-
-        await repository.syncDevices([initial])
-
-        let store = ShutterStore(
-            device: initial,
-            shutterRepository: repository
-        ) { _, _ in }
-
-        await repository.setTarget(uniqueId: "shutter-1", targetStep: .half, originStep: .closed)
-        await settleAsyncState()
-
-        #expect(store.actualStep == .closed)
-        #expect(store.effectiveTargetStep == .half)
-        #expect(store.isInFlight)
-
-        await repository.syncDevices([updated])
-        await settleAsyncState()
-
-        #expect(store.actualStep == .closed)
-        #expect(store.effectiveTargetStep == .half)
-        #expect(store.isInFlight)
-
-        await repository.syncDevices([updated])
-        await settleAsyncState()
-
-        #expect(store.actualStep == .half)
-        #expect(store.effectiveTargetStep == .half)
-        #expect(!store.isInFlight)
-    }
-
-    @Test
-    func repositorySyncUpdatesActualWhenNoTargetIsInFlight() async {
-        let initial = makeShutterDevice(value: 0)
-        let updated = makeShutterDevice(value: 75)
-        let repository = makeRepository()
-
-        await repository.syncDevices([initial])
-
-        let store = ShutterStore(
-            device: initial,
-            shutterRepository: repository
-        ) { _, _ in }
-
-        await repository.syncDevices([updated])
-        await settleAsyncState()
-
-        #expect(store.actualStep == .threeQuarter)
-        #expect(store.effectiveTargetStep == .threeQuarter)
-        #expect(!store.isInFlight)
+        let commands = await commandRecorder.values
+        #expect(commands.count == 1)
+        #expect(commands[0].0 == "shutter-1")
+        #expect(commands[0].1 == "level")
+        #expect(commands[0].2.numberValue == 50)
     }
 
     @Test
     func selectingCurrentStepDoesNotEmitCommand() async {
-        let device = makeShutterDevice(value: 75)
-        let repository = makeRepository()
-        await repository.syncDevices([device])
-
-        var commandCount = 0
+        let setTargetRecorder = TestRecorder<(String, ShutterStep, ShutterStep)>()
+        let commandRecorder = TestRecorder<(String, String, JSONValue)>()
         let store = ShutterStore(
-            device: device,
-            shutterRepository: repository
-        ) { _, _ in
-            commandCount += 1
-        }
+            uniqueId: "shutter-1",
+            initialDevice: makeShutterDevice(uniqueId: "shutter-1", value: 75),
+            dependencies: .init(
+                observeShutter: { _ in
+                    AsyncStream { continuation in
+                        continuation.finish()
+                    }
+                },
+                setTarget: { uniqueId, targetStep, originStep in
+                    await setTargetRecorder.record((uniqueId, targetStep, originStep))
+                },
+                sendCommand: { uniqueId, key, value in
+                    await commandRecorder.record((uniqueId, key, value))
+                }
+            )
+        )
 
-        await settleAsyncState()
         store.select(.threeQuarter)
+        await settleAsyncState()
 
-        #expect(commandCount == 0)
         #expect(store.actualStep == .threeQuarter)
         #expect(!store.isInFlight)
+        #expect((await setTargetRecorder.values).isEmpty)
+        #expect((await commandRecorder.values).isEmpty)
     }
 
     @Test
-    func multipleStoresReceiveSharedRepositoryUpdates() async {
-        let initial = makeShutterDevice(value: 0)
-        let updated = makeShutterDevice(value: 50)
-        let repository = makeRepository()
-        await repository.syncDevices([initial])
+    func observesSnapshotAndUpdatesStateForMatchingUniqueId() async {
+        let streamBox = BufferedStreamBox<ShutterSnapshot?>()
+        let descriptor = DeviceControlDescriptor(
+            kind: .slider,
+            key: "level",
+            isOn: true,
+            value: 25,
+            range: 0...100
+        )
 
-        let storeA = ShutterStore(
-            device: initial,
-            shutterRepository: repository
-        ) { _, _ in }
-        let storeB = ShutterStore(
-            device: initial,
-            shutterRepository: repository
-        ) { _, _ in }
-
-        await repository.setTarget(uniqueId: "shutter-1", targetStep: .half, originStep: .closed)
-        await settleAsyncState()
-
-        #expect(storeA.effectiveTargetStep == .half)
-        #expect(storeB.effectiveTargetStep == .half)
-        #expect(storeA.isInFlight)
-        #expect(storeB.isInFlight)
-
-        await repository.syncDevices([updated])
-        await settleAsyncState()
-        await repository.syncDevices([updated])
-        await settleAsyncState()
-
-        #expect(storeA.actualStep == .half)
-        #expect(storeB.actualStep == .half)
-        #expect(!storeA.isInFlight)
-        #expect(!storeB.isInFlight)
-    }
-
-    private func makeRepository() -> ShutterRepository {
-        let databasePath = TestSupport.temporaryDatabasePath()
-        let deviceRepository = DeviceRepository(databasePath: databasePath, log: { _ in })
-        return ShutterRepository(databasePath: databasePath, deviceRepository: deviceRepository, log: { _ in })
-    }
-
-    private func makeShutterDevice(value: Double) -> DeviceRecord {
-        TestSupport.makeDevice(
+        let store = ShutterStore(
             uniqueId: "shutter-1",
+            initialDevice: makeShutterDevice(uniqueId: "shutter-1", value: 0),
+            dependencies: .init(
+                observeShutter: { _ in streamBox.stream },
+                setTarget: { _, _, _ in },
+                sendCommand: { _, _, _ in }
+            )
+        )
+
+        streamBox.yield(
+            ShutterSnapshot(
+                uniqueId: "shutter-1",
+                descriptor: descriptor,
+                actualStep: .quarter,
+                targetStep: .half
+            )
+        )
+        await settleAsyncState()
+
+        #expect(store.descriptor == descriptor)
+        #expect(store.actualStep == .quarter)
+        #expect(store.effectiveTargetStep == .half)
+        #expect(store.isInFlight)
+    }
+
+    @Test
+    func ignoresSnapshotsWithDifferentUniqueId() async {
+        let streamBox = BufferedStreamBox<ShutterSnapshot?>()
+        let baseline = makeShutterDevice(uniqueId: "shutter-1", value: 50)
+        let store = ShutterStore(
+            uniqueId: "shutter-1",
+            initialDevice: baseline,
+            dependencies: .init(
+                observeShutter: { _ in streamBox.stream },
+                setTarget: { _, _, _ in },
+                sendCommand: { _, _, _ in }
+            )
+        )
+
+        let initialActual = store.actualStep
+        let otherDescriptor = DeviceControlDescriptor(
+            kind: .slider,
+            key: "level",
+            isOn: true,
+            value: 100,
+            range: 0...100
+        )
+
+        streamBox.yield(
+            ShutterSnapshot(
+                uniqueId: "other",
+                descriptor: otherDescriptor,
+                actualStep: .open,
+                targetStep: .open
+            )
+        )
+        await settleAsyncState()
+
+        #expect(store.actualStep == initialActual)
+        #expect(store.descriptor.key == "level")
+    }
+
+    @Test
+    func syncUpdatesActualBeforeSnapshotButKeepsSnapshotStateAfterward() async {
+        let streamBox = BufferedStreamBox<ShutterSnapshot?>()
+        let store = ShutterStore(
+            uniqueId: "shutter-1",
+            initialDevice: makeShutterDevice(uniqueId: "shutter-1", value: 0),
+            dependencies: .init(
+                observeShutter: { _ in streamBox.stream },
+                setTarget: { _, _, _ in },
+                sendCommand: { _, _, _ in }
+            )
+        )
+
+        store.sync(device: makeShutterDevice(uniqueId: "shutter-1", value: 75))
+        #expect(store.actualStep == .threeQuarter)
+
+        streamBox.yield(
+            ShutterSnapshot(
+                uniqueId: "shutter-1",
+                descriptor: DeviceControlDescriptor(kind: .slider, key: "level", isOn: true, value: 25, range: 0...100),
+                actualStep: .quarter,
+                targetStep: .half
+            )
+        )
+        await settleAsyncState()
+
+        store.sync(device: makeShutterDevice(uniqueId: "shutter-1", value: 100))
+        #expect(store.actualStep == .quarter)
+        #expect(store.effectiveTargetStep == .half)
+    }
+
+    @Test
+    func initWithoutInitialDeviceUsesFallbackDescriptor() {
+        let store = ShutterStore(
+            uniqueId: "shutter-1",
+            initialDevice: nil,
+            dependencies: .init(
+                observeShutter: { _ in
+                    AsyncStream { continuation in
+                        continuation.finish()
+                    }
+                },
+                setTarget: { _, _, _ in },
+                sendCommand: { _, _, _ in }
+            )
+        )
+
+        #expect(store.descriptor.kind == .slider)
+        #expect(store.descriptor.key == "level")
+        #expect(store.descriptor.range == 0...100)
+        #expect(store.actualStep == .closed)
+        #expect(store.effectiveTargetStep == .closed)
+    }
+
+    private func makeShutterDevice(uniqueId: String, value: Double) -> DeviceRecord {
+        TestSupport.makeDevice(
+            uniqueId: uniqueId,
             name: "Main Shutter",
             usage: "shutter",
             data: ["level": .number(value)],
-            metadata: [
-                "level": .object([
-                    "min": .number(0),
-                    "max": .number(100)
-                ])
-            ]
+            metadata: ["level": .object(["min": .number(0), "max": .number(100)])]
         )
-    }
-
-    private func settleAsyncState() async {
-        await Task.yield()
-        await Task.yield()
-        await Task.yield()
     }
 }

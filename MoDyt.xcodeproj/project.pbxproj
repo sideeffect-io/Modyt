@@ -30,11 +30,16 @@
 		1A180D2B2F363304005359B9 /* Exceptions for "MoDyt" folder in "MoDytTests" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				MoDytTests/AppCoordinatorStoreTests.swift,
-				MoDytTests/AuthenticationReducerTests.swift,
+				MoDytTests/AppRootStoreTests.swift,
+				MoDytTests/AuthenticationStoreTests.swift,
+				MoDytTests/DashboardDeviceCardStoreTests.swift,
+				MoDytTests/DashboardStoreTests.swift,
+				MoDytTests/DevicesStoreTests.swift,
 				MoDytTests/MoDytTests.swift,
-				MoDytTests/RuntimeReducerTests.swift,
+				MoDytTests/RootTabStoreTests.swift,
+				MoDytTests/SettingsStoreTests.swift,
 				MoDytTests/ShutterStoreTests.swift,
+				MoDytTests/StoreTestSupport.swift,
 				MoDytTests/TestSupport.swift,
 			);
 			target = 1A50E6C42F2D19650072A200 /* MoDytTests */;
@@ -43,11 +48,16 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
-				MoDytTests/AppCoordinatorStoreTests.swift,
-				MoDytTests/AuthenticationReducerTests.swift,
+				MoDytTests/AppRootStoreTests.swift,
+				MoDytTests/AuthenticationStoreTests.swift,
+				MoDytTests/DashboardDeviceCardStoreTests.swift,
+				MoDytTests/DashboardStoreTests.swift,
+				MoDytTests/DevicesStoreTests.swift,
 				MoDytTests/MoDytTests.swift,
-				MoDytTests/RuntimeReducerTests.swift,
+				MoDytTests/RootTabStoreTests.swift,
+				MoDytTests/SettingsStoreTests.swift,
 				MoDytTests/ShutterStoreTests.swift,
+				MoDytTests/StoreTestSupport.swift,
 				MoDytTests/TestSupport.swift,
 			);
 			target = 1A50E6B72F2D19640072A200 /* MoDyt */;

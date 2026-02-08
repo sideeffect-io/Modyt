@@ -46,6 +46,10 @@ enum TestSupport {
             client: client,
             repository: repository,
             shutterRepository: shutterRepository,
+            setOnDidDisconnect: { _ in },
+            requestRefreshAll: {},
+            sendDeviceCommand: { _, _, _ in },
+            requestDisconnect: {},
             now: Date.init,
             log: { _ in }
         )

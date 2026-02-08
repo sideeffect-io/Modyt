@@ -1,0 +1,190 @@
+# MoDyt Knowledge Base (Session-Derived)
+
+## 1) Mistakes To Avoid, Tips, And Self-Rules
+
+### A. Process and Tooling Rules
+
+- Rule: use `apply_patch` for manual file edits; do not issue patch blocks through `shell_command`.
+- Rule: for app compile/run validation, use XcodeBuildMCP tools (`build_sim`, `build_run_sim`) rather than only package-level commands.
+- Rule: after architecture/API changes, update docs (`README`/`.codex` docs) in the same change set.
+- Rule: when asked for architecture refactors, keep edits minimal and behavior-preserving first, then style/UI pass.
+
+### B. UI/State Management Mistakes To Avoid
+
+- Rule: do not bind shutter target/pending UI directly to DB-backed actual value.
+- Rule: separate actual state (source of truth from repository/DB) from target/pending state (user intent).
+- Rule: send shutter command on interaction commit (release/tap), not continuously while sliding.
+- Rule: actual layer must never teleport to target; it should converge as updates arrive.
+- Rule: keep pending indicator visible only while there is a real in-flight divergence.
+- Rule: avoid state mutation during view update cycles (no "Modifying state during view update" patterns).
+
+### C. Architecture Hygiene Rules
+
+- Rule: stores do not create other stores.
+- Rule: store ownership belongs to the owning SwiftUI view.
+- Rule: parent-child store communication goes through explicit closures passed in view composition.
+- Rule: keep reducers pure (`State x Event -> State + Effects`), with side effects executed in effect handlers.
+- Rule: inject dependencies via closures/capability structs, not concrete infrastructure types.
+- Rule: split monolithic stores/factories into feature-scoped units.
+- Rule: maintain one test file per store and keep store logic testable in isolation.
+
+### D. Practical Tips
+
+- Use `DeltaDoreClient` public connection flow APIs (`inspectConnectionFlow`, `connectWithStoredCredentials`, `connectWithNewCredentials`) from app stores/factories.
+- Keep lifecycle wiring explicit: app active state forwarded from `scenePhase` to connection/session logic.
+- Run both runtime app checks and package tests when touching cross-cutting behavior (`DeltaDoreClient`, `Persistence`, app stores).
+
+---
+
+## 2) Your Architectural Guidance (Codified)
+
+### Functional + Composition-First
+
+- Prefer functional architecture principles:
+- immutable state models,
+- pure reducers,
+- explicit effects,
+- composition over inheritance.
+
+- Store/state machine naming pattern expectation:
+- `State`, `Event`, `Effect`, `DelegateEvent`.
+
+- Keep side effects at boundaries:
+- domain/store reducer logic stays pure,
+- IO/network/database operations live in injected effect closures.
+
+### Dependency Injection Practices
+
+Preferred DI order:
+- closures first,
+- capability structs wrapping closures second,
+- protocols only at true external boundaries.
+
+- Do not inject concrete infrastructure directly into feature stores when closures can express needed capability.
+- Keep dependencies narrow and feature-specific (no "god dependency" object for every store).
+- Factories are composition boundaries: build concrete closures there, not in reducers.
+
+### Communication Between Layers
+
+Expected direction:
+- Views own stores.
+- Stores expose state + `send(event)`.
+- Child-to-parent signaling via closure callbacks/delegate events.
+- Parent-to-child behavior via injected closures/dependencies.
+
+- Avoid hidden shared mutable wiring; cross-layer communication should be explicit in constructors and view composition.
+
+### Store Granularity and Responsibilities
+
+You prefer fine-grained feature stores instead of one monolith:
+- app/root route store,
+- auth flow store,
+- session/root-tab runtime boundary,
+- dashboard list store,
+- dashboard card store,
+- shutter control store,
+- devices list store,
+- settings/disconnect store.
+
+You explicitly asked for:
+- dedicated files by feature/view/store,
+- one store test file per store,
+- high isolation and testability.
+
+### UI and Data Semantics Guidance
+
+- SQLite/repository is source of truth for device state.
+- UI may use optimistic/pending state, but must reconcile with repository updates.
+- Polling/lifecycle behavior should be tied to app active/background lifecycle (`setAppActive`).
+
+---
+
+## 3) Overall Architecture Of The App (Current Codebase)
+
+### A. Top-Level Composition
+
+- Entry point: `MoDyt/App/MoDytApp.swift`.
+- Creates live `AppEnvironment`.
+- Builds and injects individual factory values into SwiftUI `EnvironmentValues`.
+
+### B. Routing and Flow
+
+`AppRootStore` in `MoDyt/App/Features/AppRoot/Stores/AppRootStore.swift` owns:
+- route (`authentication` vs `runtime`),
+- app active flag.
+
+`AppRootView` in `MoDyt/App/Features/AppRoot/Views/AppRootView.swift`:
+- maps route to `AuthenticationRootView` or `RootTabView`,
+- forwards `scenePhase` to root store as app-active event.
+
+### C. Factory/DI Layer
+
+- Per-feature factories in `MoDyt/App/Factories/*` create stores with closure dependencies.
+- Environment keys expose each factory (`authenticationStoreFactory`, `rootTabStoreFactory`, etc.).
+- `WithStoreView` initializes a store from a factory per owning view, matching your ownership rule.
+
+### D. Feature Stores
+
+`AuthenticationStore`:
+- inspects connection flow,
+- handles login/site selection/connect,
+- emits authenticated delegate event.
+
+`RootTabStore`:
+- runtime session boundary for persistence bootstrap, message stream, refresh, app-active propagation, disconnect flow.
+
+`DashboardStore`:
+- observes favorites IDs,
+- toggles/reorders favorites,
+- requests refresh.
+
+`DashboardDeviceCardStore`:
+- observes a single device,
+- applies optimistic updates for non-shutter controls,
+- dispatches device commands.
+
+`ShutterStore`:
+- per-device shutter UI/control logic (`actualStep`, `targetStep`, in-flight),
+- sends commit command via injected closure,
+- syncs with `ShutterRepository` snapshots.
+
+`DevicesStore`:
+- observes all devices,
+- derives grouped sections,
+- toggles favorites and refresh.
+
+`SettingsStore`:
+- handles disconnect UI state and async disconnect request.
+
+### E. Data Layer
+
+`DeviceRepository` (`actor`):
+- persists devices in SQLite via `Persistence` package DAO,
+- applies incoming `TydomMessage`,
+- exposes async streams (`observeDevices`, `observeFavorites`, `observeDevice`),
+- handles favorite ordering/reordering and optimistic updates.
+
+`ShutterRepository` (`actor`):
+- persists shutter UI sync state in SQLite (`shutter_ui_state`),
+- merges device stream into shutter snapshots,
+- exposes `observeShutter`.
+
+`AppEnvironment` bridges:
+- `DeltaDoreClient`,
+- repositories,
+- command/refresh/disconnect closures,
+- logging and utility functions.
+
+### F. Message/Command Pipeline (Runtime)
+
+- Connection/messages from `DeltaDoreClient`.
+- `RootTabStore` decodes stream and applies messages to repository.
+- Repositories update SQLite + push async stream updates.
+- Feature stores consume streams and update view state.
+- User intents dispatch commands via injected closures back through environment/client.
+
+### G. Test Architecture
+
+- Store-oriented test files under `MoDyt/MoDytTests` (`AuthenticationStoreTests`, `RootTabStoreTests`, `DashboardStoreTests`, etc.).
+- Pattern aligns with your preference: isolated store testing with fake/injected closures.
+

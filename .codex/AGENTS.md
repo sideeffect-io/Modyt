@@ -95,8 +95,9 @@ This yields a clean, linear history and makes `git bisect` and blame more effect
 
 ## How to run and test
 
-In the context of a Swift package, we use the Swift CLI with commands like `swift build` or `swift test`
-If this is a full Xcode project, we can use the XCodeBuildMCP server.
+After each change, make sure the code compiles:
+- In the context of a Swift package, we use the Swift CLI with commands like `swift build` or `swift test`
+- If this is a full Xcode project, we can use the XCodeBuildMCP server.
 
 --
 
@@ -106,31 +107,9 @@ When needed use the Cupertino MCP server to access the officiel Swift documentat
 
 ---
 
-## Lessons Learned
+## Knowledge base
 
-- Shutter UI: build with a dual-layer track (background + foreground) and invert values when the visual direction is reversed; keep mask/handle/progress indicator in the same coordinate space to avoid drift.
-- Devices list: keep a consistent row layout with SF Symbol icon treatment and spacing; support dark mode and subtle texture rather than flat white backgrounds.
-- DeltaDore discovery: use `/ping` then stop on first success; normalize MAC addresses; avoid Bonjour; close the connection after probing.
-- Connection resolution: keep a fast-path for an already-known working connection before running full discovery.
-- Logging: add message-pipeline logs that include the config file path and `devices-meta` details for supportability.
-- Tooling: use XcodeBuildMCP for full Xcode project builds/tests; reserve `swift build`/`swift test` for Swift packages.
-- Guard iOS-only SwiftUI modifiers (like `.textInputAutocapitalization`) with `#if os(iOS)` to keep macOS builds compiling (see `MoDyt/App/Views/LoginView.swift`).
-- Use the existing `glassCard(...)` modifier from `MoDyt/App/Views/Components/Components.swift` for card-like surfaces to keep UI consistency.
-- Prefer the `DeltaDoreClient` connection flows (`inspectConnectionFlow`, `connectWithStoredCredentials`, `connectWithNewCredentials`) instead of rolling ad-hoc gateway logic in app code.
-- When writing custom SQL with `Packages/Persistence`, always use parameter bindings (`?`) to avoid injection and keep queries consistent with the DAO patterns.
-- For tests or alternate storage, build DAOs from closures (in-memory `DAO`) rather than mocking SQLite directly.
-- Reuse preferred patterns in packages: keep types `internal` by default and make them `public` only when part of the external API.
-- After CLI changes, a quick sanity check is `swift run DeltaDoreCLI --help` before attempting live connections.
-- For cloud site/gateway lookup, normalize MAC addresses (strip separators, uppercase) and retry variants; keep the original MAC for websocket usage.
-- Swift Testing `#expect(throws:)` requires the error type to conform to `Equatable`; add conformance or use a different assertion style.
-- Avoid returning non-Sendable `AsyncSequence` from actor-isolated APIs; expose `AsyncStream` instead to keep concurrency-safe boundaries.
-- Keep CLI code in a functional-core/imperative-shell shape: minimal `@main`, parsing/IO orchestration split into small files.
-- Prefer `rg --files` / `rg -n` for discovery, then `nl -ba` + `sed -n` to inspect Swift files with line numbers.
-- Run package tests with `swift test --package-path Packages/DeltaDoreClient` and `swift test --package-path Packages/Persistence` before app-level changes.
-- Use `xcodebuild -list -project MoDyt.xcodeproj` to confirm schemes before invoking `xcodebuild -scheme MoDyt -project MoDyt.xcodeproj`.
-- Keep UI flows split by domain (`MoDyt/App/Authentication` and `MoDyt/App/Runtime`) with dedicated stores and views.
-- Centralize route switching in `AppCoordinatorStore` (`@Observable`, `@MainActor`) and surface navigation via delegate events.
-- Keep reducers pure and push derived collections (grouped devices, favorites) into helper functions.
-- Rule: when moving SwiftUI views between folders, update Xcode project references and create target folders before moving files.
-- Rule: keep `@Bindable` store types aligned with view ownership (avoid mismatching `AppStore` vs `AuthenticationStore` in login views).
+You maintain a knowledge base for mistakes to avoid, tips and tricks, architectural guidance, coding preferences in `.codex/KNOWLEDGE_BASE.md`.
+Read that knowledge base and add new entries as you learn things.
+
 
