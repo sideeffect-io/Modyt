@@ -41,10 +41,11 @@ struct DashboardView: View {
 
     @ViewBuilder
     private func favoritesSection(store: DashboardStore) -> some View {
-        let favoriteIDs = store.state.favoriteIDs
+        let favoriteDevices = store.state.favoriteDevices
+        let favoriteIDs = favoriteDevices.map(\.uniqueId)
 
         VStack(alignment: .leading, spacing: 12) {
-            if favoriteIDs.isEmpty {
+            if favoriteDevices.isEmpty {
                 ContentUnavailableView(
                     "No Favorites Yet",
                     systemImage: "star",
@@ -53,8 +54,8 @@ struct DashboardView: View {
                 .padding(.vertical, 24)
             } else {
                 LazyVGrid(columns: gridColumns, spacing: 18) {
-                    ForEach(favoriteIDs, id: \.self) { uniqueId in
-                        favoriteTile(for: uniqueId, store: store)
+                    ForEach(favoriteDevices, id: \.uniqueId) { device in
+                        favoriteTile(for: device, store: store)
                     }
                 }
                 .animation(.easeInOut(duration: 0.28), value: favoriteIDs)
@@ -62,11 +63,8 @@ struct DashboardView: View {
         }
     }
 
-    private func favoriteTile(for uniqueId: String, store: DashboardStore) -> some View {
-        DashboardDeviceCardView(
-            uniqueId: uniqueId,
-            onToggleFavorite: { store.send(.toggleFavorite(uniqueId)) }
-        )
+    private func favoriteTile(for device: DeviceRecord, store: DashboardStore) -> some View {
+        DashboardDeviceCardView(device: device)
         .padding(1)
         .transition(
             AnyTransition.asymmetric(
@@ -75,18 +73,18 @@ struct DashboardView: View {
             )
         )
         .overlay {
-            if draggedId == uniqueId {
+            if draggedId == device.uniqueId {
                 RoundedRectangle(cornerRadius: 22)
                     .stroke(.white.opacity(0.6), lineWidth: 2)
             }
         }
-        .draggable(uniqueId)
+        .draggable(device.uniqueId)
         .dropDestination(for: String.self) { items, _ in
             guard let sourceId = items.first else { return false }
-            store.send(.reorderFavorite(sourceId, uniqueId))
+            store.send(.reorderFavorite(sourceId, device.uniqueId))
             return true
         } isTargeted: { isTargeted in
-            draggedId = isTargeted ? uniqueId : nil
+            draggedId = isTargeted ? device.uniqueId : nil
         }
     }
 }

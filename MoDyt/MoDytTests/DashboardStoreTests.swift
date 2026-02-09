@@ -5,10 +5,10 @@ import Testing
 struct DashboardStoreTests {
     @Test
     func favoritesStreamUpdatesState() async {
-        let streamBox = BufferedStreamBox<[String]>()
+        let streamBox = BufferedStreamBox<[DeviceRecord]>()
         let store = DashboardStore(
             dependencies: .init(
-                observeFavoriteIDs: { streamBox.stream },
+                observeFavoriteDevices: { streamBox.stream },
                 toggleFavorite: { _ in },
                 reorderFavorite: { _, _ in },
                 refreshAll: {}
@@ -16,19 +16,23 @@ struct DashboardStoreTests {
         )
 
         store.send(.onAppear)
-        streamBox.yield(["a", "b", "c"])
+        streamBox.yield([
+            TestSupport.makeDevice(uniqueId: "a", name: "A", usage: "light", isFavorite: true),
+            TestSupport.makeDevice(uniqueId: "b", name: "B", usage: "light", isFavorite: true),
+            TestSupport.makeDevice(uniqueId: "c", name: "C", usage: "light", isFavorite: true)
+        ])
         await settleAsyncState()
 
-        #expect(store.state.favoriteIDs == ["a", "b", "c"])
+        #expect(store.state.favoriteDevices.map(\.uniqueId) == ["a", "b", "c"])
     }
 
     @Test
     func onAppearStartsObservationOnlyOnce() async {
-        let streamBox = BufferedStreamBox<[String]>()
+        let streamBox = BufferedStreamBox<[DeviceRecord]>()
         let observeCounter = LockedCounter()
         let store = DashboardStore(
             dependencies: .init(
-                observeFavoriteIDs: {
+                observeFavoriteDevices: {
                     observeCounter.increment()
                     return streamBox.stream
                 },
@@ -50,7 +54,7 @@ struct DashboardStoreTests {
         let recorder = TestRecorder<String>()
         let store = DashboardStore(
             dependencies: .init(
-                observeFavoriteIDs: {
+                observeFavoriteDevices: {
                     AsyncStream { continuation in
                         continuation.finish()
                     }

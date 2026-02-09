@@ -188,3 +188,42 @@ You explicitly asked for:
 - Store-oriented test files under `MoDyt/MoDytTests` (`AuthenticationStoreTests`, `RootTabStoreTests`, `DashboardStoreTests`, etc.).
 - Pattern aligns with your preference: isolated store testing with fake/injected closures.
 
+---
+
+## 4) Latest Session Updates (Dashboard Device Ownership Split)
+
+### A. Dashboard Favorites Data Flow (Updated)
+
+- `DashboardStore` should observe favorite **devices** (`[DeviceRecord]`) instead of only favorite IDs.
+- `DashboardView` should pass the full `DeviceRecord` to each dashboard card; card identity/reorder still uses `uniqueId`.
+- This removes the need for per-card generic device observation just to render name/type/status.
+
+### B. Card Store Responsibility (Narrowed)
+
+- `DashboardDeviceCardStore` is now favorite-only:
+  - single intent: `favoriteTapped`,
+  - single side effect: toggle favorite in repository.
+- Control command dispatch (`applyOptimisticUpdate` / `sendDeviceCommand`) was removed from this store.
+- Consequence: dashboard card store is now strictly "shared card chrome behavior", not device-control behavior.
+
+### C. Device-Control Ownership by Type
+
+- `ShutterView` / `ShutterStore` own shutter control and shutter-specific observation.
+- `LightView` / `LightStore` own light control and light-specific observation.
+- `DashboardDeviceCardView` routes control UI by `device.group`:
+  - `.shutter` -> `ShutterView`,
+  - `.light` -> `LightView`,
+  - other groups -> no control widget.
+
+### D. Why Shutter Observation Differs from Light Observation
+
+- Shutter observation comes from `ShutterRepository.observeShutter`, which emits consolidated `ShutterSnapshot` values that include transient UI coordination state (`targetStep`, `originStep`, `ignoredEcho`) in addition to raw device data.
+- Light observation can use `DeviceRepository.observeDevice` directly because current light UX does not require extra shutter-like reconciliation state.
+
+### E. Xcode Project Sync Gotcha (Important)
+
+- With file-system synchronized Xcode projects (`PBXFileSystemSynchronizedBuildFileExceptionSet`), replacing/recreating a test file can drop its membership exception entries.
+- If that happens, the test file may be compiled into app target `MoDyt` and fail with:
+  - `Compilation search paths unable to resolve module dependency: 'Testing'`,
+  - warning that file is part of module `MoDyt`.
+- Fix: re-add the test file path in both exception sets (`MoDytTests` target and `MoDyt` target exception list).

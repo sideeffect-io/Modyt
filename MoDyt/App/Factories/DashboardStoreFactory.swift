@@ -7,14 +7,12 @@ struct DashboardStoreFactory {
         DashboardStoreFactory {
             DashboardStore(
                 dependencies: .init(
-                    observeFavoriteIDs: {
+                    observeFavoriteDevices: {
                         AsyncStream { continuation in
                             let task = Task {
-                                let favoriteIDs = await environment.repository.observeFavorites().map { devices in
-                                    devices.map(\.uniqueId)
-                                }
-                                for await ids in favoriteIDs {
-                                    continuation.yield(ids)
+                                let favorites = await environment.repository.observeFavorites()
+                                for await devices in favorites {
+                                    continuation.yield(devices)
                                 }
                                 continuation.finish()
                             }

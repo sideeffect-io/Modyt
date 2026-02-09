@@ -1,15 +1,16 @@
 import Foundation
 import Observation
+import DeltaDoreClient
 
 struct DashboardState: Sendable, Equatable {
-    var favoriteIDs: [String]
+    var favoriteDevices: [DeviceRecord]
 
-    static let initial = DashboardState(favoriteIDs: [])
+    static let initial = DashboardState(favoriteDevices: [])
 }
 
 enum DashboardEvent: Sendable {
     case onAppear
-    case favoritesUpdated([String])
+    case favoritesUpdated([DeviceRecord])
     case refreshRequested
     case toggleFavorite(String)
     case reorderFavorite(String, String)
@@ -31,8 +32,8 @@ enum DashboardReducer {
         case .onAppear:
             effects = [.startObservingFavorites]
 
-        case .favoritesUpdated(let favoriteIDs):
-            state.favoriteIDs = favoriteIDs
+        case .favoritesUpdated(let favoriteDevices):
+            state.favoriteDevices = favoriteDevices
 
         case .refreshRequested:
             effects = [.refreshAll]
@@ -52,7 +53,7 @@ enum DashboardReducer {
 @MainActor
 final class DashboardStore {
     struct Dependencies {
-        let observeFavoriteIDs: () -> AsyncStream<[String]>
+        let observeFavoriteDevices: () -> AsyncStream<[DeviceRecord]>
         let toggleFavorite: (String) async -> Void
         let reorderFavorite: (String, String) async -> Void
         let refreshAll: () async -> Void
@@ -85,9 +86,9 @@ final class DashboardStore {
         case .startObservingFavorites:
             guard favoritesTask.task == nil else { return }
             favoritesTask.task = Task { [weak self, dependencies] in
-                let stream = dependencies.observeFavoriteIDs()
-                for await favoriteIDs in stream {
-                    self?.send(.favoritesUpdated(favoriteIDs))
+                let stream = dependencies.observeFavoriteDevices()
+                for await favoriteDevices in stream {
+                    self?.send(.favoritesUpdated(favoriteDevices))
                 }
             }
 

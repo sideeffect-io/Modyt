@@ -119,6 +119,25 @@ struct DeviceControlDescriptor: Sendable, Equatable {
     let range: ClosedRange<Double>
 }
 
+struct DrivingLightControlDescriptor: Sendable, Equatable {
+    let powerKey: String?
+    let levelKey: String?
+    let isOn: Bool
+    let level: Double
+    let range: ClosedRange<Double>
+
+    var normalizedLevel: Double {
+        let span = range.upperBound - range.lowerBound
+        guard span > 0 else { return isOn ? 1 : 0 }
+        let normalized = (level - range.lowerBound) / span
+        return min(max(normalized, 0), 1)
+    }
+
+    var percentage: Int {
+        Int((normalizedLevel * 100).rounded())
+    }
+}
+
 extension DeviceRecord {
     var group: DeviceGroup {
         DeviceGroup.from(usage: usage)
@@ -151,6 +170,36 @@ extension DeviceRecord {
             return descriptor
         }
         return nil
+    }
+
+    func drivingLightControlDescriptor() -> DrivingLightControlDescriptor? {
+        guard group == .light else { return nil }
+
+        let power = toggleDescriptor(forKey: "on")
+            ?? toggleDescriptor(forKey: "state")
+            ?? firstBoolDescriptor()
+
+        let level = sliderDescriptor(forKey: "level")
+            ?? sliderDescriptor(forKey: "position")
+            ?? firstNumberDescriptor()
+
+        guard power != nil || level != nil else { return nil }
+
+        let range = level?.range ?? 0...100
+        let lowerBound = range.lowerBound
+        let upperBound = range.upperBound
+        let fallbackLevel = power?.isOn == true ? upperBound : lowerBound
+        let rawLevel = level?.value ?? fallbackLevel
+        let levelValue = min(max(rawLevel, lowerBound), upperBound)
+        let isOn = power?.isOn ?? (levelValue > lowerBound)
+
+        return DrivingLightControlDescriptor(
+            powerKey: power?.key,
+            levelKey: level?.key,
+            isOn: isOn,
+            level: levelValue,
+            range: range
+        )
     }
 
     var statusText: String {

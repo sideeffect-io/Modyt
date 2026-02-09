@@ -8,6 +8,7 @@ struct MoDytApp: App {
     private let dashboardStoreFactory: DashboardStoreFactory
     private let dashboardDeviceCardStoreFactory: DashboardDeviceCardStoreFactory
     private let shutterStoreFactory: ShutterStoreFactory
+    private let lightStoreFactory: LightStoreFactory
     private let devicesStoreFactory: DevicesStoreFactory
     private let settingsStoreFactory: SettingsStoreFactory
 
@@ -19,6 +20,7 @@ struct MoDytApp: App {
         dashboardStoreFactory = .live(environment: environment)
         dashboardDeviceCardStoreFactory = .live(environment: environment)
         shutterStoreFactory = .live(environment: environment)
+        lightStoreFactory = .live(environment: environment)
         devicesStoreFactory = .live(environment: environment)
         settingsStoreFactory = .live(environment: environment)
     }
@@ -32,6 +34,7 @@ struct MoDytApp: App {
                 .environment(\.dashboardStoreFactory, dashboardStoreFactory)
                 .environment(\.dashboardDeviceCardStoreFactory, dashboardDeviceCardStoreFactory)
                 .environment(\.shutterStoreFactory, shutterStoreFactory)
+                .environment(\.lightStoreFactory, lightStoreFactory)
                 .environment(\.devicesStoreFactory, devicesStoreFactory)
                 .environment(\.settingsStoreFactory, settingsStoreFactory)
         }

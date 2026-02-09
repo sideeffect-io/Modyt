@@ -9,14 +9,8 @@ struct DashboardDeviceCardStoreFactory {
             DashboardDeviceCardStore(
                 uniqueId: uniqueId,
                 dependencies: .init(
-                    observeDevice: { uniqueId in
-                        await environment.repository.observeDevice(uniqueId: uniqueId)
-                    },
-                    applyOptimisticUpdate: { uniqueId, key, value in
-                        await environment.repository.applyOptimisticUpdate(uniqueId: uniqueId, key: key, value: value)
-                    },
-                    sendDeviceCommand: { uniqueId, key, value in
-                        await environment.sendDeviceCommand(uniqueId, key, value)
+                    toggleFavorite: { uniqueId in
+                        await environment.repository.toggleFavorite(uniqueId: uniqueId)
                     }
                 )
             )
