@@ -6,7 +6,7 @@ import DeltaDoreClient
 @MainActor
 final class LightStore {
     struct Dependencies {
-        let observeLight: (String) async -> AsyncStream<DeviceRecord?>
+        let observeLight: (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable
         let applyOptimisticUpdate: (String, String, JSONValue) async -> Void
         let sendCommand: (String, String, JSONValue) async -> Void
     }

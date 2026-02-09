@@ -8,18 +8,7 @@ struct DashboardStoreFactory {
             DashboardStore(
                 dependencies: .init(
                     observeFavoriteDevices: {
-                        AsyncStream { continuation in
-                            let task = Task {
-                                let favorites = await environment.repository.observeFavorites()
-                                for await devices in favorites {
-                                    continuation.yield(devices)
-                                }
-                                continuation.finish()
-                            }
-                            continuation.onTermination = { _ in
-                                task.cancel()
-                            }
-                        }
+                        await environment.repository.observeFavorites()
                     },
                     toggleFavorite: { uniqueId in
                         await environment.repository.toggleFavorite(uniqueId: uniqueId)

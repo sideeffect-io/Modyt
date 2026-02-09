@@ -53,7 +53,7 @@ enum DashboardReducer {
 @MainActor
 final class DashboardStore {
     struct Dependencies {
-        let observeFavoriteDevices: () -> AsyncStream<[DeviceRecord]>
+        let observeFavoriteDevices: () async -> any AsyncSequence<[DeviceRecord], Never> & Sendable
         let toggleFavorite: (String) async -> Void
         let reorderFavorite: (String, String) async -> Void
         let refreshAll: () async -> Void
@@ -86,7 +86,7 @@ final class DashboardStore {
         case .startObservingFavorites:
             guard favoritesTask.task == nil else { return }
             favoritesTask.task = Task { [weak self, dependencies] in
-                let stream = dependencies.observeFavoriteDevices()
+                let stream = await dependencies.observeFavoriteDevices()
                 for await favoriteDevices in stream {
                     self?.send(.favoritesUpdated(favoriteDevices))
                 }

@@ -56,8 +56,8 @@ actor DeviceRepository {
         }
     }
 
-    func observeFavorites() -> AsyncStream<[DeviceRecord]> {
-        let favorites = observeDevices().map { snapshot in
+    func observeFavorites() -> some AsyncSequence<[DeviceRecord], Never> & Sendable {
+        observeDevices().map { snapshot in
             snapshot
                 .filter(\.isFavorite)
                 .sorted { lhs, rhs in
@@ -66,37 +66,11 @@ actor DeviceRepository {
                     return lhsOrder < rhsOrder
                 }
         }
-
-        return AsyncStream { continuation in
-            let task = Task {
-                for await favoriteDevices in favorites {
-                    continuation.yield(favoriteDevices)
-                }
-                continuation.finish()
-            }
-
-            continuation.onTermination = { _ in
-                task.cancel()
-            }
-        }
     }
 
-    func observeDevice(uniqueId: String) -> AsyncStream<DeviceRecord?> {
-        let deviceSnapshots = observeDevices().map { snapshot in
+    func observeDevice(uniqueId: String) -> some AsyncSequence<DeviceRecord?, Never> & Sendable {
+        observeDevices().map { snapshot in
             snapshot.first(where: { $0.uniqueId == uniqueId })
-        }
-
-        return AsyncStream { continuation in
-            let task = Task {
-                for await device in deviceSnapshots {
-                    continuation.yield(device)
-                }
-                continuation.finish()
-            }
-
-            continuation.onTermination = { _ in
-                task.cancel()
-            }
         }
     }
 
