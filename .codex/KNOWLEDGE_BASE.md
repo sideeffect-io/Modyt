@@ -261,7 +261,36 @@ You explicitly asked for:
 
 ---
 
-## 6) Latest Session Updates (Shutter/Light Concurrency + Runtime Cleanup)
+## 6) Latest Session Updates (Temperature Card + DeltaDore Sensor Semantics)
+
+### A. Mistakes To Avoid
+
+- Do not assume any numeric telemetry field is directly displayable temperature; `configTemp` can be a configuration code (e.g. `520`) and not ambient temperature.
+- Do not use generic numeric fallback logic for thermo cards without excluding non-display keys (`config*`, `lightPower`, `jobsMP`, etc.).
+- Do not display raw/unknown unit strings (e.g. `NA`) as temperature unit labels.
+- Do not lock UI decisions too early; when UX direction changes (gauge vs no gauge), keep thermo view composition simple so controls can be removed without architecture churn.
+
+### B. Tips And Tricks
+
+- For DeltaDore thermo devices, prioritize `outTemperature` and known temperature keys before any generic value extraction.
+- When validating unclear payload semantics, quickly compare with established integrations (`hass-deltadore-tydom-component`, `tydom2mqtt`) to confirm which field is used in practice.
+- Normalize unit values before rendering (`degC` -> `°C`, `degF` -> `°F`) and drop invalid placeholders like `NA`.
+- Use Swift `Text` numeric formatting for display consistency: `.number.precision(.fractionLength(1))` for one decimal digit.
+
+### C. Architecture Patterns Reinforced
+
+- Temperature follows the same feature pattern as other device types, with dedicated `TemperatureView`, `TemperatureStore`, and `TemperatureStoreFactory`, wired through app environment/factories and dashboard card routing by device group.
+- The store observes live streams from `DeltaDoreClient`-fed repository data rather than snapshot polling from the view layer.
+- Device-specific parsing belongs in device/domain mapping (`DeviceRecord`) so UI/store layers remain focused on presentation and flow.
+
+### D. Coding Preferences Captured
+
+- Thermo card UI should stay minimal and readable: no subtitle (`Thermo`) and no gauge in the current direction.
+- Temperature value should be the visual focal point: centered horizontally in the card, shown with one decimal digit, with unit when valid.
+
+---
+
+## 7) Latest Session Updates (Shutter/Light Concurrency + Runtime Cleanup)
 
 ### A. Mistakes To Avoid
 
@@ -299,7 +328,7 @@ You explicitly asked for:
 
 ---
 
-## 7) Latest Session Updates (Light Gauge Jerkiness + Glass Rendering)
+## 8) Latest Session Updates (Light Gauge Jerkiness + Glass Rendering)
 
 ### A. Root Cause Findings
 

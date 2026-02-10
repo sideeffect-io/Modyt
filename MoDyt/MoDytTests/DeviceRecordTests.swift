@@ -72,6 +72,77 @@ struct DeviceRecordTests {
     }
 
     @Test
+    func temperatureDescriptorUsesPreferredKeyAndNormalizesUnit() {
+        let device = TestSupport.makeDevice(
+            uniqueId: "thermo-1",
+            name: "Outdoor Sensor",
+            usage: "sensorThermo",
+            data: [
+                "battery": .number(92),
+                "temperature": .number(18.4)
+            ],
+            metadata: [
+                "temperature": .object(["unit": .string("celsius")])
+            ]
+        )
+
+        let descriptor = device.temperatureDescriptor()
+
+        #expect(descriptor?.key == "temperature")
+        #expect(descriptor?.value == 18.4)
+        #expect(descriptor?.unitSymbol == "°C")
+    }
+
+    @Test
+    func temperatureDescriptorPrefersOutTemperatureOverConfigValue() {
+        let device = TestSupport.makeDevice(
+            uniqueId: "thermo-2",
+            name: "Outdoor Probe",
+            usage: "sensorThermo",
+            data: [
+                "configTemp": .number(520),
+                "outTemperature": .number(11.0)
+            ],
+            metadata: [
+                "configTemp": .object(["unit": .string("NA")]),
+                "outTemperature": .object(["unit": .string("degC")])
+            ]
+        )
+
+        let descriptor = device.temperatureDescriptor()
+
+        #expect(descriptor?.key == "outTemperature")
+        #expect(descriptor?.value == 11.0)
+        #expect(descriptor?.unitSymbol == "°C")
+    }
+
+    @Test
+    func temperatureDescriptorIgnoresNonTemperatureNumericValues() {
+        let device = TestSupport.makeDevice(
+            uniqueId: "thermo-3",
+            name: "Secondary Sensor",
+            usage: "sensorThermo",
+            data: [
+                "reading": .number(21)
+            ]
+        )
+
+        #expect(device.temperatureDescriptor() == nil)
+    }
+
+    @Test
+    func temperatureDescriptorIsNilForNonThermoDevices() {
+        let device = TestSupport.makeDevice(
+            uniqueId: "light-9",
+            name: "Garage",
+            usage: "light",
+            data: ["temperature": .number(19)]
+        )
+
+        #expect(device.temperatureDescriptor() == nil)
+    }
+
+    @Test
     func observationEquivalenceIgnoresUpdatedAtAndUnrelatedMetadata() {
         let baseline = TestSupport.makeDevice(
             uniqueId: "light-7",

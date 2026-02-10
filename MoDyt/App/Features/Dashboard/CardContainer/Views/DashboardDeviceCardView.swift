@@ -37,7 +37,7 @@ struct DashboardDeviceCardView: View {
                 .font(.system(.headline, design: .rounded))
                 .lineLimit(1)
 
-            if device.group != .shutter && device.group != .light {
+            if device.group != .shutter && device.group != .light && device.group != .thermo {
                 Text(device.group.title)
                     .font(.system(.caption, design: .rounded))
                     .foregroundStyle(.secondary)
@@ -57,6 +57,8 @@ struct DashboardDeviceCardView: View {
             ShutterView(uniqueId: device.uniqueId, layout: .regular)
         case .light:
             LightView(uniqueId: device.uniqueId)
+        case .thermo:
+            TemperatureView(uniqueId: device.uniqueId)
         default:
             EmptyView()
         }
