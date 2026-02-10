@@ -5,6 +5,42 @@ import DeltaDoreClient
 @MainActor
 struct ShutterStoreTests {
     @Test
+    func snapshotUIEquivalenceIgnoresDescriptorValueNoise() {
+        let baseline = ShutterSnapshot(
+            uniqueId: "shutter-1",
+            descriptor: DeviceControlDescriptor(kind: .slider, key: "level", isOn: true, value: 100, range: 0...100),
+            actualStep: .open,
+            targetStep: nil
+        )
+        let noisy = ShutterSnapshot(
+            uniqueId: "shutter-1",
+            descriptor: DeviceControlDescriptor(kind: .slider, key: "level", isOn: true, value: 98, range: 0...100),
+            actualStep: .open,
+            targetStep: nil
+        )
+
+        #expect(ShutterSnapshot.areEquivalentForUI(baseline, noisy))
+    }
+
+    @Test
+    func snapshotUIEquivalenceDetectsTargetChange() {
+        let baseline = ShutterSnapshot(
+            uniqueId: "shutter-1",
+            descriptor: DeviceControlDescriptor(kind: .slider, key: "level", isOn: true, value: 100, range: 0...100),
+            actualStep: .open,
+            targetStep: nil
+        )
+        let withTarget = ShutterSnapshot(
+            uniqueId: "shutter-1",
+            descriptor: DeviceControlDescriptor(kind: .slider, key: "level", isOn: true, value: 100, range: 0...100),
+            actualStep: .open,
+            targetStep: .half
+        )
+
+        #expect(!ShutterSnapshot.areEquivalentForUI(baseline, withTarget))
+    }
+
+    @Test
     func selectEmitsMappedNumericCommandAndSetsTarget() async {
         let setTargetRecorder = TestRecorder<(String, ShutterStep, ShutterStep)>()
         let commandRecorder = TestRecorder<(String, String, JSONValue)>()
@@ -202,6 +238,41 @@ struct ShutterStoreTests {
         #expect(store.descriptor.range == 0...100)
         #expect(store.actualStep == .closed)
         #expect(store.effectiveTargetStep == .closed)
+    }
+
+    @Test
+    func duplicateSnapshotIsFilteredBeforeReachingStore() async {
+        let streamBox = BufferedStreamBox<ShutterSnapshot?>()
+        let store = ShutterStore(
+            uniqueId: "shutter-1",
+            initialDevice: makeShutterDevice(uniqueId: "shutter-1", value: 100),
+            dependencies: .init(
+                observeShutter: { _ in streamBox.stream.removeDuplicates(by: ShutterSnapshot.areEquivalentForUI) },
+                setTarget: { _, _, _ in },
+                sendCommand: { _, _, _ in }
+            )
+        )
+
+        let baseline = ShutterSnapshot(
+            uniqueId: "shutter-1",
+            descriptor: DeviceControlDescriptor(kind: .slider, key: "level", isOn: true, value: 100, range: 0...100),
+            actualStep: .open,
+            targetStep: nil
+        )
+
+        streamBox.yield(baseline)
+        await settleAsyncState()
+
+        store.select(.half)
+        #expect(store.effectiveTargetStep == .half)
+        #expect(store.isInFlight)
+
+        // Simulates an unrelated repository emission that repeats the same pre-command snapshot.
+        streamBox.yield(baseline)
+        await settleAsyncState()
+
+        #expect(store.effectiveTargetStep == .half)
+        #expect(store.isInFlight)
     }
 
     private func makeShutterDevice(uniqueId: String, value: Double) -> DeviceRecord {

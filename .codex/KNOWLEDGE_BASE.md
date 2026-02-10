@@ -227,3 +227,72 @@ You explicitly asked for:
   - `Compilation search paths unable to resolve module dependency: 'Testing'`,
   - warning that file is part of module `MoDyt`.
 - Fix: re-add the test file path in both exception sets (`MoDytTests` target and `MoDyt` target exception list).
+
+---
+
+## 5) Latest Session Updates (AsyncSequence, Cross-Platform, Layout)
+
+### A. Mistakes To Avoid
+
+- Do not create passthrough `AsyncStream` wrappers (`Task` + `for await` + `yield`) just to cross actor boundaries when an async dependency closure can be awaited directly.
+- Do not return non-Sendable async-sequence existentials from actor-isolated APIs to `@MainActor` call sites; use `any AsyncSequence<..., Never> & Sendable`.
+- Do not apply `.toolbarBackground(..., for: .navigationBar/.tabBar)` or `.containerBackground(..., for: .navigation)` unguarded on macOS.
+- Do not keep unused dependency closures and their matching `State`/`Event`/`Effect` plumbing once behavior is no longer used.
+
+### B. Tips And Tricks
+
+- Prefer dependency signatures like `() async -> ...` / `(String) async -> ...` for actor-isolated stream access; this avoids factory-level stream passthrough glue.
+- For derived streams (`observeFavorites`, `observeDevice`), return `observeDevices().map { ... }` directly when no manual continuation management is needed.
+- Encapsulate iOS-only chrome behavior in helper modifiers (for example `hideChromeBackgroundForMobileTabs()`), guarded with `#if os(iOS)`.
+- For centered/balanced card controls on iPad, give each side equal flexible space (`.frame(maxWidth: .infinity, alignment: .center)`) rather than letting only one side expand.
+
+### C. Architecture Patterns Reinforced
+
+- Repository boundary owns continuation/observer lifecycle streams; higher-level derived streams should stay declarative (`map`) when possible.
+- Store dependencies should expose capabilities (iterate async sequence, execute effect) rather than requiring concrete stream types.
+- Dashboard root store scope should remain focused on favorites observation, reorder, and refresh; per-card favorite toggling belongs to card-level store.
+- Cross-platform adaptation should be compile-time (`#if os(iOS)`) while preserving runtime behavior on iOS/iPadOS.
+
+### D. Coding Preferences Captured
+
+- You prefer aggressive dead-code cleanup: if a closure/effect/event path is unused, remove it entirely.
+- You want platform fixes that preserve existing iOS and iPadOS behavior exactly.
+- You value visually balanced controls on iPad (horizontally centered and evenly distributed), not just functionally correct layouts.
+
+---
+
+## 6) Latest Session Updates (Shutter/Light Concurrency + Runtime Cleanup)
+
+### A. Mistakes To Avoid
+
+- Do not use `updatedAt` as a proxy for meaningful shutter change in reconciliation logic; unrelated gateway/device updates can change timestamps and create false positives.
+- Do not register observers asynchronously inside an `AsyncStream` builder (`Task { addObserver }`) without synchronous registration first; termination can happen first and leave orphan observers.
+- Do not add buffering/stacking/time-window hacks to hide state collisions when semantic dedup and proper stream boundaries can solve the root cause.
+- Do not let `syncDevices` grow with ad-hoc branches; treat size/branch explosion as a design smell early.
+
+### B. Tips And Tricks
+
+- For observer-based streams, use `AsyncStream.makeStream()`, register observer synchronously, then start async snapshot loading in a cancellable task.
+- Always cancel in-flight initial snapshot tasks in `onTermination` and remove observer in all exit paths (failure + termination).
+- Deduplicate per-device streams with semantic comparison of meaningful control fields (`kind`, `key`, `range`, mapped `ShutterStep`), not metadata/timestamp noise.
+- Reproduce optimistic UI race bugs with integration tests that interleave:
+    - pending shutter target,
+    - shutter echo to target,
+    - unrelated light updates,
+    - stale shutter payload,
+    - final real shutter movement.
+
+### C. Architecture Patterns Reinforced
+
+- Keep `DeviceRepository` as raw persisted source of truth and `ShutterRepository` as domain-specific projection layer that merges raw state with shutter UI intent state.
+- Ensure `ShutterRepository` maintains a single long-lived upstream device observation (`deviceObservationTask` guard) per repository instance; shutter stores consume per-device projected streams.
+- Keep dashboard-level observation focused on lightweight device identity/ordering data; control-specific state belongs to per-device control streams.
+- Prefer semantic dedup at stream boundaries over temporal heuristics in view/store state.
+
+### D. Coding Preferences Captured
+
+- You prefer simple, deterministic state models over defensive complexity.
+- You explicitly prefer dedup-based isolation between controls and want to avoid time-based gating mechanisms.
+- You want failed mitigation experiments removed quickly when they do not solve root cause.
+- You want stronger integration tests before/with fixes when concurrency bugs are hard to reproduce.
+- You want code-smell driven cleanup (function size, unused wiring/deps/events/effects/tests), as shown by the `RootTabStore` simplification request.

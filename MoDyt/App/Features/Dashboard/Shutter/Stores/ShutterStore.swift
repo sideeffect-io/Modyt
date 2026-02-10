@@ -46,9 +46,19 @@ enum ShutterStep: Int, CaseIterable, Identifiable, Sendable {
 @MainActor
 final class ShutterStore {
     struct Dependencies {
-        let observeShutter: (String) async -> AsyncStream<ShutterSnapshot?>
+        let observeShutter: (String) async -> any AsyncSequence<ShutterSnapshot?, Never>
         let setTarget: (String, ShutterStep, ShutterStep) async -> Void
         let sendCommand: (String, String, JSONValue) async -> Void
+
+        init(
+            observeShutter: @escaping (String) async -> any AsyncSequence<ShutterSnapshot?, Never>,
+            setTarget: @escaping (String, ShutterStep, ShutterStep) async -> Void,
+            sendCommand: @escaping (String, String, JSONValue) async -> Void
+        ) {
+            self.observeShutter = observeShutter
+            self.setTarget = setTarget
+            self.sendCommand = sendCommand
+        }
     }
 
     private(set) var descriptor: DeviceControlDescriptor

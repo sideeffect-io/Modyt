@@ -16,6 +16,26 @@ struct ShutterSnapshot: Sendable, Equatable {
         guard let targetStep else { return false }
         return actualStep != targetStep
     }
+
+    func isEquivalentForUI(to other: ShutterSnapshot) -> Bool {
+        uniqueId == other.uniqueId &&
+        actualStep == other.actualStep &&
+        targetStep == other.targetStep &&
+        descriptor.kind == other.descriptor.kind &&
+        descriptor.key == other.descriptor.key &&
+        descriptor.range == other.descriptor.range
+    }
+
+    static func areEquivalentForUI(_ lhs: ShutterSnapshot?, _ rhs: ShutterSnapshot?) -> Bool {
+        switch (lhs, rhs) {
+        case (.none, .none):
+            true
+        case let (.some(left), .some(right)):
+            left.isEquivalentForUI(to: right)
+        default:
+            false
+        }
+    }
 }
 
 actor ShutterRepository {
@@ -35,6 +55,7 @@ actor ShutterRepository {
     private let now: @Sendable () -> Date
     private let log: @Sendable (String) -> Void
     private let deviceRepository: DeviceRepository
+    private let autoObserveDevices: Bool
 
     private var database: SQLiteDatabase?
     private var uiStateDAO: DAO<ShutterUIRecord>?
@@ -47,11 +68,13 @@ actor ShutterRepository {
     init(
         databasePath: String,
         deviceRepository: DeviceRepository,
+        autoObserveDevices: Bool = true,
         now: @escaping @Sendable () -> Date = Date.init,
         log: @escaping @Sendable (String) -> Void = { _ in }
     ) {
         self.databasePath = databasePath
         self.deviceRepository = deviceRepository
+        self.autoObserveDevices = autoObserveDevices
         self.now = now
         self.log = log
     }
@@ -68,27 +91,28 @@ actor ShutterRepository {
         database = db
         uiStateDAO = dao
         uiStateById = Dictionary(uniqueKeysWithValues: existing.map { ($0.uniqueId, $0) })
-        startObservingDevicesIfNeeded()
+        if autoObserveDevices {
+            startObservingDevicesIfNeeded()
+        }
     }
 
     func observeShutter(uniqueId: String) async -> AsyncStream<ShutterSnapshot?> {
         try? await startIfNeeded()
         let observerId = UUID()
+        let (stream, continuation) = AsyncStream<ShutterSnapshot?>.makeStream()
 
-        return AsyncStream { continuation in
-            Task { [weak self] in
-                guard let self else {
-                    continuation.finish()
-                    return
-                }
-                await self.addObserver(id: observerId, uniqueId: uniqueId, continuation: continuation)
-                continuation.yield(await self.snapshot(for: uniqueId))
-            }
-
-            continuation.onTermination = { [weak self] _ in
-                Task { await self?.removeObserver(id: observerId) }
-            }
+        addObserver(id: observerId, uniqueId: uniqueId, continuation: continuation)
+        continuation.yield(snapshot(for: uniqueId))
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.removeObserver(id: observerId) }
         }
+
+        return stream
+    }
+
+    func stopObservation() {
+        deviceObservationTask?.cancel()
+        deviceObservationTask = nil
     }
 
     func syncDevices(_ devices: [DeviceRecord]) async {
@@ -101,8 +125,13 @@ actor ShutterRepository {
             let uniqueId = device.uniqueId
             nextDescriptorsById[uniqueId] = descriptor
 
+            let previousDescriptor = descriptorsById[uniqueId]
             let newStep = ShutterStep.nearestStep(for: descriptor.value, in: descriptor.range)
             let previousDisplayed = displayedActualById[uniqueId] ?? newStep
+            let didShutterControlChange = Self.didShutterControlChange(
+                previous: previousDescriptor,
+                current: descriptor
+            )
 
             if var uiRecord = uiStateById[uniqueId],
                let target = uiRecord.targetStep.flatMap(ShutterStep.init(rawValue:)) {
@@ -113,6 +142,9 @@ actor ShutterRepository {
                     uiRecord.updatedAt = now()
                     uiStateById[uniqueId] = uiRecord
                     await upsertUIState(uiRecord)
+                    displayedActualById[uniqueId] = previousDisplayed
+                } else if newStep == target && uiRecord.ignoredEcho && !didShutterControlChange {
+                    // Ignore duplicate echoes coming from unrelated device updates.
                     displayedActualById[uniqueId] = previousDisplayed
                 } else {
                     displayedActualById[uniqueId] = newStep
@@ -173,11 +205,12 @@ actor ShutterRepository {
 
     private func startObservingDevicesIfNeeded() {
         guard deviceObservationTask == nil else { return }
+        let deviceRepository = self.deviceRepository
 
         deviceObservationTask = Task { [weak self] in
-            guard let self else { return }
-            let stream = await self.deviceRepository.observeDevices()
+            let stream = await deviceRepository.observeDevices()
             for await devices in stream {
+                guard let self else { return }
                 await self.syncDevices(devices)
             }
         }
@@ -250,6 +283,18 @@ actor ShutterRepository {
         guard device.group == .shutter else { return nil }
         guard let descriptor = device.primaryControlDescriptor(), descriptor.kind == .slider else { return nil }
         return descriptor
+    }
+
+    private static func didShutterControlChange(
+        previous: DeviceControlDescriptor?,
+        current: DeviceControlDescriptor
+    ) -> Bool {
+        guard let previous else { return true }
+        return previous.kind != current.kind ||
+            previous.key != current.key ||
+            previous.range != current.range ||
+            ShutterStep.nearestStep(for: previous.value, in: previous.range) !=
+            ShutterStep.nearestStep(for: current.value, in: current.range)
     }
 
     private static let createShutterUIStateTableSQL = """

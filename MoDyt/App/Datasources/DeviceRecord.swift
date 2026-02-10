@@ -139,6 +139,79 @@ struct DrivingLightControlDescriptor: Sendable, Equatable {
 }
 
 extension DeviceRecord {
+    struct ObservationSignature: Sendable, Equatable {
+        let uniqueId: String
+        let name: String
+        let usage: String
+        let kind: String
+        let isFavorite: Bool
+        let favoriteOrder: Int?
+        let dashboardOrder: Int?
+        let primaryControl: DeviceControlDescriptor?
+        let drivingLightControl: DrivingLightControlDescriptor?
+        let fallbackData: [String: JSONValue]?
+    }
+
+    struct FavoritesSignature: Sendable, Equatable {
+        let uniqueId: String
+        let name: String
+        let usage: String
+        let kind: String
+        let isFavorite: Bool
+        let favoriteOrder: Int?
+        let dashboardOrder: Int?
+        let primaryControl: DeviceControlDescriptor?
+        let drivingLightControl: DrivingLightControlDescriptor?
+        let fallbackStatusData: [String: JSONValue]?
+    }
+
+    var observationSignature: ObservationSignature {
+        let primaryControl = primaryControlDescriptor()
+        let drivingLightControl = drivingLightControlDescriptor()
+        let fallbackData: [String: JSONValue]? =
+            (primaryControl == nil && drivingLightControl == nil) ? data : nil
+
+        return ObservationSignature(
+            uniqueId: uniqueId,
+            name: name,
+            usage: usage,
+            kind: kind,
+            isFavorite: isFavorite,
+            favoriteOrder: favoriteOrder,
+            dashboardOrder: dashboardOrder,
+            primaryControl: primaryControl,
+            drivingLightControl: drivingLightControl,
+            fallbackData: fallbackData
+        )
+    }
+
+    var favoritesSignature: FavoritesSignature {
+        let primaryControl = primaryControlDescriptor()
+        let drivingLightControl = drivingLightControlDescriptor()
+        let fallbackStatusData: [String: JSONValue]? = group == .light || group == .shutter ? nil : data
+
+        return FavoritesSignature(
+            uniqueId: uniqueId,
+            name: name,
+            usage: usage,
+            kind: kind,
+            isFavorite: isFavorite,
+            favoriteOrder: favoriteOrder,
+            dashboardOrder: dashboardOrder,
+            primaryControl: primaryControl,
+            drivingLightControl: drivingLightControl,
+            fallbackStatusData: fallbackStatusData
+        )
+    }
+
+    func isEquivalentForObservation(to other: DeviceRecord) -> Bool {
+        observationSignature == other.observationSignature
+    }
+
+    func isEquivalentForFavorites(to other: DeviceRecord) -> Bool {
+        favoritesSignature == other.favoritesSignature
+    }
+
     var group: DeviceGroup {
         DeviceGroup.from(usage: usage)
     }

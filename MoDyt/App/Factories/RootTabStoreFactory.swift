@@ -28,25 +28,8 @@ struct RootTabStoreFactory {
                     },
                     setAppActive: { isActive in
                         await environment.client.setCurrentConnectionAppActive(isActive)
-                    },
-                    disconnectConnection: {
-                        await environment.client.disconnectCurrentConnection()
-                    },
-                    clearShutterState: {
-                        await environment.shutterRepository.clearAll()
-                    },
-                    clearStoredData: {
-                        await environment.client.clearStoredData()
-                    },
-                    deviceByID: { uniqueId in
-                        await environment.repository.device(uniqueId: uniqueId)
                     }
-                ),
-                onDelegateEvent: { delegateEvent in
-                    if case .didDisconnect = delegateEvent {
-                        onDidDisconnect()
-                    }
-                }
+                )
             )
         }
     }

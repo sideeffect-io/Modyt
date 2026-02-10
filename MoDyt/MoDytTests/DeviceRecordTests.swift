@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import DeltaDoreClient
 @testable import MoDyt
@@ -68,5 +69,64 @@ struct DeviceRecordTests {
         )
 
         #expect(device.drivingLightControlDescriptor() == nil)
+    }
+
+    @Test
+    func observationEquivalenceIgnoresUpdatedAtAndUnrelatedMetadata() {
+        let baseline = TestSupport.makeDevice(
+            uniqueId: "light-7",
+            name: "Patio",
+            usage: "light",
+            data: ["on": .bool(true), "level": .number(70)],
+            metadata: [
+                "level": .object(["min": .number(0), "max": .number(100)]),
+                "heartbeat": .number(1)
+            ]
+        )
+
+        var changed = baseline
+        changed.updatedAt = baseline.updatedAt.addingTimeInterval(5)
+        changed.metadata = [
+            "level": .object(["min": .number(0), "max": .number(100)]),
+            "heartbeat": .number(2)
+        ]
+
+        #expect(baseline.isEquivalentForObservation(to: changed))
+    }
+
+    @Test
+    func observationEquivalenceDetectsMeaningfulControlChange() {
+        let baseline = TestSupport.makeDevice(
+            uniqueId: "light-8",
+            name: "Garage",
+            usage: "light",
+            data: ["on": .bool(false), "level": .number(20)],
+            metadata: ["level": .object(["min": .number(0), "max": .number(100)])]
+        )
+
+        var changed = baseline
+        changed.data["level"] = .number(65)
+
+        #expect(!baseline.isEquivalentForObservation(to: changed))
+    }
+
+    @Test
+    func favoritesEquivalenceIgnoresUpdatedAtButTracksVisibleStatus() {
+        let baseline = TestSupport.makeDevice(
+            uniqueId: "window-1",
+            name: "Kitchen Window",
+            usage: "window",
+            isFavorite: true,
+            dashboardOrder: 0,
+            data: ["open": .bool(false)]
+        )
+
+        var timeOnlyChange = baseline
+        timeOnlyChange.updatedAt = baseline.updatedAt.addingTimeInterval(20)
+        #expect(baseline.isEquivalentForFavorites(to: timeOnlyChange))
+
+        var statusChange = baseline
+        statusChange.data["open"] = .bool(true)
+        #expect(!baseline.isEquivalentForFavorites(to: statusChange))
     }
 }

@@ -3,23 +3,21 @@ import Observation
 import DeltaDoreClient
 
 struct DashboardState: Sendable, Equatable {
-    var favoriteDevices: [DeviceRecord]
+    var favoriteDevices: [DashboardDeviceDescription]
 
     static let initial = DashboardState(favoriteDevices: [])
 }
 
 enum DashboardEvent: Sendable {
     case onAppear
-    case favoritesUpdated([DeviceRecord])
+    case favoritesUpdated([DashboardDeviceDescription])
     case refreshRequested
-    case toggleFavorite(String)
     case reorderFavorite(String, String)
 }
 
 enum DashboardEffect: Sendable, Equatable {
     case startObservingFavorites
     case refreshAll
-    case toggleFavorite(String)
     case reorderFavorite(String, String)
 }
 
@@ -38,9 +36,6 @@ enum DashboardReducer {
         case .refreshRequested:
             effects = [.refreshAll]
 
-        case .toggleFavorite(let uniqueId):
-            effects = [.toggleFavorite(uniqueId)]
-
         case .reorderFavorite(let sourceId, let targetId):
             effects = [.reorderFavorite(sourceId, targetId)]
         }
@@ -53,8 +48,7 @@ enum DashboardReducer {
 @MainActor
 final class DashboardStore {
     struct Dependencies {
-        let observeFavoriteDevices: () async -> any AsyncSequence<[DeviceRecord], Never> & Sendable
-        let toggleFavorite: (String) async -> Void
+        let observeFavoriteDevices: () async -> any AsyncSequence<[DashboardDeviceDescription], Never> & Sendable
         let reorderFavorite: (String, String) async -> Void
         let refreshAll: () async -> Void
     }
@@ -95,11 +89,6 @@ final class DashboardStore {
         case .refreshAll:
             Task { [dependencies] in
                 await dependencies.refreshAll()
-            }
-
-        case .toggleFavorite(let uniqueId):
-            Task { [dependencies] in
-                await dependencies.toggleFavorite(uniqueId)
             }
 
         case .reorderFavorite(let sourceId, let targetId):

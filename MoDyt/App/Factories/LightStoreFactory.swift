@@ -1,13 +1,13 @@
 import SwiftUI
 
 struct LightStoreFactory {
-    let make: @MainActor (String, DeviceRecord?) -> LightStore
+    let make: @MainActor (String) -> LightStore
 
     static func live(environment: AppEnvironment) -> LightStoreFactory {
-        LightStoreFactory { uniqueId, initialDevice in
+        LightStoreFactory { uniqueId in
             LightStore(
                 uniqueId: uniqueId,
-                initialDevice: initialDevice,
+                initialDevice: nil,
                 dependencies: .init(
                     observeLight: { uniqueId in
                         await environment.repository.observeDevice(uniqueId: uniqueId)

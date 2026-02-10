@@ -63,7 +63,7 @@ struct DashboardView: View {
         }
     }
 
-    private func favoriteTile(for device: DeviceRecord, store: DashboardStore) -> some View {
+    private func favoriteTile(for device: DashboardDeviceDescription, store: DashboardStore) -> some View {
         DashboardDeviceCardView(device: device)
         .padding(1)
         .transition(

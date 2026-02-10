@@ -31,6 +31,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				MoDytTests/AppRootStoreTests.swift,
+				MoDytTests/AsyncSequenceRemoveDuplicatesTests.swift,
 				MoDytTests/AuthenticationStoreTests.swift,
 				MoDytTests/DashboardDeviceCardStoreTests.swift,
 				MoDytTests/DashboardStoreTests.swift,
@@ -40,6 +41,7 @@
 				MoDytTests/MoDytTests.swift,
 				MoDytTests/RootTabStoreTests.swift,
 				MoDytTests/SettingsStoreTests.swift,
+				MoDytTests/ShutterLightInteractionIntegrationTests.swift,
 				MoDytTests/ShutterStoreTests.swift,
 				MoDytTests/StoreTestSupport.swift,
 				MoDytTests/TestSupport.swift,
@@ -51,6 +53,7 @@
 			membershipExceptions = (
 				Info.plist,
 				MoDytTests/AppRootStoreTests.swift,
+				MoDytTests/AsyncSequenceRemoveDuplicatesTests.swift,
 				MoDytTests/AuthenticationStoreTests.swift,
 				MoDytTests/DashboardDeviceCardStoreTests.swift,
 				MoDytTests/DashboardStoreTests.swift,
@@ -60,6 +63,7 @@
 				MoDytTests/MoDytTests.swift,
 				MoDytTests/RootTabStoreTests.swift,
 				MoDytTests/SettingsStoreTests.swift,
+				MoDytTests/ShutterLightInteractionIntegrationTests.swift,
 				MoDytTests/ShutterStoreTests.swift,
 				MoDytTests/StoreTestSupport.swift,
 				MoDytTests/TestSupport.swift,

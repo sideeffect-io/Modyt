@@ -6,18 +6,11 @@ struct ShutterView: View {
     @Environment(\.colorScheme) private var colorScheme
     
     let uniqueId: String
-    let device: DeviceRecord
     let layout: ShutterControlLayout
     
     var body: some View {
-        WithStoreView(factory: { shutterStoreFactory.make(uniqueId, device) }) { store in
+        WithStoreView(factory: { shutterStoreFactory.make(uniqueId) }) { store in
             shutterContent(store: store)
-                .onAppear {
-                    store.sync(device: device)
-                }
-                .onChange(of: device) { _, newValue in
-                    store.sync(device: newValue)
-                }
         }
     }
     

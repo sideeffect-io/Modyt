@@ -2,16 +2,18 @@ import SwiftUI
 import DeltaDoreClient
 
 struct ShutterStoreFactory {
-    let make: @MainActor (String, DeviceRecord?) -> ShutterStore
+    let make: @MainActor (String) -> ShutterStore
 
     static func live(environment: AppEnvironment) -> ShutterStoreFactory {
-        ShutterStoreFactory { uniqueId, initialDevice in
+        ShutterStoreFactory { uniqueId in
             ShutterStore(
                 uniqueId: uniqueId,
-                initialDevice: initialDevice,
+                initialDevice: nil,
                 dependencies: .init(
                     observeShutter: { uniqueId in
-                        await environment.shutterRepository.observeShutter(uniqueId: uniqueId)
+                        await environment.shutterRepository
+                            .observeShutter(uniqueId: uniqueId)
+                            .removeDuplicates(by: ShutterSnapshot.areEquivalentForUI)
                     },
                     setTarget: { uniqueId, targetStep, originStep in
                         await environment.shutterRepository.setTarget(

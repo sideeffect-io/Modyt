@@ -36,24 +36,34 @@ actor DeviceRepository {
 
     func observeDevices() -> AsyncStream<[DeviceRecord]> {
         let observerId = UUID()
-        return AsyncStream { continuation in
-            Task { [weak self] in
-                guard let self else { return }
-                do {
-                    try await self.startIfNeeded()
-                    let snapshot = try await self.listDevices()
-                    log("Devices snapshot loaded count=\(snapshot.count)")
-                    continuation.yield(snapshot)
-                    await self.addObserver(id: observerId, continuation: continuation)
-                } catch {
-                    log("Devices snapshot load failed error=\(error)")
-                    continuation.finish()
-                }
+        let (stream, continuation) = AsyncStream<[DeviceRecord]>.makeStream()
+
+        addObserver(id: observerId, continuation: continuation)
+
+        let snapshotTask = Task { [weak self] in
+            guard let self else {
+                continuation.finish()
+                return
             }
-            continuation.onTermination = { [weak self] _ in
-                Task { await self?.removeObserver(id: observerId) }
+
+            do {
+                try await self.startIfNeeded()
+                let snapshot = try await self.listDevices()
+                log("Devices snapshot loaded count=\(snapshot.count)")
+                continuation.yield(snapshot)
+            } catch {
+                log("Devices snapshot load failed error=\(error)")
+                await self.removeObserver(id: observerId)
+                continuation.finish()
             }
         }
+
+        continuation.onTermination = { [weak self] _ in
+            snapshotTask.cancel()
+            Task { await self?.removeObserver(id: observerId) }
+        }
+
+        return stream
     }
 
     func observeFavorites() -> some AsyncSequence<[DeviceRecord], Never> & Sendable {
@@ -66,12 +76,34 @@ actor DeviceRepository {
                     return lhsOrder < rhsOrder
                 }
         }
+        .removeDuplicates(by: Self.areFavoriteSnapshotsEquivalent)
+    }
+
+    func observeFavoriteDescriptions() -> some AsyncSequence<[DashboardDeviceDescription], Never> & Sendable {
+        observeDevices().map { snapshot in
+            snapshot
+                .filter(\.isFavorite)
+                .sorted { lhs, rhs in
+                    let lhsOrder = lhs.dashboardOrder ?? lhs.favoriteOrder ?? Int.max
+                    let rhsOrder = rhs.dashboardOrder ?? rhs.favoriteOrder ?? Int.max
+                    return lhsOrder < rhsOrder
+                }
+                .map { device in
+                    DashboardDeviceDescription(
+                        uniqueId: device.uniqueId,
+                        name: device.name,
+                        usage: device.usage
+                    )
+                }
+        }
+        .removeDuplicates()
     }
 
     func observeDevice(uniqueId: String) -> some AsyncSequence<DeviceRecord?, Never> & Sendable {
         observeDevices().map { snapshot in
             snapshot.first(where: { $0.uniqueId == uniqueId })
         }
+        .removeDuplicates(by: Self.areObservedDevicesEquivalent)
     }
 
     func device(uniqueId: String) async -> DeviceRecord? {
@@ -206,6 +238,30 @@ actor DeviceRepository {
         try await startIfNeeded()
         guard let dao else { throw RepositoryError.notReady }
         return dao
+    }
+
+    private static func areFavoriteSnapshotsEquivalent(
+        _ lhs: [DeviceRecord],
+        _ rhs: [DeviceRecord]
+    ) async -> Bool {
+        guard lhs.count == rhs.count else { return false }
+        return zip(lhs, rhs).allSatisfy { left, right in
+            left.isEquivalentForFavorites(to: right)
+        }
+    }
+
+    private static func areObservedDevicesEquivalent(
+        _ lhs: DeviceRecord?,
+        _ rhs: DeviceRecord?
+    ) async -> Bool {
+        switch (lhs, rhs) {
+        case (.none, .none):
+            true
+        case let (.some(left), .some(right)):
+            left.isEquivalentForObservation(to: right)
+        default:
+            false
+        }
     }
 
     private static let createDevicesTableSQL = """

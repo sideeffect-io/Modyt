@@ -5,11 +5,10 @@ import Testing
 struct DashboardStoreTests {
     @Test
     func favoritesStreamUpdatesState() async {
-        let streamBox = BufferedStreamBox<[DeviceRecord]>()
+        let streamBox = BufferedStreamBox<[DashboardDeviceDescription]>()
         let store = DashboardStore(
             dependencies: .init(
                 observeFavoriteDevices: { streamBox.stream },
-                toggleFavorite: { _ in },
                 reorderFavorite: { _, _ in },
                 refreshAll: {}
             )
@@ -17,9 +16,9 @@ struct DashboardStoreTests {
 
         store.send(.onAppear)
         streamBox.yield([
-            TestSupport.makeDevice(uniqueId: "a", name: "A", usage: "light", isFavorite: true),
-            TestSupport.makeDevice(uniqueId: "b", name: "B", usage: "light", isFavorite: true),
-            TestSupport.makeDevice(uniqueId: "c", name: "C", usage: "light", isFavorite: true)
+            DashboardDeviceDescription(uniqueId: "a", name: "A", usage: "light"),
+            DashboardDeviceDescription(uniqueId: "b", name: "B", usage: "light"),
+            DashboardDeviceDescription(uniqueId: "c", name: "C", usage: "light")
         ])
         await settleAsyncState()
 
@@ -28,7 +27,7 @@ struct DashboardStoreTests {
 
     @Test
     func onAppearStartsObservationOnlyOnce() async {
-        let streamBox = BufferedStreamBox<[DeviceRecord]>()
+        let streamBox = BufferedStreamBox<[DashboardDeviceDescription]>()
         let observeCounter = LockedCounter()
         let store = DashboardStore(
             dependencies: .init(
@@ -36,7 +35,6 @@ struct DashboardStoreTests {
                     observeCounter.increment()
                     return streamBox.stream
                 },
-                toggleFavorite: { _ in },
                 reorderFavorite: { _, _ in },
                 refreshAll: {}
             )
@@ -50,7 +48,7 @@ struct DashboardStoreTests {
     }
 
     @Test
-    func toggleReorderAndRefreshDispatchEffects() async {
+    func reorderAndRefreshDispatchEffects() async {
         let recorder = TestRecorder<String>()
         let store = DashboardStore(
             dependencies: .init(
@@ -58,9 +56,6 @@ struct DashboardStoreTests {
                     AsyncStream { continuation in
                         continuation.finish()
                     }
-                },
-                toggleFavorite: { uniqueId in
-                    await recorder.record("toggle:\(uniqueId)")
                 },
                 reorderFavorite: { sourceId, targetId in
                     await recorder.record("reorder:\(sourceId)->\(targetId)")
@@ -71,13 +66,11 @@ struct DashboardStoreTests {
             )
         )
 
-        store.send(.toggleFavorite("device-1"))
         store.send(.reorderFavorite("device-1", "device-2"))
         store.send(.refreshRequested)
         await settleAsyncState()
 
         let entries = await recorder.values
-        #expect(entries.contains("toggle:device-1"))
         #expect(entries.contains("reorder:device-1->device-2"))
         #expect(entries.contains("refresh"))
     }

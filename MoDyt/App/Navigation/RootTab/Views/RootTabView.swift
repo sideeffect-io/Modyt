@@ -29,8 +29,7 @@ struct RootTabView: View {
                 NavigationStack {
                     TabBackgroundContainer {
                         DashboardView()
-                        .toolbarBackground(.hidden, for: .navigationBar)
-                        .toolbarBackground(.hidden, for: .tabBar)
+                            .hideChromeBackgroundForMobileTabs()
                     }
                 }
                 .clearNavigationContainerBackground()
@@ -40,8 +39,7 @@ struct RootTabView: View {
                 NavigationStack {
                     TabBackgroundContainer {
                         DevicesView()
-                        .toolbarBackground(.hidden, for: .navigationBar)
-                        .toolbarBackground(.hidden, for: .tabBar)
+                            .hideChromeBackgroundForMobileTabs()
                     }
                 }
                 .clearNavigationContainerBackground()
@@ -51,9 +49,8 @@ struct RootTabView: View {
                 NavigationStack {
                     TabBackgroundContainer {
                         SettingsView()
-                        .navigationTitle("Settings")
-                        .toolbarBackground(.hidden, for: .navigationBar)
-                        .toolbarBackground(.hidden, for: .tabBar)
+                            .navigationTitle("Settings")
+                            .hideChromeBackgroundForMobileTabs()
                     }
                 }
                 .clearNavigationContainerBackground()
@@ -64,12 +61,27 @@ struct RootTabView: View {
 
 private extension View {
     @ViewBuilder
+    func hideChromeBackgroundForMobileTabs() -> some View {
+        #if os(iOS)
+        self
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbarBackground(.hidden, for: .tabBar)
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder
     func clearNavigationContainerBackground() -> some View {
+        #if os(iOS)
         if #available(iOS 17.0, *) {
             containerBackground(.clear, for: .navigation)
         } else {
             self
         }
+        #else
+        self
+        #endif
     }
 }
 

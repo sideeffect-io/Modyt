@@ -1,10 +1,9 @@
 import SwiftUI
-import DeltaDoreClient
 
 struct DashboardDeviceCardView: View {
     @Environment(\.dashboardDeviceCardStoreFactory) private var dashboardDeviceCardStoreFactory
 
-    let device: DeviceRecord
+    let device: DashboardDeviceDescription
 
     private let dashboardCardHeight: CGFloat = 194
 
@@ -18,7 +17,7 @@ struct DashboardDeviceCardView: View {
     }
 
     private func cardContent(
-        for device: DeviceRecord,
+        for device: DashboardDeviceDescription,
         onFavoriteTapped: @escaping () -> Void
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -28,7 +27,7 @@ struct DashboardDeviceCardView: View {
                     .frame(width: 36, height: 36)
                 Spacer()
                 FavoriteOrbButton(
-                    isFavorite: device.isFavorite,
+                    isFavorite: true,
                     size: 32,
                     action: onFavoriteTapped
                 )
@@ -39,7 +38,7 @@ struct DashboardDeviceCardView: View {
                 .lineLimit(1)
 
             if device.group != .shutter && device.group != .light {
-                Text(device.statusText)
+                Text(device.group.title)
                     .font(.system(.caption, design: .rounded))
                     .foregroundStyle(.secondary)
             }
@@ -52,21 +51,12 @@ struct DashboardDeviceCardView: View {
     }
 
     @ViewBuilder
-    private func controlContent(for device: DeviceRecord) -> some View {
+    private func controlContent(for device: DashboardDeviceDescription) -> some View {
         switch device.group {
         case .shutter:
-            ShutterView(
-                uniqueId: device.uniqueId,
-                device: device,
-                layout: .regular
-            )
+            ShutterView(uniqueId: device.uniqueId, layout: .regular)
         case .light:
-            if device.drivingLightControlDescriptor() != nil {
-                LightView(
-                    uniqueId: device.uniqueId,
-                    device: device
-                )
-            }
+            LightView(uniqueId: device.uniqueId)
         default:
             EmptyView()
         }

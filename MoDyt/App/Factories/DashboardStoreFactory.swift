@@ -8,10 +8,7 @@ struct DashboardStoreFactory {
             DashboardStore(
                 dependencies: .init(
                     observeFavoriteDevices: {
-                        await environment.repository.observeFavorites()
-                    },
-                    toggleFavorite: { uniqueId in
-                        await environment.repository.toggleFavorite(uniqueId: uniqueId)
+                        await environment.repository.observeFavoriteDescriptions()
                     },
                     reorderFavorite: { sourceId, targetId in
                         await environment.repository.reorderDashboard(from: sourceId, to: targetId)

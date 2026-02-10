@@ -5,12 +5,11 @@ struct LightView: View {
     @Environment(\.lightStoreFactory) private var lightStoreFactory
 
     let uniqueId: String
-    let device: DeviceRecord
 
     @State private var interactionNormalizedLevel: Double?
 
     var body: some View {
-        WithStoreView(factory: { lightStoreFactory.make(uniqueId, device) }) { store in
+        WithStoreView(factory: { lightStoreFactory.make(uniqueId) }) { store in
             let descriptor = store.descriptor
             let displayedNormalized = interactionNormalizedLevel ?? descriptor.normalizedLevel
             let dialIsOn = descriptor.isOn || displayedNormalized > 0.001
@@ -19,7 +18,7 @@ struct LightView: View {
                 ? .easeInOut(duration: 0.24)
                 : nil
 
-            HStack(alignment: .center, spacing: 12) {
+            HStack(alignment: .center, spacing: 16) {
                 CircularIntensityDial(
                     normalizedValue: displayedNormalized,
                     isOn: dialIsOn,
@@ -34,6 +33,7 @@ struct LightView: View {
                 .frame(width: 80, height: 80)
                 .animation(dialAnimation, value: displayedNormalized)
                 .animation(dialAnimation, value: dialIsOn)
+                .frame(maxWidth: .infinity, alignment: .center)
 
                 VStack(spacing: 8) {
                     Button {
@@ -67,8 +67,9 @@ struct LightView: View {
                         .font(.system(.caption, design: .rounded).weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, alignment: .center)
             }
+            .frame(maxWidth: .infinity, alignment: .center)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Driving lights")
             .accessibilityValue("\(displayedPercentage) percent, \(descriptor.isOn ? "on" : "off")")
