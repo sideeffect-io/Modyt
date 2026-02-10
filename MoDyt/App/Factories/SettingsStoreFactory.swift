@@ -9,6 +9,7 @@ struct SettingsStoreFactory {
                 dependencies: .init(
                     requestDisconnect: {
                         await environment.requestDisconnect()
+                        return .success(())
                     }
                 )
             )

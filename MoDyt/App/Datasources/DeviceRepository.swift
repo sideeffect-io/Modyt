@@ -133,10 +133,18 @@ actor DeviceRepository {
     }
 
     func applyOptimisticUpdate(uniqueId: String, key: String, value: JSONValue) async {
+        await applyOptimisticUpdates(uniqueId: uniqueId, changes: [key: value])
+    }
+
+    func applyOptimisticUpdates(uniqueId: String, changes: [String: JSONValue]) async {
+        guard !changes.isEmpty else { return }
         guard let deviceDAO = try? await requireDAO() else { return }
         guard var existing = try? await deviceDAO.read(.text(uniqueId)) else { return }
         var data = existing.data
-        data[key] = value
+        for (key, value) in changes {
+            data[key] = value
+        }
+        guard data != existing.data else { return }
         existing.data = data
         existing.updatedAt = now()
         _ = try? await deviceDAO.update(existing)

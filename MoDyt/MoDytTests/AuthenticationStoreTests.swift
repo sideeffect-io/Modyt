@@ -53,7 +53,7 @@ struct AuthenticationStoreTests {
 
         let (failureState, _) = AuthenticationReducer.reduce(
             state: loadingState,
-            event: .sitesLoaded(.failure(TestError.expectedFailure))
+            event: .sitesLoaded(.failure(AuthenticationStoreError(message: "expected failure")))
         )
         guard case .login(let failureLogin) = failureState.phase else {
             #expect(Bool(false), "Expected login phase")

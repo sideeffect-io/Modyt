@@ -8,9 +8,15 @@ struct SettingsState: Sendable, Equatable {
     static let initial = SettingsState(isDisconnecting: false, errorMessage: nil)
 }
 
+struct SettingsStoreError: LocalizedError, Sendable, Equatable {
+    let message: String
+
+    var errorDescription: String? { message }
+}
+
 enum SettingsEvent: Sendable {
     case disconnectTapped
-    case disconnectFinished(Result<Void, Error>)
+    case disconnectFinished(Result<Void, SettingsStoreError>)
 }
 
 enum SettingsEffect: Sendable, Equatable {
@@ -35,7 +41,7 @@ enum SettingsReducer {
             case .success:
                 state.errorMessage = nil
             case .failure(let error):
-                state.errorMessage = error.localizedDescription
+                state.errorMessage = error.message
             }
         }
 
@@ -47,16 +53,16 @@ enum SettingsReducer {
 @MainActor
 final class SettingsStore {
     struct Dependencies {
-        let requestDisconnect: () async throws -> Void
+        let requestDisconnect: @Sendable () async -> Result<Void, SettingsStoreError>
     }
 
     private(set) var state: SettingsState
 
-    private let dependencies: Dependencies
+    private let worker: Worker
 
     init(dependencies: Dependencies) {
         self.state = .initial
-        self.dependencies = dependencies
+        self.worker = Worker(requestDisconnect: dependencies.requestDisconnect)
     }
 
     func send(_ event: SettingsEvent) {
@@ -74,14 +80,26 @@ final class SettingsStore {
     private func handle(_ effect: SettingsEffect) {
         switch effect {
         case .requestDisconnect:
-            Task { [weak self, dependencies] in
-                do {
-                    try await dependencies.requestDisconnect()
-                    self?.send(.disconnectFinished(.success(())))
-                } catch {
-                    self?.send(.disconnectFinished(.failure(error)))
-                }
+            Task { [weak self, worker] in
+                let result = await worker.requestDisconnect()
+                self?.receive(.disconnectFinished(result))
             }
+        }
+    }
+
+    private func receive(_ event: SettingsEvent) {
+        send(event)
+    }
+
+    private actor Worker {
+        private let requestDisconnectAction: @Sendable () async -> Result<Void, SettingsStoreError>
+
+        init(requestDisconnect: @escaping @Sendable () async -> Result<Void, SettingsStoreError>) {
+            self.requestDisconnectAction = requestDisconnect
+        }
+
+        func requestDisconnect() async -> Result<Void, SettingsStoreError> {
+            await requestDisconnectAction()
         }
     }
 }

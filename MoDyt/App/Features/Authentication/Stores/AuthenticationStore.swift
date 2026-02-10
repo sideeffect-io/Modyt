@@ -34,13 +34,19 @@ struct AuthenticationState: Sendable, Equatable {
     static let initial = AuthenticationState(phase: .bootstrapping)
 }
 
+struct AuthenticationStoreError: LocalizedError, Sendable, Equatable {
+    let message: String
+
+    var errorDescription: String? { message }
+}
+
 enum AuthenticationEvent: Sendable {
     case onAppear
     case flowInspected(DeltaDoreClient.ConnectionFlowStatus)
     case loginEmailChanged(String)
     case loginPasswordChanged(String)
     case loadSitesTapped
-    case sitesLoaded(Result<[DeltaDoreClient.Site], Error>)
+    case sitesLoaded(Result<[DeltaDoreClient.Site], AuthenticationStoreError>)
     case siteSelected(Int)
     case connectTapped
     case connectionSucceeded
@@ -112,7 +118,7 @@ enum AuthenticationReducer {
                     login.selectedSiteIndex = sites.count == 1 ? 0 : nil
                     login.errorMessage = nil
                 case .failure(let error):
-                    login.errorMessage = error.localizedDescription
+                    login.errorMessage = error.message
                 }
                 state.phase = .login(login)
             }
@@ -155,25 +161,30 @@ enum AuthenticationReducer {
 @MainActor
 final class AuthenticationStore {
     struct Dependencies {
-        let inspectFlow: () async -> DeltaDoreClient.ConnectionFlowStatus
-        let connectStored: () async throws -> Void
-        let listSites: (String, String) async throws -> [DeltaDoreClient.Site]
-        let connectNew: (String, String, Int?) async throws -> Void
+        let inspectFlow: @Sendable () async -> DeltaDoreClient.ConnectionFlowStatus
+        let connectStored: @Sendable () async throws -> Void
+        let listSites: @Sendable (String, String) async throws -> [DeltaDoreClient.Site]
+        let connectNew: @Sendable (String, String, Int?) async throws -> Void
     }
 
     private(set) var state: AuthenticationState
 
     var onDelegateEvent: @MainActor (AuthenticationDelegateEvent) -> Void
 
-    private let dependencies: Dependencies
+    private let worker: Worker
 
     init(
         dependencies: Dependencies,
         onDelegateEvent: @escaping @MainActor (AuthenticationDelegateEvent) -> Void = { _ in }
     ) {
-        self.dependencies = dependencies
         self.state = .initial
         self.onDelegateEvent = onDelegateEvent
+        self.worker = Worker(
+            inspectFlow: dependencies.inspectFlow,
+            connectStored: dependencies.connectStored,
+            listSites: dependencies.listSites,
+            connectNew: dependencies.connectNew
+        )
     }
 
     func send(_ event: AuthenticationEvent) {
@@ -199,53 +210,87 @@ final class AuthenticationStore {
     private func handle(_ effect: AuthenticationEffect) {
         switch effect {
         case .inspectFlow:
-            Task { [dependencies] in
-                let flow = await dependencies.inspectFlow()
-                await MainActor.run {
-                    self.send(.flowInspected(flow))
-                }
+            Task { [weak self, worker] in
+                let flow = await worker.inspectFlow()
+                self?.receive(.flowInspected(flow))
             }
 
         case .connectStored:
-            Task { [dependencies] in
-                do {
-                    try await dependencies.connectStored()
-                    await MainActor.run {
-                        self.send(.connectionSucceeded)
-                    }
-                } catch {
-                    await MainActor.run {
-                        self.send(.connectionFailed(error.localizedDescription))
-                    }
+            Task { [weak self, worker] in
+                if let message = await worker.connectStored() {
+                    self?.receive(.connectionFailed(message))
+                } else {
+                    self?.receive(.connectionSucceeded)
                 }
             }
 
         case .listSites(let email, let password):
-            Task { [dependencies] in
-                do {
-                    let sites = try await dependencies.listSites(email, password)
-                    await MainActor.run {
-                        self.send(.sitesLoaded(.success(sites)))
-                    }
-                } catch {
-                    await MainActor.run {
-                        self.send(.sitesLoaded(.failure(error)))
-                    }
-                }
+            Task { [weak self, worker] in
+                let result = await worker.listSites(email: email, password: password)
+                self?.receive(.sitesLoaded(result))
             }
 
         case .connectNew(let email, let password, let siteIndex):
-            Task { [dependencies] in
-                do {
-                    try await dependencies.connectNew(email, password, siteIndex)
-                    await MainActor.run {
-                        self.send(.connectionSucceeded)
-                    }
-                } catch {
-                    await MainActor.run {
-                        self.send(.connectionFailed(error.localizedDescription))
-                    }
+            Task { [weak self, worker] in
+                if let message = await worker.connectNew(email: email, password: password, siteIndex: siteIndex) {
+                    self?.receive(.connectionFailed(message))
+                } else {
+                    self?.receive(.connectionSucceeded)
                 }
+            }
+        }
+    }
+
+    private func receive(_ event: AuthenticationEvent) {
+        send(event)
+    }
+
+    private actor Worker {
+        private let inspectFlowAction: @Sendable () async -> DeltaDoreClient.ConnectionFlowStatus
+        private let connectStoredAction: @Sendable () async throws -> Void
+        private let listSitesAction: @Sendable (String, String) async throws -> [DeltaDoreClient.Site]
+        private let connectNewAction: @Sendable (String, String, Int?) async throws -> Void
+
+        init(
+            inspectFlow: @escaping @Sendable () async -> DeltaDoreClient.ConnectionFlowStatus,
+            connectStored: @escaping @Sendable () async throws -> Void,
+            listSites: @escaping @Sendable (String, String) async throws -> [DeltaDoreClient.Site],
+            connectNew: @escaping @Sendable (String, String, Int?) async throws -> Void
+        ) {
+            self.inspectFlowAction = inspectFlow
+            self.connectStoredAction = connectStored
+            self.listSitesAction = listSites
+            self.connectNewAction = connectNew
+        }
+
+        func inspectFlow() async -> DeltaDoreClient.ConnectionFlowStatus {
+            await inspectFlowAction()
+        }
+
+        func connectStored() async -> String? {
+            do {
+                try await connectStoredAction()
+                return nil
+            } catch {
+                return error.localizedDescription
+            }
+        }
+
+        func listSites(email: String, password: String) async -> Result<[DeltaDoreClient.Site], AuthenticationStoreError> {
+            do {
+                let sites = try await listSitesAction(email, password)
+                return .success(sites)
+            } catch {
+                return .failure(AuthenticationStoreError(message: error.localizedDescription))
+            }
+        }
+
+        func connectNew(email: String, password: String, siteIndex: Int?) async -> String? {
+            do {
+                try await connectNewAction(email, password, siteIndex)
+                return nil
+            } catch {
+                return error.localizedDescription
             }
         }
     }

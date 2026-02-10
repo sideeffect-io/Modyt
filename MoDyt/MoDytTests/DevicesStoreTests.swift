@@ -24,6 +24,7 @@ struct DevicesStoreTests {
             ]
         )
         await settleAsyncState()
+        streamBox.finish()
 
         #expect(store.state.groupedDevices.count == 2)
         #expect(store.state.groupedDevices.map(\.group) == [.shutter, .light])

@@ -296,3 +296,52 @@ You explicitly asked for:
 - You want failed mitigation experiments removed quickly when they do not solve root cause.
 - You want stronger integration tests before/with fixes when concurrency bugs are hard to reproduce.
 - You want code-smell driven cleanup (function size, unused wiring/deps/events/effects/tests), as shown by the `RootTabStore` simplification request.
+
+---
+
+## 7) Latest Session Updates (Light Gauge Jerkiness + Glass Rendering)
+
+### A. Root Cause Findings
+
+- The main visible jank on light gauge on/off transitions was dominated by card compositing cost, not only gauge math.
+- Disabling `.glassCard(cornerRadius: 22)` on dashboard cards immediately made gauge animation smooth, confirming the rendering bottleneck.
+- Co-locating gauge animation and switch visual state changes in the same glass-rendered card increases invalidation pressure and frame drops.
+
+### B. UI/Animation Lessons
+
+- Simplifying `LightView` structure helps update isolation:
+  - keep gauge animation state local (`GaugeControlView`),
+  - keep parent state minimal (`requestedPowerTarget`),
+  - avoid broad state fan-out from card container updates.
+- A `Path`/`Shape`-based gauge (`PathGauge` + `GaugeArc`) is a good tradeoff for predictable animation and lower view-tree complexity.
+- For diagnosing jerky SwiftUI animations, A/B toggles are high-signal:
+  - remove card glass,
+  - move switch out of card,
+  - remove switch visual animations,
+  - then reintroduce effects one by one.
+
+### C. Glass Strategy That Preserved Performance
+
+- Replacing native card glass effect with a faux glass recipe based on material (`.ultraThinMaterial`/`.thinMaterial`) reduced animation jank significantly.
+- A unified modifier API is kept through `glassCard(..., tone:)` with two tones:
+  - `surface` for outer card,
+  - `inset` for nested control card.
+- Final visual tuning guidance:
+  - keep both modes flat/homogeneous (no visible gradient bias),
+  - keep outer light cards brighter/whiter than background,
+  - keep inset light cards darker than outer card to preserve hierarchy,
+  - use slight light-mode shadow only for depth (avoid halo blur).
+
+### D. Swift Concurrency Guidance Reinforced
+
+- `Task.detached` should remain a last resort; prefer structured concurrency and actor isolation.
+- In this codebase snapshot, no `Task.detached` usage is present.
+- To avoid blocking the main thread without detached tasks:
+  - keep heavy IO/compute in actor/repository boundaries,
+  - expose async APIs and streams to stores,
+  - confine UI state mutation to main-actor contexts only.
+
+### E. Product/Team Preference Captured
+
+- You prioritize smooth interaction and frame stability over perfect visual parity with native glass APIs.
+- You prefer iterative visual calibration with screenshot-based comparison until parity is close enough.

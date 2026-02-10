@@ -48,19 +48,23 @@ enum DashboardReducer {
 @MainActor
 final class DashboardStore {
     struct Dependencies {
-        let observeFavoriteDevices: () async -> any AsyncSequence<[DashboardDeviceDescription], Never> & Sendable
-        let reorderFavorite: (String, String) async -> Void
-        let refreshAll: () async -> Void
+        let observeFavoriteDevices: @Sendable () async -> any AsyncSequence<[DashboardDeviceDescription], Never> & Sendable
+        let reorderFavorite: @Sendable (String, String) async -> Void
+        let refreshAll: @Sendable () async -> Void
     }
 
     private(set) var state: DashboardState
 
-    private let dependencies: Dependencies
     private let favoritesTask = TaskHandle()
+    private let worker: Worker
 
     init(dependencies: Dependencies) {
         self.state = .initial
-        self.dependencies = dependencies
+        self.worker = Worker(
+            observeFavoriteDevices: dependencies.observeFavoriteDevices,
+            reorderFavorite: dependencies.reorderFavorite,
+            refreshAll: dependencies.refreshAll
+        )
     }
 
     func send(_ event: DashboardEvent) {
@@ -79,22 +83,55 @@ final class DashboardStore {
         switch effect {
         case .startObservingFavorites:
             guard favoritesTask.task == nil else { return }
-            favoritesTask.task = Task { [weak self, dependencies] in
-                let stream = await dependencies.observeFavoriteDevices()
-                for await favoriteDevices in stream {
-                    self?.send(.favoritesUpdated(favoriteDevices))
+            favoritesTask.task = Task { [weak self, worker] in
+                await worker.observeFavorites { [weak self] favoriteDevices in
+                    await self?.send(.favoritesUpdated(favoriteDevices))
                 }
             }
 
         case .refreshAll:
-            Task { [dependencies] in
-                await dependencies.refreshAll()
+            Task { [worker] in
+                await worker.refreshAll()
             }
 
         case .reorderFavorite(let sourceId, let targetId):
-            Task { [dependencies] in
-                await dependencies.reorderFavorite(sourceId, targetId)
+            Task { [worker] in
+                await worker.reorderFavorite(sourceId: sourceId, targetId: targetId)
             }
+        }
+    }
+
+    private actor Worker {
+        private let observeFavoriteDevices: @Sendable () async -> any AsyncSequence<[DashboardDeviceDescription], Never> & Sendable
+        private let reorderFavoriteAction: @Sendable (String, String) async -> Void
+        private let refreshAllAction: @Sendable () async -> Void
+
+        init(
+            observeFavoriteDevices: @escaping @Sendable () async -> any AsyncSequence<[DashboardDeviceDescription], Never> & Sendable,
+            reorderFavorite: @escaping @Sendable (String, String) async -> Void,
+            refreshAll: @escaping @Sendable () async -> Void
+        ) {
+            self.observeFavoriteDevices = observeFavoriteDevices
+            self.reorderFavoriteAction = reorderFavorite
+            self.refreshAllAction = refreshAll
+        }
+
+        func observeFavorites(
+            onUpdate: @escaping @Sendable ([DashboardDeviceDescription]) async -> Void
+        ) async {
+            let stream = await observeFavoriteDevices()
+            for await favoriteDevices in stream {
+                guard !Task.isCancelled else { return }
+                await onUpdate(favoriteDevices)
+            }
+        }
+
+        func refreshAll() async {
+            await refreshAllAction()
+        }
+
+        func reorderFavorite(sourceId: String, targetId: String) async {
+            await reorderFavoriteAction(sourceId, targetId)
         }
     }
 }

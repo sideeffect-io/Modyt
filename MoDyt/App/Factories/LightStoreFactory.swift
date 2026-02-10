@@ -12,8 +12,8 @@ struct LightStoreFactory {
                     observeLight: { uniqueId in
                         await environment.repository.observeDevice(uniqueId: uniqueId)
                     },
-                    applyOptimisticUpdate: { uniqueId, key, value in
-                        await environment.repository.applyOptimisticUpdate(uniqueId: uniqueId, key: key, value: value)
+                    applyOptimisticChanges: { uniqueId, changes in
+                        await environment.repository.applyOptimisticUpdates(uniqueId: uniqueId, changes: changes)
                     },
                     sendCommand: { uniqueId, key, value in
                         await environment.sendDeviceCommand(uniqueId, key, value)

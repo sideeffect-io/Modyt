@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import DeltaDoreClient
 @testable import MoDyt
@@ -20,8 +21,11 @@ struct LightStoreTests {
                         continuation.finish()
                     }
                 },
-                applyOptimisticUpdate: { uniqueId, key, value in
-                    await recorder.record("optimistic:\(uniqueId):\(key):\(value.boolValue == true)")
+                applyOptimisticChanges: { uniqueId, changes in
+                    for key in changes.keys.sorted() {
+                        guard let value = changes[key] else { continue }
+                        await recorder.record("optimistic:\(uniqueId):\(key):\(value.boolValue == true)")
+                    }
                 },
                 sendCommand: { uniqueId, key, value in
                     await recorder.record("command:\(uniqueId):\(key):\(value.boolValue == true)")
@@ -54,8 +58,11 @@ struct LightStoreTests {
                         continuation.finish()
                     }
                 },
-                applyOptimisticUpdate: { uniqueId, key, value in
-                    await recorder.record("optimistic:\(uniqueId):\(key):\(Int(value.numberValue ?? -1))")
+                applyOptimisticChanges: { uniqueId, changes in
+                    for key in changes.keys.sorted() {
+                        guard let value = changes[key] else { continue }
+                        await recorder.record("optimistic:\(uniqueId):\(key):\(Int(value.numberValue ?? -1))")
+                    }
                 },
                 sendCommand: { uniqueId, key, value in
                     await recorder.record("command:\(uniqueId):\(key):\(Int(value.numberValue ?? -1))")
@@ -88,7 +95,7 @@ struct LightStoreTests {
                         continuation.finish()
                     }
                 },
-                applyOptimisticUpdate: { _, _, _ in
+                applyOptimisticChanges: { _, _ in
                     await recorder.record("optimistic")
                 },
                 sendCommand: { _, _, _ in
@@ -119,10 +126,14 @@ struct LightStoreTests {
                         continuation.finish()
                     }
                 },
-                applyOptimisticUpdate: { uniqueId, key, value in
-                    let number = value.numberValue.map { String(Int($0.rounded())) } ?? ""
-                    let bool = value.boolValue.map { String($0) } ?? ""
-                    await recorder.record("optimistic:\(uniqueId):\(key):\(number)\(bool)")
+                applyOptimisticChanges: { uniqueId, changes in
+                    await recorder.record("optimisticBatch:\(uniqueId):\(changes.count)")
+                    for key in changes.keys.sorted() {
+                        guard let value = changes[key] else { continue }
+                        let number = value.numberValue.map { String(Int($0.rounded())) } ?? ""
+                        let bool = value.boolValue.map { String($0) } ?? ""
+                        await recorder.record("optimistic:\(uniqueId):\(key):\(number)\(bool)")
+                    }
                 },
                 sendCommand: { uniqueId, key, value in
                     let number = value.numberValue.map { String(Int($0.rounded())) } ?? ""
@@ -139,6 +150,8 @@ struct LightStoreTests {
         #expect(store.descriptor.isOn)
 
         let entries = await recorder.values
+        #expect(entries.filter { $0.hasPrefix("optimisticBatch:light-5") }.count == 1)
+        #expect(entries.contains("optimisticBatch:light-5:2"))
         #expect(entries.contains("optimistic:light-5:level:40"))
         #expect(entries.contains("command:light-5:level:40"))
         #expect(entries.contains("optimistic:light-5:on:true"))
@@ -160,8 +173,11 @@ struct LightStoreTests {
                         continuation.finish()
                     }
                 },
-                applyOptimisticUpdate: { _, key, value in
-                    await recorder.record("optimistic:\(key):\(value.boolValue == true)")
+                applyOptimisticChanges: { _, changes in
+                    for key in changes.keys.sorted() {
+                        guard let value = changes[key] else { continue }
+                        await recorder.record("optimistic:\(key):\(value.boolValue == true)")
+                    }
                 },
                 sendCommand: { _, key, value in
                     await recorder.record("command:\(key):\(value.boolValue == true)")
@@ -188,7 +204,7 @@ struct LightStoreTests {
             ),
             dependencies: .init(
                 observeLight: { _ in streamBox.stream },
-                applyOptimisticUpdate: { _, _, _ in },
+                applyOptimisticChanges: { _, _ in },
                 sendCommand: { _, _, _ in }
             )
         )
@@ -205,6 +221,80 @@ struct LightStoreTests {
         #expect(store.descriptor.level == 85)
         #expect(store.descriptor.powerKey == "on")
         #expect(store.descriptor.levelKey == "level")
+    }
+
+    @Test
+    func pendingStateSuppressesStaleEchoBeforeTimeout() async {
+        let streamBox = BufferedStreamBox<DeviceRecord?>()
+        let now = Date(timeIntervalSince1970: 5_000)
+        let store = LightStore(
+            uniqueId: "light-7",
+            initialDevice: makeLightDevice(
+                uniqueId: "light-7",
+                data: ["on": .bool(false), "level": .number(0)],
+                metadata: ["level": .object(["min": .number(0), "max": .number(100)])]
+            ),
+            dependencies: .init(
+                observeLight: { _ in streamBox.stream },
+                applyOptimisticChanges: { _, _ in },
+                sendCommand: { _, _, _ in },
+                now: { now }
+            )
+        )
+
+        store.setLevelNormalized(1.0)
+        await settleAsyncState()
+        #expect(store.descriptor.isOn)
+        #expect(store.descriptor.level == 100)
+
+        streamBox.yield(
+            makeLightDevice(
+                uniqueId: "light-7",
+                data: ["on": .bool(false), "level": .number(0)],
+                metadata: ["level": .object(["min": .number(0), "max": .number(100)])]
+            )
+        )
+        await settleAsyncState()
+
+        #expect(store.descriptor.isOn)
+        #expect(store.descriptor.level == 100)
+    }
+
+    @Test
+    func pendingStateExpiresAndAcceptsIncomingDescriptor() async {
+        let streamBox = BufferedStreamBox<DeviceRecord?>()
+        var now = Date(timeIntervalSince1970: 6_000)
+        let store = LightStore(
+            uniqueId: "light-8",
+            initialDevice: makeLightDevice(
+                uniqueId: "light-8",
+                data: ["on": .bool(false), "level": .number(0)],
+                metadata: ["level": .object(["min": .number(0), "max": .number(100)])]
+            ),
+            dependencies: .init(
+                observeLight: { _ in streamBox.stream },
+                applyOptimisticChanges: { _, _ in },
+                sendCommand: { _, _, _ in },
+                now: { now }
+            )
+        )
+
+        store.setLevelNormalized(1.0)
+        await settleAsyncState()
+        #expect(store.descriptor.isOn)
+
+        now = now.addingTimeInterval(1.1)
+        streamBox.yield(
+            makeLightDevice(
+                uniqueId: "light-8",
+                data: ["on": .bool(false), "level": .number(0)],
+                metadata: ["level": .object(["min": .number(0), "max": .number(100)])]
+            )
+        )
+        await settleAsyncState()
+
+        #expect(!store.descriptor.isOn)
+        #expect(store.descriptor.level == 0)
     }
 
     private func makeLightDevice(

@@ -46,14 +46,14 @@ enum ShutterStep: Int, CaseIterable, Identifiable, Sendable {
 @MainActor
 final class ShutterStore {
     struct Dependencies {
-        let observeShutter: (String) async -> any AsyncSequence<ShutterSnapshot?, Never>
-        let setTarget: (String, ShutterStep, ShutterStep) async -> Void
-        let sendCommand: (String, String, JSONValue) async -> Void
+        let observeShutter: @Sendable (String) async -> any AsyncSequence<ShutterSnapshot?, Never> & Sendable
+        let setTarget: @Sendable (String, ShutterStep, ShutterStep) async -> Void
+        let sendCommand: @Sendable (String, String, JSONValue) async -> Void
 
         init(
-            observeShutter: @escaping (String) async -> any AsyncSequence<ShutterSnapshot?, Never>,
-            setTarget: @escaping (String, ShutterStep, ShutterStep) async -> Void,
-            sendCommand: @escaping (String, String, JSONValue) async -> Void
+            observeShutter: @escaping @Sendable (String) async -> any AsyncSequence<ShutterSnapshot?, Never> & Sendable,
+            setTarget: @escaping @Sendable (String, ShutterStep, ShutterStep) async -> Void,
+            sendCommand: @escaping @Sendable (String, String, JSONValue) async -> Void
         ) {
             self.observeShutter = observeShutter
             self.setTarget = setTarget
@@ -67,8 +67,8 @@ final class ShutterStore {
 
     private var hasSnapshot = false
     private let uniqueId: String
-    private let dependencies: Dependencies
     private let observationTask = TaskHandle()
+    private let worker: Worker
 
     var effectiveTargetStep: ShutterStep {
         targetStep ?? actualStep
@@ -95,17 +95,19 @@ final class ShutterStore {
             )
 
         self.uniqueId = uniqueId
-        self.dependencies = dependencies
         self.descriptor = resolvedDescriptor
         self.actualStep = ShutterStep.nearestStep(for: resolvedDescriptor.value, in: resolvedDescriptor.range)
         self.targetStep = nil
+        self.worker = Worker(
+            uniqueId: uniqueId,
+            observeShutter: dependencies.observeShutter,
+            setTarget: dependencies.setTarget,
+            sendCommand: dependencies.sendCommand
+        )
 
-        observationTask.task = Task { [weak self, dependencies] in
-            let stream = await dependencies.observeShutter(uniqueId)
-            for await snapshot in stream {
-                guard let snapshot else { continue }
-                guard snapshot.uniqueId == uniqueId else { continue }
-                self?.apply(snapshot: snapshot)
+        observationTask.task = Task { [weak self, worker] in
+            await worker.observe { [weak self] snapshot in
+                await self?.apply(snapshot: snapshot)
             }
         }
     }
@@ -127,9 +129,8 @@ final class ShutterStore {
         let descriptorKey = descriptor.key
         let targetValue = step.mappedValue(in: descriptor.range)
 
-        Task { [dependencies, uniqueId] in
-            await dependencies.setTarget(uniqueId, step, originStep)
-            await dependencies.sendCommand(uniqueId, descriptorKey, .number(targetValue))
+        Task { [worker] in
+            await worker.select(step, originStep: originStep, descriptorKey: descriptorKey, targetValue: targetValue)
         }
     }
 
@@ -144,6 +145,45 @@ final class ShutterStore {
         descriptor = snapshot.descriptor
         actualStep = snapshot.actualStep
         targetStep = snapshot.targetStep
+    }
+
+    private actor Worker {
+        private let uniqueId: String
+        private let observeShutter: @Sendable (String) async -> any AsyncSequence<ShutterSnapshot?, Never> & Sendable
+        private let setTarget: @Sendable (String, ShutterStep, ShutterStep) async -> Void
+        private let sendCommand: @Sendable (String, String, JSONValue) async -> Void
+
+        init(
+            uniqueId: String,
+            observeShutter: @escaping @Sendable (String) async -> any AsyncSequence<ShutterSnapshot?, Never> & Sendable,
+            setTarget: @escaping @Sendable (String, ShutterStep, ShutterStep) async -> Void,
+            sendCommand: @escaping @Sendable (String, String, JSONValue) async -> Void
+        ) {
+            self.uniqueId = uniqueId
+            self.observeShutter = observeShutter
+            self.setTarget = setTarget
+            self.sendCommand = sendCommand
+        }
+
+        func observe(onSnapshot: @escaping @Sendable (ShutterSnapshot) async -> Void) async {
+            let stream = await observeShutter(uniqueId)
+            for await snapshot in stream {
+                guard !Task.isCancelled else { return }
+                guard let snapshot else { continue }
+                guard snapshot.uniqueId == uniqueId else { continue }
+                await onSnapshot(snapshot)
+            }
+        }
+
+        func select(
+            _ step: ShutterStep,
+            originStep: ShutterStep,
+            descriptorKey: String,
+            targetValue: Double
+        ) async {
+            await setTarget(uniqueId, step, originStep)
+            await sendCommand(uniqueId, descriptorKey, .number(targetValue))
+        }
     }
 }
 

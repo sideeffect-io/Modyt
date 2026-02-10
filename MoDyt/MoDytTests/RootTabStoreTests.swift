@@ -35,6 +35,7 @@ struct RootTabStoreTests {
         store.send(.onStart)
         messageStream.yield(.gatewayInfo(.init(payload: [:]), transactionId: "tx-1"))
         await settleAsyncState(iterations: 16)
+        messageStream.finish()
 
         #expect(await prepareCounter.value == 1)
         #expect(await appActiveRecorder.values == [true])

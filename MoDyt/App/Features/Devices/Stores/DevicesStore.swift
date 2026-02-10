@@ -16,7 +16,7 @@ struct DevicesState: Sendable, Equatable {
 
 enum DevicesEvent: Sendable {
     case onAppear
-    case devicesUpdated([DeviceRecord])
+    case devicesUpdated([DeviceGroupSection])
     case refreshRequested
     case toggleFavorite(String)
 }
@@ -36,8 +36,8 @@ enum DevicesReducer {
         case .onAppear:
             effects = [.startObservingDevices]
 
-        case .devicesUpdated(let devices):
-            state.groupedDevices = deriveGroupedDevices(from: devices)
+        case .devicesUpdated(let groupedDevices):
+            state.groupedDevices = groupedDevices
 
         case .refreshRequested:
             effects = [.refreshAll]
@@ -54,19 +54,23 @@ enum DevicesReducer {
 @MainActor
 final class DevicesStore {
     struct Dependencies {
-        let observeDevices: () async -> AsyncStream<[DeviceRecord]>
-        let toggleFavorite: (String) async -> Void
-        let refreshAll: () async -> Void
+        let observeDevices: @Sendable () async -> AsyncStream<[DeviceRecord]>
+        let toggleFavorite: @Sendable (String) async -> Void
+        let refreshAll: @Sendable () async -> Void
     }
 
     private(set) var state: DevicesState
 
-    private let dependencies: Dependencies
     private let deviceTask = TaskHandle()
+    private let worker: Worker
 
     init(dependencies: Dependencies) {
         self.state = .initial
-        self.dependencies = dependencies
+        self.worker = Worker(
+            observeDevices: dependencies.observeDevices,
+            toggleFavorite: dependencies.toggleFavorite,
+            refreshAll: dependencies.refreshAll
+        )
     }
 
     func send(_ event: DevicesEvent) {
@@ -85,22 +89,55 @@ final class DevicesStore {
         switch effect {
         case .startObservingDevices:
             guard deviceTask.task == nil else { return }
-            deviceTask.task = Task { [weak self, dependencies] in
-                let stream = await dependencies.observeDevices()
-                for await devices in stream {
-                    self?.send(.devicesUpdated(devices))
+            deviceTask.task = Task { [weak self, worker] in
+                await worker.observeDevices { [weak self] groupedDevices in
+                    await self?.send(.devicesUpdated(groupedDevices))
                 }
             }
 
         case .toggleFavorite(let uniqueId):
-            Task { [dependencies] in
-                await dependencies.toggleFavorite(uniqueId)
+            Task { [worker] in
+                await worker.toggleFavorite(uniqueId)
             }
 
         case .refreshAll:
-            Task { [dependencies] in
-                await dependencies.refreshAll()
+            Task { [worker] in
+                await worker.refreshAll()
             }
+        }
+    }
+
+    private actor Worker {
+        private let observeDevicesSource: @Sendable () async -> AsyncStream<[DeviceRecord]>
+        private let toggleFavoriteAction: @Sendable (String) async -> Void
+        private let refreshAllAction: @Sendable () async -> Void
+
+        init(
+            observeDevices: @escaping @Sendable () async -> AsyncStream<[DeviceRecord]>,
+            toggleFavorite: @escaping @Sendable (String) async -> Void,
+            refreshAll: @escaping @Sendable () async -> Void
+        ) {
+            self.observeDevicesSource = observeDevices
+            self.toggleFavoriteAction = toggleFavorite
+            self.refreshAllAction = refreshAll
+        }
+
+        func observeDevices(
+            onUpdate: @escaping @Sendable ([DeviceGroupSection]) async -> Void
+        ) async {
+            let stream = await observeDevicesSource()
+            for await devices in stream {
+                guard !Task.isCancelled else { return }
+                await onUpdate(deriveGroupedDevices(from: devices))
+            }
+        }
+
+        func toggleFavorite(_ uniqueId: String) async {
+            await toggleFavoriteAction(uniqueId)
+        }
+
+        func refreshAll() async {
+            await refreshAllAction()
         }
     }
 }

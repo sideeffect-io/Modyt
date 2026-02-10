@@ -21,6 +21,7 @@ struct DashboardStoreTests {
             DashboardDeviceDescription(uniqueId: "c", name: "C", usage: "light")
         ])
         await settleAsyncState()
+        streamBox.finish()
 
         #expect(store.state.favoriteDevices.map(\.uniqueId) == ["a", "b", "c"])
     }

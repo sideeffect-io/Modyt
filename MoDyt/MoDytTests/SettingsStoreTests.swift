@@ -10,6 +10,7 @@ struct SettingsStoreTests {
             dependencies: .init(
                 requestDisconnect: {
                     await recorder.record("disconnect")
+                    return .success(())
                 }
             )
         )
@@ -25,12 +26,10 @@ struct SettingsStoreTests {
 
     @Test
     func disconnectFailureSetsErrorMessage() async {
-        struct DisconnectError: Error {}
-
         let store = SettingsStore(
             dependencies: .init(
                 requestDisconnect: {
-                    throw DisconnectError()
+                    .failure(SettingsStoreError(message: "disconnect failed"))
                 }
             )
         )
@@ -49,6 +48,7 @@ struct SettingsStoreTests {
             dependencies: .init(
                 requestDisconnect: {
                     await recorder.record("disconnect")
+                    return .success(())
                 }
             )
         )

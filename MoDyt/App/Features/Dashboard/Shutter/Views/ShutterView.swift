@@ -22,12 +22,12 @@ struct ShutterView: View {
             regularControl(metrics: metrics, store: store)
                 .padding(.vertical, metrics.padding)
                 .frame(maxWidth: .infinity)
-                .glassCard(cornerRadius: containerCornerRadius, interactive: true)
+                .glassCard(cornerRadius: containerCornerRadius, interactive: true, tone: .inset)
         } else {
             horizontalControl(metrics: metrics, store: store)
                 .padding(.vertical, metrics.padding)
                 .frame(maxWidth: .infinity)
-                .glassCard(cornerRadius: containerCornerRadius, interactive: true)
+                .glassCard(cornerRadius: containerCornerRadius, interactive: true, tone: .inset)
         }
     }
     
