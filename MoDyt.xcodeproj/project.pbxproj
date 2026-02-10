@@ -44,6 +44,7 @@
 				MoDytTests/ShutterLightInteractionIntegrationTests.swift,
 				MoDytTests/ShutterStoreTests.swift,
 				MoDytTests/StoreTestSupport.swift,
+				MoDytTests/TemperatureStoreTests.swift,
 				MoDytTests/TestSupport.swift,
 			);
 			target = 1A50E6C42F2D19650072A200 /* MoDytTests */;
@@ -66,6 +67,7 @@
 				MoDytTests/ShutterLightInteractionIntegrationTests.swift,
 				MoDytTests/ShutterStoreTests.swift,
 				MoDytTests/StoreTestSupport.swift,
+				MoDytTests/TemperatureStoreTests.swift,
 				MoDytTests/TestSupport.swift,
 			);
 			target = 1A50E6B72F2D19640072A200 /* MoDyt */;

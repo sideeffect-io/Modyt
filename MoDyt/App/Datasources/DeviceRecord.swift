@@ -138,6 +138,12 @@ struct DrivingLightControlDescriptor: Sendable, Equatable {
     }
 }
 
+struct TemperatureDescriptor: Sendable, Equatable {
+    let key: String
+    let value: Double
+    let unitSymbol: String?
+}
+
 extension DeviceRecord {
     struct ObservationSignature: Sendable, Equatable {
         let uniqueId: String
@@ -149,6 +155,7 @@ extension DeviceRecord {
         let dashboardOrder: Int?
         let primaryControl: DeviceControlDescriptor?
         let drivingLightControl: DrivingLightControlDescriptor?
+        let temperature: TemperatureDescriptor?
         let fallbackData: [String: JSONValue]?
     }
 
@@ -162,14 +169,16 @@ extension DeviceRecord {
         let dashboardOrder: Int?
         let primaryControl: DeviceControlDescriptor?
         let drivingLightControl: DrivingLightControlDescriptor?
+        let temperature: TemperatureDescriptor?
         let fallbackStatusData: [String: JSONValue]?
     }
 
     var observationSignature: ObservationSignature {
         let primaryControl = primaryControlDescriptor()
         let drivingLightControl = drivingLightControlDescriptor()
+        let temperature = temperatureDescriptor()
         let fallbackData: [String: JSONValue]? =
-            (primaryControl == nil && drivingLightControl == nil) ? data : nil
+            (primaryControl == nil && drivingLightControl == nil && temperature == nil) ? data : nil
 
         return ObservationSignature(
             uniqueId: uniqueId,
@@ -181,6 +190,7 @@ extension DeviceRecord {
             dashboardOrder: dashboardOrder,
             primaryControl: primaryControl,
             drivingLightControl: drivingLightControl,
+            temperature: temperature,
             fallbackData: fallbackData
         )
     }
@@ -188,6 +198,7 @@ extension DeviceRecord {
     var favoritesSignature: FavoritesSignature {
         let primaryControl = primaryControlDescriptor()
         let drivingLightControl = drivingLightControlDescriptor()
+        let temperature = temperatureDescriptor()
         let fallbackStatusData: [String: JSONValue]? = group == .light || group == .shutter ? nil : data
 
         return FavoritesSignature(
@@ -200,6 +211,7 @@ extension DeviceRecord {
             dashboardOrder: dashboardOrder,
             primaryControl: primaryControl,
             drivingLightControl: drivingLightControl,
+            temperature: temperature,
             fallbackStatusData: fallbackStatusData
         )
     }
@@ -275,6 +287,28 @@ extension DeviceRecord {
         )
     }
 
+    func temperatureDescriptor() -> TemperatureDescriptor? {
+        guard group == .thermo else { return nil }
+
+        for key in Self.preferredTemperatureKeys {
+            if let descriptor = temperatureDescriptor(forKey: key) {
+                return descriptor
+            }
+        }
+
+        // Fall back only to values that are explicitly temperature-like
+        // and avoid configuration fields such as configTemp (often "NA"/non-display values).
+        for key in data.keys.sorted() {
+            guard Self.isLikelyTemperatureKey(key) else { continue }
+            guard let descriptor = temperatureDescriptor(forKey: key) else { continue }
+            if descriptor.unitSymbol != nil || key.localizedCaseInsensitiveContains("temperature") {
+                return descriptor
+            }
+        }
+
+        return nil
+    }
+
     var statusText: String {
         if let value = data["level"]?.numberValue {
             return "Level \(Int(value))%"
@@ -342,5 +376,81 @@ extension DeviceRecord {
         guard let minValue = object["min"]?.numberValue,
               let maxValue = object["max"]?.numberValue else { return nil }
         return minValue...maxValue
+    }
+
+    private func temperatureDescriptor(forKey key: String) -> TemperatureDescriptor? {
+        guard let value = data[key]?.numberValue else { return nil }
+        return TemperatureDescriptor(
+            key: key,
+            value: value,
+            unitSymbol: temperatureUnitSymbol(forKey: key)
+        )
+    }
+
+    private func temperatureUnitSymbol(forKey key: String) -> String? {
+        let metadataObject = metadata?[key]?.objectValue
+        let metadataCandidates = [
+            metadataObject?["unit"]?.stringValue,
+            metadataObject?["unity"]?.stringValue,
+            metadataObject?["symbol"]?.stringValue,
+            metadataObject?["uom"]?.stringValue,
+            metadataObject?["unitLabel"]?.stringValue
+        ]
+
+        if let rawUnit = metadataCandidates.compactMap({ $0 }).first {
+            return normalizedTemperatureUnitSymbol(rawUnit)
+        }
+
+        let dataCandidates = [
+            data["\(key)_unit"]?.stringValue,
+            data["\(key)Unit"]?.stringValue,
+            data["temperatureUnit"]?.stringValue,
+            data["tempUnit"]?.stringValue,
+            data["unit"]?.stringValue
+        ]
+
+        if let rawUnit = dataCandidates.compactMap({ $0 }).first {
+            return normalizedTemperatureUnitSymbol(rawUnit)
+        }
+
+        return nil
+    }
+
+    private func normalizedTemperatureUnitSymbol(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        switch trimmed.lowercased() {
+        case "na", "n/a", "none", "null", "-":
+            return nil
+        case "c", "°c", "celsius", "degc", "degcelsius":
+            return "°C"
+        case "f", "°f", "fahrenheit", "degf", "degfahrenheit":
+            return "°F"
+        case "k", "°k", "kelvin":
+            return "K"
+        default:
+            return trimmed
+        }
+    }
+
+    private static let preferredTemperatureKeys = [
+        "outTemperature",
+        "temperature",
+        "temp",
+        "currentTemperature",
+        "outdoorTemperature",
+        "outsideTemperature",
+        "ambientTemperature",
+        "measuredTemperature",
+        "regTemperature",
+        "devTemperature"
+    ]
+
+    private static func isLikelyTemperatureKey(_ key: String) -> Bool {
+        let normalized = key.lowercased()
+        if normalized.hasPrefix("config") { return false }
+        if normalized == "lightpower" || normalized == "jobsmp" { return false }
+        return normalized.contains("temp") || normalized.contains("temperature")
     }
 }
