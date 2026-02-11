@@ -9,7 +9,10 @@ struct MoDytApp: App {
     private let dashboardDeviceCardStoreFactory: DashboardDeviceCardStoreFactory
     private let shutterStoreFactory: ShutterStoreFactory
     private let lightStoreFactory: LightStoreFactory
+    private let sunlightStoreFactory: SunlightStoreFactory
+    private let energyConsumptionStoreFactory: EnergyConsumptionStoreFactory
     private let temperatureStoreFactory: TemperatureStoreFactory
+    private let heatPumpStoreFactory: HeatPumpStoreFactory
     private let thermostatStoreFactory: ThermostatStoreFactory
     private let devicesStoreFactory: DevicesStoreFactory
     private let settingsStoreFactory: SettingsStoreFactory
@@ -23,7 +26,10 @@ struct MoDytApp: App {
         dashboardDeviceCardStoreFactory = .live(environment: environment)
         shutterStoreFactory = .live(environment: environment)
         lightStoreFactory = .live(environment: environment)
+        sunlightStoreFactory = .live(environment: environment)
+        energyConsumptionStoreFactory = .live(environment: environment)
         temperatureStoreFactory = .live(environment: environment)
+        heatPumpStoreFactory = .live(environment: environment)
         thermostatStoreFactory = .live(environment: environment)
         devicesStoreFactory = .live(environment: environment)
         settingsStoreFactory = .live(environment: environment)
@@ -39,7 +45,10 @@ struct MoDytApp: App {
                 .environment(\.dashboardDeviceCardStoreFactory, dashboardDeviceCardStoreFactory)
                 .environment(\.shutterStoreFactory, shutterStoreFactory)
                 .environment(\.lightStoreFactory, lightStoreFactory)
+                .environment(\.sunlightStoreFactory, sunlightStoreFactory)
+                .environment(\.energyConsumptionStoreFactory, energyConsumptionStoreFactory)
                 .environment(\.temperatureStoreFactory, temperatureStoreFactory)
+                .environment(\.heatPumpStoreFactory, heatPumpStoreFactory)
                 .environment(\.thermostatStoreFactory, thermostatStoreFactory)
                 .environment(\.devicesStoreFactory, devicesStoreFactory)
                 .environment(\.settingsStoreFactory, settingsStoreFactory)

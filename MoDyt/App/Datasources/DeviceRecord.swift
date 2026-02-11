@@ -94,7 +94,7 @@ enum DeviceGroup: String, CaseIterable, Sendable {
             return .boiler
         case "alarm":
             return .alarm
-        case "weather":
+        case "weather", "sunlight", "sensorSun", "sensorSunlight", "irradiance":
             return .weather
         case "sensorDF":
             return .water
@@ -164,6 +164,40 @@ struct ThermostatDescriptor: Sendable, Equatable {
     }
 }
 
+struct SunlightDescriptor: Sendable, Equatable {
+    let key: String
+    let value: Double
+    let range: ClosedRange<Double>
+    let unitSymbol: String
+
+    var clampedValue: Double {
+        min(max(value, range.lowerBound), range.upperBound)
+    }
+
+    var normalizedValue: Double {
+        let span = range.upperBound - range.lowerBound
+        guard span > 0 else { return 0 }
+        return (clampedValue - range.lowerBound) / span
+    }
+}
+
+struct EnergyConsumptionDescriptor: Sendable, Equatable {
+    let key: String
+    let value: Double
+    let range: ClosedRange<Double>
+    let unitSymbol: String
+
+    var clampedValue: Double {
+        min(max(value, range.lowerBound), range.upperBound)
+    }
+
+    var normalizedValue: Double {
+        let span = range.upperBound - range.lowerBound
+        guard span > 0 else { return 0 }
+        return (clampedValue - range.lowerBound) / span
+    }
+}
+
 extension DeviceRecord {
     struct ObservationSignature: Sendable, Equatable {
         let uniqueId: String
@@ -177,6 +211,8 @@ extension DeviceRecord {
         let drivingLightControl: DrivingLightControlDescriptor?
         let temperature: TemperatureDescriptor?
         let thermostat: ThermostatDescriptor?
+        let sunlight: SunlightDescriptor?
+        let energyConsumption: EnergyConsumptionDescriptor?
         let fallbackData: [String: JSONValue]?
     }
 
@@ -192,6 +228,8 @@ extension DeviceRecord {
         let drivingLightControl: DrivingLightControlDescriptor?
         let temperature: TemperatureDescriptor?
         let thermostat: ThermostatDescriptor?
+        let sunlight: SunlightDescriptor?
+        let energyConsumption: EnergyConsumptionDescriptor?
         let fallbackStatusData: [String: JSONValue]?
     }
 
@@ -200,8 +238,15 @@ extension DeviceRecord {
         let drivingLightControl = drivingLightControlDescriptor()
         let temperature = temperatureDescriptor()
         let thermostat = thermostatDescriptor()
+        let sunlight = sunlightDescriptor()
+        let energyConsumption = energyConsumptionDescriptor()
         let fallbackData: [String: JSONValue]? =
-            (primaryControl == nil && drivingLightControl == nil && temperature == nil && thermostat == nil) ? data : nil
+            (primaryControl == nil
+            && drivingLightControl == nil
+            && temperature == nil
+            && thermostat == nil
+            && sunlight == nil
+            && energyConsumption == nil) ? data : nil
 
         return ObservationSignature(
             uniqueId: uniqueId,
@@ -215,6 +260,8 @@ extension DeviceRecord {
             drivingLightControl: drivingLightControl,
             temperature: temperature,
             thermostat: thermostat,
+            sunlight: sunlight,
+            energyConsumption: energyConsumption,
             fallbackData: fallbackData
         )
     }
@@ -224,8 +271,14 @@ extension DeviceRecord {
         let drivingLightControl = drivingLightControlDescriptor()
         let temperature = temperatureDescriptor()
         let thermostat = thermostatDescriptor()
+        let sunlight = sunlightDescriptor()
+        let energyConsumption = energyConsumptionDescriptor()
         let fallbackStatusData: [String: JSONValue]? =
-            group == .light || group == .shutter || group == .boiler ? nil : data
+            group == .light
+            || group == .shutter
+            || group == .boiler
+            || sunlight != nil
+            || energyConsumption != nil ? nil : data
 
         return FavoritesSignature(
             uniqueId: uniqueId,
@@ -239,6 +292,8 @@ extension DeviceRecord {
             drivingLightControl: drivingLightControl,
             temperature: temperature,
             thermostat: thermostat,
+            sunlight: sunlight,
+            energyConsumption: energyConsumption,
             fallbackStatusData: fallbackStatusData
         )
     }
@@ -385,6 +440,42 @@ extension DeviceRecord {
         )
     }
 
+    func sunlightDescriptor() -> SunlightDescriptor? {
+        guard group == .weather || group == .other else { return nil }
+
+        for key in Self.preferredSunlightKeys {
+            if let descriptor = sunlightDescriptor(forKey: key) {
+                return descriptor
+            }
+        }
+
+        for key in data.keys.sorted() {
+            guard Self.isLikelySunlightKey(key) else { continue }
+            guard let descriptor = sunlightDescriptor(forKey: key) else { continue }
+            return descriptor
+        }
+
+        return nil
+    }
+
+    func energyConsumptionDescriptor() -> EnergyConsumptionDescriptor? {
+        guard group == .energy || group == .other else { return nil }
+
+        for key in Self.preferredEnergyConsumptionKeys {
+            if let descriptor = energyConsumptionDescriptor(forKey: key) {
+                return descriptor
+            }
+        }
+
+        for key in data.keys.sorted() {
+            guard Self.isLikelyEnergyConsumptionKey(key) else { continue }
+            guard let descriptor = energyConsumptionDescriptor(forKey: key) else { continue }
+            return descriptor
+        }
+
+        return nil
+    }
+
     var statusText: String {
         if let value = data["level"]?.numberValue {
             return "Level \(Int(value))%"
@@ -473,6 +564,34 @@ extension DeviceRecord {
         )
     }
 
+    private func sunlightDescriptor(forKey key: String) -> SunlightDescriptor? {
+        guard let rawValue = numericValue(forKey: key) else { return nil }
+
+        let unit = sunlightUnit(forKey: key)
+        let value = rawValue * unit.multiplier
+
+        return SunlightDescriptor(
+            key: key,
+            value: value,
+            range: Self.defaultSunlightRange,
+            unitSymbol: unit.symbol
+        )
+    }
+
+    private func energyConsumptionDescriptor(forKey key: String) -> EnergyConsumptionDescriptor? {
+        guard let rawValue = numericValue(forKey: key) else { return nil }
+
+        let unit = energyConsumptionUnit(forKey: key)
+        let value = rawValue * unit.multiplier
+
+        return EnergyConsumptionDescriptor(
+            key: key,
+            value: value,
+            range: Self.defaultEnergyConsumptionRange,
+            unitSymbol: unit.symbol
+        )
+    }
+
     private func temperatureUnitSymbol(forKey key: String) -> String? {
         let metadataObject = metadata?[key]?.objectValue
         let metadataCandidates = [
@@ -558,6 +677,121 @@ extension DeviceRecord {
             return "%"
         default:
             return trimmed
+        }
+    }
+
+    private struct SunlightUnit {
+        let symbol: String
+        let multiplier: Double
+    }
+
+    private struct EnergyConsumptionUnit {
+        let symbol: String
+        let multiplier: Double
+    }
+
+    private func sunlightUnit(forKey key: String) -> SunlightUnit {
+        let metadataObject = metadata?[key]?.objectValue
+        let metadataCandidates = [
+            metadataObject?["unit"]?.stringValue,
+            metadataObject?["unity"]?.stringValue,
+            metadataObject?["symbol"]?.stringValue,
+            metadataObject?["uom"]?.stringValue
+        ]
+
+        if let rawUnit = metadataCandidates.compactMap({ $0 }).first,
+           let unit = normalizedSunlightUnit(rawUnit) {
+            return unit
+        }
+
+        let dataCandidates = [
+            data["\(key)_unit"]?.stringValue,
+            data["\(key)Unit"]?.stringValue,
+            data["sunlightUnit"]?.stringValue,
+            data["irradianceUnit"]?.stringValue,
+            data["unit"]?.stringValue
+        ]
+
+        if let rawUnit = dataCandidates.compactMap({ $0 }).first,
+           let unit = normalizedSunlightUnit(rawUnit) {
+            return unit
+        }
+
+        return SunlightUnit(symbol: "W/m2", multiplier: 1)
+    }
+
+    private func normalizedSunlightUnit(_ raw: String) -> SunlightUnit? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let canonical = trimmed
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "^", with: "")
+            .replacingOccurrences(of: "²", with: "2")
+
+        switch canonical {
+        case "na", "n/a", "none", "null", "-":
+            return nil
+        case "w/m2", "wm2", "watt/m2", "wattperm2":
+            return SunlightUnit(symbol: "W/m2", multiplier: 1)
+        case "kw/m2", "kwm2", "kilowatt/m2", "kilowattperm2":
+            return SunlightUnit(symbol: "W/m2", multiplier: 1000)
+        default:
+            return SunlightUnit(symbol: trimmed, multiplier: 1)
+        }
+    }
+
+    private func energyConsumptionUnit(forKey key: String) -> EnergyConsumptionUnit {
+        let metadataObject = metadata?[key]?.objectValue
+        let metadataCandidates = [
+            metadataObject?["unit"]?.stringValue,
+            metadataObject?["unity"]?.stringValue,
+            metadataObject?["symbol"]?.stringValue,
+            metadataObject?["uom"]?.stringValue
+        ]
+
+        if let rawUnit = metadataCandidates.compactMap({ $0 }).first,
+           let unit = normalizedEnergyConsumptionUnit(rawUnit) {
+            return unit
+        }
+
+        let dataCandidates = [
+            data["\(key)_unit"]?.stringValue,
+            data["\(key)Unit"]?.stringValue,
+            data["energyUnit"]?.stringValue,
+            data["consumptionUnit"]?.stringValue,
+            data["unit"]?.stringValue
+        ]
+
+        if let rawUnit = dataCandidates.compactMap({ $0 }).first,
+           let unit = normalizedEnergyConsumptionUnit(rawUnit) {
+            return unit
+        }
+
+        return EnergyConsumptionUnit(symbol: "kWh", multiplier: 1)
+    }
+
+    private func normalizedEnergyConsumptionUnit(_ raw: String) -> EnergyConsumptionUnit? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let canonical = trimmed
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: ".", with: "")
+
+        switch canonical {
+        case "na", "n/a", "none", "null", "-":
+            return nil
+        case "kwh", "kilowatthour", "kilowatthours":
+            return EnergyConsumptionUnit(symbol: "kWh", multiplier: 1)
+        case "wh", "watthour", "watthours":
+            return EnergyConsumptionUnit(symbol: "kWh", multiplier: 0.001)
+        case "mwh", "megawatthour", "megawatthours":
+            return EnergyConsumptionUnit(symbol: "kWh", multiplier: 1000)
+        default:
+            return EnergyConsumptionUnit(symbol: trimmed, multiplier: 1)
         }
     }
 
@@ -696,6 +930,29 @@ extension DeviceRecord {
         "relativeHumidity"
     ]
 
+    private static let preferredSunlightKeys = [
+        "lightPower",
+        "sunlightPower",
+        "sunlight",
+        "solarRadiation",
+        "solarIrradiance",
+        "irradiance",
+        "globalRadiation"
+    ]
+
+    private static let preferredEnergyConsumptionKeys = [
+        "energyIndex_ELEC",
+        "energyIndex",
+        "energyHisto_ELEC",
+        "energyHisto",
+        "consumption",
+        "energy"
+    ]
+
+    private static let defaultSunlightRange: ClosedRange<Double> = 0...1400
+    // 36 kVA (typical residential max in France) used continuously for 24h ~= 864 kWh/day.
+    private static let defaultEnergyConsumptionRange: ClosedRange<Double> = 0...864
+
     private static func isLikelyTemperatureKey(_ key: String) -> Bool {
         let normalized = key.lowercased()
         if normalized.hasPrefix("config") { return false }
@@ -714,5 +971,27 @@ extension DeviceRecord {
     private static func isLikelyHumidityKey(_ key: String) -> Bool {
         let normalized = key.lowercased()
         return normalized.contains("hygro") || normalized.contains("humidity")
+    }
+
+    private static func isLikelySunlightKey(_ key: String) -> Bool {
+        let normalized = key.lowercased()
+        return normalized == "lightpower"
+            || normalized.contains("sun")
+            || normalized.contains("solar")
+            || normalized.contains("irradiance")
+            || normalized.contains("radiation")
+    }
+
+    private static func isLikelyEnergyConsumptionKey(_ key: String) -> Bool {
+        let normalized = key.lowercased()
+        if normalized.contains("energyinstant") {
+            return false
+        }
+
+        return normalized.contains("energyindex")
+            || normalized.contains("energyhisto")
+            || normalized.contains("consumption")
+            || normalized.contains("kwh")
+            || normalized.contains("energy")
     }
 }

@@ -202,6 +202,47 @@ struct DeviceRecordTests {
     }
 
     @Test
+    func energyConsumptionDescriptorUsesEnergyIndexAndDefaultRange() {
+        let device = TestSupport.makeDevice(
+            uniqueId: "energy-1",
+            name: "Consumption",
+            usage: "conso",
+            data: [
+                "energyIndex_ELEC": .number(186.5)
+            ]
+        )
+
+        let descriptor = device.energyConsumptionDescriptor()
+
+        #expect(descriptor?.key == "energyIndex_ELEC")
+        #expect(descriptor?.value == 186.5)
+        #expect(descriptor?.range == 0...864)
+        #expect(descriptor?.unitSymbol == "kWh")
+    }
+
+    @Test
+    func energyConsumptionDescriptorConvertsWhToKWh() {
+        let device = TestSupport.makeDevice(
+            uniqueId: "energy-2",
+            name: "Consumption",
+            usage: "conso",
+            data: [
+                "energyIndex_ELEC": .number(1200)
+            ],
+            metadata: [
+                "energyIndex_ELEC": .object([
+                    "unit": .string("Wh")
+                ])
+            ]
+        )
+
+        let descriptor = device.energyConsumptionDescriptor()
+
+        #expect(descriptor?.value == 1.2)
+        #expect(descriptor?.unitSymbol == "kWh")
+    }
+
+    @Test
     func observationEquivalenceIgnoresUpdatedAtAndUnrelatedMetadata() {
         let baseline = TestSupport.makeDevice(
             uniqueId: "light-7",

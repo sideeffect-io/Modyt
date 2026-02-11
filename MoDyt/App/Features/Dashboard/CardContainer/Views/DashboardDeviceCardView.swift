@@ -22,7 +22,7 @@ struct DashboardDeviceCardView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center) {
-                Image(systemName: device.group.symbolName)
+                Image(systemName: iconSystemName(for: device))
                     .font(.system(size: 22, weight: .semibold))
                     .frame(width: 36, height: 36)
                 Spacer()
@@ -37,7 +37,12 @@ struct DashboardDeviceCardView: View {
                 .font(.system(.headline, design: .rounded))
                 .lineLimit(1)
 
-            if device.group != .shutter && device.group != .light && device.group != .thermo && device.group != .boiler {
+            if device.group != .shutter
+                && device.group != .light
+                && device.group != .thermo
+                && device.group != .boiler
+                && device.group != .weather
+                && device.group != .energy {
                 Text(device.group.title)
                     .font(.system(.caption, design: .rounded))
                     .foregroundStyle(.secondary)
@@ -50,6 +55,17 @@ struct DashboardDeviceCardView: View {
         .glassCard(cornerRadius: 22)
     }
 
+    private func iconSystemName(for device: DashboardDeviceDescription) -> String {
+        switch device.group {
+        case .boiler:
+            return isHeatPumpDevice(device) ? "heat.waves" : "thermometer"
+        case .weather:
+            return "sun.max.fill"
+        default:
+            return device.group.symbolName
+        }
+    }
+
     @ViewBuilder
     private func controlContent(for device: DashboardDeviceDescription) -> some View {
         switch device.group {
@@ -60,9 +76,28 @@ struct DashboardDeviceCardView: View {
         case .thermo:
             TemperatureView(uniqueId: device.uniqueId)
         case .boiler:
-            ThermostatView(uniqueId: device.uniqueId)
+            if isHeatPumpDevice(device) {
+                HeatPumpView(uniqueId: device.uniqueId)
+            } else {
+                ThermostatView(uniqueId: device.uniqueId)
+            }
+        case .weather:
+            SunlightView(uniqueId: device.uniqueId)
+        case .energy:
+            EnergyConsumptionView(uniqueId: device.uniqueId)
         default:
             EmptyView()
         }
+    }
+
+    private func isHeatPumpDevice(_ device: DashboardDeviceDescription) -> Bool {
+        let usage = device.usage.lowercased()
+        if usage == "sh_hvac" || usage == "aeraulic" || usage.contains("hvac") {
+            return true
+        }
+
+        let name = device.name.lowercased()
+        return name.localizedStandardContains("pompe")
+            || name.localizedStandardContains("heat pump")
     }
 }

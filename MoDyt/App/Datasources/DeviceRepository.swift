@@ -351,6 +351,12 @@ actor DeviceRepository {
         if device.temperatureDescriptor() != nil {
             return .thermo
         }
+        if device.energyConsumptionDescriptor() != nil {
+            return .energy
+        }
+        if device.sunlightDescriptor() != nil {
+            return .weather
+        }
 
         return usageGroup
     }

@@ -22,6 +22,13 @@ Agents working with this repo (AI assistants, automation tools, or new team memb
 
 ---
 
+## Session Memory
+
+- At the start of each session, read `.codex/KNOWLEDGE_BASE.md` before making changes.
+- Keep `.codex/KNOWLEDGE_BASE.md` updated with new mistakes to avoid, practical commands, architectural guidance, and coding preferences discovered during implementation.
+
+---
+
 ## Plan
 
 For long reasoning operations and complex tasks we do an execution plan upfront and ask for validation.
@@ -110,6 +117,4 @@ When needed use the Cupertino MCP server to access the officiel Swift documentat
 ## Knowledge base
 
 You maintain a knowledge base for mistakes to avoid, tips and tricks, architectural guidance, coding preferences in `.codex/KNOWLEDGE_BASE.md`.
-Read that knowledge base and add new entries as you learn things.
-
-
+Read that knowledge base at the start of each session and add new entries as you learn things.

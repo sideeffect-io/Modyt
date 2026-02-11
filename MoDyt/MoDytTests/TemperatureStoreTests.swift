@@ -172,3 +172,68 @@ struct ThermostatStoreTests {
         )
     }
 }
+
+@MainActor
+struct EnergyConsumptionStoreTests {
+    @Test
+    func initUsesInitialEnergyConsumptionDescriptor() {
+        let store = EnergyConsumptionStore(
+            uniqueId: "energy-1",
+            initialDevice: makeEnergyDevice(uniqueId: "energy-1", value: 132.2),
+            dependencies: .init(
+                observeEnergyConsumption: { _ in
+                    AsyncStream { continuation in
+                        continuation.finish()
+                    }
+                }
+            )
+        )
+
+        #expect(store.descriptor?.value == 132.2)
+        #expect(store.descriptor?.unitSymbol == "kWh")
+    }
+
+    @Test
+    func observationUpdatesDescriptorFromIncomingDevice() async {
+        let streamBox = BufferedStreamBox<DeviceRecord?>()
+        let store = EnergyConsumptionStore(
+            uniqueId: "energy-2",
+            initialDevice: makeEnergyDevice(uniqueId: "energy-2", value: 40.0),
+            dependencies: .init(
+                observeEnergyConsumption: { _ in streamBox.stream }
+            )
+        )
+
+        streamBox.yield(makeEnergyDevice(uniqueId: "energy-2", value: 88.7))
+        await settleAsyncState()
+
+        #expect(store.descriptor?.value == 88.7)
+    }
+
+    @Test
+    func observationClearsDescriptorWhenDeviceDisappears() async {
+        let streamBox = BufferedStreamBox<DeviceRecord?>()
+        let store = EnergyConsumptionStore(
+            uniqueId: "energy-3",
+            initialDevice: makeEnergyDevice(uniqueId: "energy-3", value: 71.0),
+            dependencies: .init(
+                observeEnergyConsumption: { _ in streamBox.stream }
+            )
+        )
+
+        streamBox.yield(nil)
+        await settleAsyncState()
+
+        #expect(store.descriptor == nil)
+    }
+
+    private func makeEnergyDevice(uniqueId: String, value: Double) -> DeviceRecord {
+        TestSupport.makeDevice(
+            uniqueId: uniqueId,
+            name: "Energy",
+            usage: "conso",
+            data: ["energyIndex_ELEC": .number(value)],
+            metadata: ["energyIndex_ELEC": .object(["unit": .string("kWh")])]
+        )
+    }
+}
