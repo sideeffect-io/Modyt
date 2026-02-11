@@ -37,7 +37,7 @@ struct DashboardDeviceCardView: View {
                 .font(.system(.headline, design: .rounded))
                 .lineLimit(1)
 
-            if device.group != .shutter && device.group != .light && device.group != .thermo {
+            if device.group != .shutter && device.group != .light && device.group != .thermo && device.group != .boiler {
                 Text(device.group.title)
                     .font(.system(.caption, design: .rounded))
                     .foregroundStyle(.secondary)
@@ -59,6 +59,8 @@ struct DashboardDeviceCardView: View {
             LightView(uniqueId: device.uniqueId)
         case .thermo:
             TemperatureView(uniqueId: device.uniqueId)
+        case .boiler:
+            ThermostatView(uniqueId: device.uniqueId)
         default:
             EmptyView()
         }

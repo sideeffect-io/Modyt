@@ -143,6 +143,65 @@ struct DeviceRecordTests {
     }
 
     @Test
+    func thermostatDescriptorBuildsFromBoilerData() {
+        let device = TestSupport.makeDevice(
+            uniqueId: "boiler-1",
+            name: "Living Thermostat",
+            usage: "boiler",
+            data: [
+                "temperature": .number(21.4),
+                "hygroIn": .number(48),
+                "setpoint": .number(22.5)
+            ],
+            metadata: [
+                "temperature": .object(["unit": .string("degC")]),
+                "setpoint": .object([
+                    "min": .number(10),
+                    "max": .number(30),
+                    "step": .number(0.5),
+                    "unit": .string("degC")
+                ])
+            ]
+        )
+
+        let descriptor = device.thermostatDescriptor()
+
+        #expect(descriptor?.temperature?.value == 21.4)
+        #expect(descriptor?.humidity?.value == 48)
+        #expect(descriptor?.setpointKey == "setpoint")
+        #expect(descriptor?.setpoint == 22.5)
+        #expect(descriptor?.setpointRange == 10...30)
+        #expect(descriptor?.setpointStep == 0.5)
+        #expect(descriptor?.unitSymbol == "°C")
+    }
+
+    @Test
+    func thermostatDescriptorSupportsRe2020ControlBoilerPayload() {
+        let device = TestSupport.makeDevice(
+            uniqueId: "thermic-1",
+            name: "Thermostat",
+            usage: "re2020ControlBoiler",
+            data: [
+                "ambientTemperature": .number(24.1),
+                "hygroIn": .number(52),
+                "setpoint": .number(25.0),
+                "__linkedAreaId": .number(1739197415)
+            ],
+            metadata: [
+                "setpoint": .object(["min": .number(10), "max": .number(30), "step": .number(0.5)])
+            ]
+        )
+
+        let descriptor = device.thermostatDescriptor()
+
+        #expect(device.group == .boiler)
+        #expect(descriptor?.temperature?.key == "ambientTemperature")
+        #expect(descriptor?.humidity?.key == "hygroIn")
+        #expect(descriptor?.setpoint == 25.0)
+        #expect(descriptor?.canAdjustSetpoint == true)
+    }
+
+    @Test
     func observationEquivalenceIgnoresUpdatedAtAndUnrelatedMetadata() {
         let baseline = TestSupport.makeDevice(
             uniqueId: "light-7",

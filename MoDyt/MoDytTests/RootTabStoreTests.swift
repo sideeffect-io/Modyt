@@ -41,11 +41,12 @@ struct RootTabStoreTests {
         #expect(await appActiveRecorder.values == [true])
 
         let requests = await sendRecorder.values
-        #expect(requests.count == 5)
+        #expect(requests.count == 6)
         #expect(requests.contains(where: { $0.contains("GET /configs/file HTTP/1.1") }))
         #expect(requests.contains(where: { $0.contains("GET /devices/meta HTTP/1.1") }))
         #expect(requests.contains(where: { $0.contains("GET /devices/cmeta HTTP/1.1") }))
         #expect(requests.contains(where: { $0.contains("GET /devices/data HTTP/1.1") }))
+        #expect(requests.contains(where: { $0.contains("GET /areas/data HTTP/1.1") }))
         #expect(requests.contains(where: { $0.contains("POST /refresh/all HTTP/1.1") }))
 
         let applied = await applyRecorder.values

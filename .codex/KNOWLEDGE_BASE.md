@@ -374,3 +374,45 @@ You explicitly asked for:
 
 - You prioritize smooth interaction and frame stability over perfect visual parity with native glass APIs.
 - You prefer iterative visual calibration with screenshot-based comparison until parity is close enough.
+
+---
+
+## 9) Latest Session Updates (Thermostat Card Scope + Store Init Cleanup)
+
+### A. Mistakes To Avoid (And How To Avoid Them)
+
+- Do not keep feature wiring for capabilities the device does not support (for thermostat here: setpoint write commands).
+- Avoid this by validating capability scope early and then removing unused code across all impacted layers (view, store, factory, repository/environment wiring, tests).
+- Do not leave production call sites noisy with explicit `nil` arguments when initializer defaults can express intent.
+- Avoid this by defaulting optional bootstrap parameters (`initialDevice`) to `nil` in store inits and keeping factories minimal.
+- Do not leave card UI empty while wiring evolves; keep at least stable read-only telemetry visible.
+- Avoid this by prioritizing read path first (temperature/humidity observation), then layering controls only after backend capability confirmation.
+
+### B. Tips, Tricks, And Useful Commands
+
+- Fast audit for noisy `nil` call sites:
+  - `rg --line-number "initialDevice:\\s*nil" MoDyt/App`
+- Fast audit for stores that can adopt defaulted bootstrap args:
+  - `rg --line-number "initialDevice:\\s*DeviceRecord\\?" MoDyt/App/Features/Dashboard`
+- Verify targeted edits quickly with focused diffs:
+  - `git diff -- <files...>`
+- Validate signature and wiring changes with simulator build:
+  - XcodeBuildMCP `build_sim` for scheme `MoDyt`.
+
+### C. Architectural Patterns And Best Practices Reinforced
+
+- Keep feature architecture consistent by device type: dedicated view + store + factory, wired through environment dependencies.
+- Keep store dependencies capability-based and minimal: read-only devices should expose observation-only dependencies.
+- Treat software layers explicitly:
+  - UI layer: present telemetry and user intents only.
+  - Store layer: observation/state mapping and intent orchestration.
+  - Factory/environment layer: concrete dependency composition.
+  - Repository/client layer: source-of-truth data and protocol operations.
+- When requirements change, prefer full-path cleanup over partial deactivation to preserve clarity and testability.
+
+### D. Coding Preferences Captured
+
+- You prefer pragmatic scope correction over speculative features (read-only thermostat is acceptable and preferred when command support is absent).
+- You want architecture symmetry with existing features, but not at the cost of dead/unusable control paths.
+- You prefer cleaner production composition code (omit explicit `nil` where defaults make call sites clearer).
+- You expect “remove unused wiring” to include all relevant layers, not only the visible UI.

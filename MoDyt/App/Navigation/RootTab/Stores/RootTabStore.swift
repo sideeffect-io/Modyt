@@ -160,6 +160,8 @@ final class RootTabStore {
             await sendText(TydomCommand.devicesCmeta().request)
             log("Send devices-data")
             await sendText(TydomCommand.devicesData().request)
+            log("Send areas-data")
+            await sendText(TydomCommand.areasData().request)
             log("Send refresh-all")
             await sendText(TydomCommand.refreshAll().request)
         }

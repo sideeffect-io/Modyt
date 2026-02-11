@@ -81,7 +81,7 @@ final class ShutterStore {
 
     init(
         uniqueId: String,
-        initialDevice: DeviceRecord?,
+        initialDevice: DeviceRecord? = nil,
         dependencies: Dependencies
     ) {
         let resolvedDescriptor = initialDevice

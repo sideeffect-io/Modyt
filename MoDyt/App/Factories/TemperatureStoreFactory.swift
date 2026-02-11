@@ -7,7 +7,6 @@ struct TemperatureStoreFactory {
         TemperatureStoreFactory { uniqueId in
             TemperatureStore(
                 uniqueId: uniqueId,
-                initialDevice: nil,
                 dependencies: .init(
                     observeTemperature: { uniqueId in
                         await environment.repository.observeDevice(uniqueId: uniqueId)

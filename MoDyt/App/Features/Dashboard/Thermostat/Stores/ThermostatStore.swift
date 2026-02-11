@@ -3,18 +3,18 @@ import Observation
 
 @Observable
 @MainActor
-final class TemperatureStore {
+final class ThermostatStore {
     struct Dependencies {
-        let observeTemperature: @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable
+        let observeThermostat: @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable
 
         init(
-            observeTemperature: @escaping @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable
+            observeThermostat: @escaping @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable
         ) {
-            self.observeTemperature = observeTemperature
+            self.observeThermostat = observeThermostat
         }
     }
 
-    private(set) var descriptor: TemperatureDescriptor?
+    private(set) var descriptor: ThermostatDescriptor?
 
     private let observationTask = TaskHandle()
     private let worker: Worker
@@ -24,10 +24,10 @@ final class TemperatureStore {
         initialDevice: DeviceRecord? = nil,
         dependencies: Dependencies
     ) {
-        self.descriptor = initialDevice?.temperatureDescriptor()
+        self.descriptor = initialDevice?.thermostatDescriptor()
         self.worker = Worker(
             uniqueId: uniqueId,
-            observeTemperature: dependencies.observeTemperature
+            observeThermostat: dependencies.observeThermostat
         )
 
         observationTask.task = Task { [weak self, worker] in
@@ -37,33 +37,33 @@ final class TemperatureStore {
         }
     }
 
-    private func applyIncomingDescriptor(_ descriptor: TemperatureDescriptor?) {
+    private func applyIncomingDescriptor(_ descriptor: ThermostatDescriptor?) {
         guard self.descriptor != descriptor else { return }
         self.descriptor = descriptor
     }
 
     private actor Worker {
         private let uniqueId: String
-        private let observeTemperature: @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable
+        private let observeThermostat: @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable
 
         init(
             uniqueId: String,
-            observeTemperature: @escaping @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable
+            observeThermostat: @escaping @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable
         ) {
             self.uniqueId = uniqueId
-            self.observeTemperature = observeTemperature
+            self.observeThermostat = observeThermostat
         }
 
         func observe(
-            onDescriptor: @escaping @Sendable (TemperatureDescriptor?) async -> Void
+            onDescriptor: @escaping @Sendable (ThermostatDescriptor?) async -> Void
         ) async {
-            let stream = await observeTemperature(uniqueId)
+            let stream = await observeThermostat(uniqueId)
             for await device in stream {
                 guard !Task.isCancelled else { return }
                 if let device, device.uniqueId != uniqueId {
                     continue
                 }
-                await onDescriptor(device?.temperatureDescriptor())
+                await onDescriptor(device?.thermostatDescriptor())
             }
         }
     }

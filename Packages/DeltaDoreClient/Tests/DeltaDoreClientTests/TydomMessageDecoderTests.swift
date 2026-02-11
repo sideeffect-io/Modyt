@@ -76,6 +76,60 @@ import Testing
     }
 }
 
+@Test func tydomDeviceKind_mapsRe2020ControlBoilerToBoiler() {
+    // Given
+    let usage = "re2020ControlBoiler"
+
+    // When
+    let kind = TydomDeviceKind.fromUsage(usage)
+
+    // Then
+    #expect(kind == .boiler)
+}
+
+@Test func tydomMessageDecoder_preservesLinkedAreaMetadataInDeviceData() async {
+    // Given
+    let pipeline = MessagePipelineHarness(
+        deviceInfo: { uniqueId in
+            if uniqueId == "2_1" {
+                return TydomDeviceInfo(name: "Thermostat", usage: "re2020ControlBoiler", metadata: nil)
+            }
+            return nil
+        },
+        applyCacheMutation: { _ in }
+    )
+
+    let json = """
+    [
+      {"id": 1, "endpoints": [
+        {"id": 2, "error": 0, "link": {"type":"area","subtype":"thermicCtrl","id":1739197415}, "data": [
+          {"name": "ambientTemperature", "value": 23.7, "validity": "upToDate"}
+        ]}
+      ]}
+    ]
+    """
+    let payload = httpResponse(
+        uriOrigin: "/devices/data",
+        transactionId: "457",
+        body: json
+    )
+
+    // When
+    let message = await pipeline.decodeAndHydrate(payload)
+
+    // Then
+    if case .devices(let devices, let transactionId) = message {
+        #expect(transactionId == "457")
+        #expect(devices.count == 1)
+        let device = devices[0]
+        #expect(device.data["ambientTemperature"] == JSONValue.number(23.7))
+        #expect(device.data["__linkedAreaId"] == JSONValue.number(1739197415))
+        #expect(device.data["__linkedAreaSubtype"] == JSONValue.string("thermicCtrl"))
+    } else {
+        #expect(Bool(false), "Expected devices message")
+    }
+}
+
 @Test func tydomMessageDecoder_decodesDevicesCDataForConsumption() async {
     // Given
     let pipeline = MessagePipelineHarness(

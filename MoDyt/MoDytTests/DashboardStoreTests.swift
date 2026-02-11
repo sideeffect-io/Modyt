@@ -4,6 +4,29 @@ import Testing
 @MainActor
 struct DashboardStoreTests {
     @Test
+    func dashboardDeviceDescriptionUsesResolvedGroupOverride() {
+        let description = DashboardDeviceDescription(
+            uniqueId: "thermo-1",
+            name: "Thermostat",
+            usage: "unknownThermostat",
+            resolvedGroup: .boiler
+        )
+
+        #expect(description.group == .boiler)
+    }
+
+    @Test
+    func dashboardDeviceDescriptionFallsBackToUsageWhenNoOverride() {
+        let description = DashboardDeviceDescription(
+            uniqueId: "light-1",
+            name: "Light",
+            usage: "light"
+        )
+
+        #expect(description.group == .light)
+    }
+
+    @Test
     func favoritesStreamUpdatesState() async {
         let streamBox = BufferedStreamBox<[DashboardDeviceDescription]>()
         let store = DashboardStore(

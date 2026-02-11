@@ -154,11 +154,24 @@ enum TydomMessageDecoder {
 
     private static func extractDataValues(from endpoint: DevicesDataPayload.Endpoint) -> [String: JSONValue] {
         guard endpoint.error == nil || endpoint.error == 0 else { return [:] }
-        guard let entries = endpoint.data else { return [:] }
         var values: [String: JSONValue] = [:]
-        for entry in entries {
-            guard entry.validity == "upToDate", let value = entry.value else { continue }
-            values[entry.name] = value
+        if let entries = endpoint.data {
+            for entry in entries {
+                guard entry.validity == "upToDate", let value = entry.value else { continue }
+                values[entry.name] = value
+            }
+        }
+
+        if let link = endpoint.link, link.type == "area" {
+            if let linkedAreaId = link.id {
+                values["__linkedAreaId"] = .number(Double(linkedAreaId))
+            }
+            if let linkedAreaType = link.type {
+                values["__linkedAreaType"] = .string(linkedAreaType)
+            }
+            if let linkedAreaSubtype = link.subtype {
+                values["__linkedAreaSubtype"] = .string(linkedAreaSubtype)
+            }
         }
         return values
     }
@@ -410,6 +423,13 @@ private struct DevicesDataPayload: Decodable {
         let id: Int
         let error: Int?
         let data: [Entry]?
+        let link: Link?
+    }
+
+    struct Link: Decodable {
+        let type: String?
+        let subtype: String?
+        let id: Int?
     }
 
     struct Entry: Decodable {

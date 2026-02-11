@@ -40,7 +40,7 @@ final class LightStore {
 
     init(
         uniqueId: String,
-        initialDevice: DeviceRecord?,
+        initialDevice: DeviceRecord? = nil,
         dependencies: Dependencies
     ) {
         self.uniqueId = uniqueId

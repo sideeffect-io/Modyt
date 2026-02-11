@@ -90,7 +90,7 @@ enum DeviceGroup: String, CaseIterable, Sendable {
             return .energy
         case "sensorDFR":
             return .smoke
-        case "boiler", "sh_hvac", "electric", "aeraulic":
+        case "boiler", "sh_hvac", "electric", "aeraulic", "re2020ControlBoiler":
             return .boiler
         case "alarm":
             return .alarm
@@ -144,6 +144,26 @@ struct TemperatureDescriptor: Sendable, Equatable {
     let unitSymbol: String?
 }
 
+struct HumidityDescriptor: Sendable, Equatable {
+    let key: String
+    let value: Double
+    let unitSymbol: String?
+}
+
+struct ThermostatDescriptor: Sendable, Equatable {
+    let temperature: TemperatureDescriptor?
+    let humidity: HumidityDescriptor?
+    let setpointKey: String?
+    let setpoint: Double?
+    let setpointRange: ClosedRange<Double>
+    let setpointStep: Double
+    let unitSymbol: String?
+
+    var canAdjustSetpoint: Bool {
+        setpointKey != nil && setpoint != nil
+    }
+}
+
 extension DeviceRecord {
     struct ObservationSignature: Sendable, Equatable {
         let uniqueId: String
@@ -156,6 +176,7 @@ extension DeviceRecord {
         let primaryControl: DeviceControlDescriptor?
         let drivingLightControl: DrivingLightControlDescriptor?
         let temperature: TemperatureDescriptor?
+        let thermostat: ThermostatDescriptor?
         let fallbackData: [String: JSONValue]?
     }
 
@@ -170,6 +191,7 @@ extension DeviceRecord {
         let primaryControl: DeviceControlDescriptor?
         let drivingLightControl: DrivingLightControlDescriptor?
         let temperature: TemperatureDescriptor?
+        let thermostat: ThermostatDescriptor?
         let fallbackStatusData: [String: JSONValue]?
     }
 
@@ -177,8 +199,9 @@ extension DeviceRecord {
         let primaryControl = primaryControlDescriptor()
         let drivingLightControl = drivingLightControlDescriptor()
         let temperature = temperatureDescriptor()
+        let thermostat = thermostatDescriptor()
         let fallbackData: [String: JSONValue]? =
-            (primaryControl == nil && drivingLightControl == nil && temperature == nil) ? data : nil
+            (primaryControl == nil && drivingLightControl == nil && temperature == nil && thermostat == nil) ? data : nil
 
         return ObservationSignature(
             uniqueId: uniqueId,
@@ -191,6 +214,7 @@ extension DeviceRecord {
             primaryControl: primaryControl,
             drivingLightControl: drivingLightControl,
             temperature: temperature,
+            thermostat: thermostat,
             fallbackData: fallbackData
         )
     }
@@ -199,7 +223,9 @@ extension DeviceRecord {
         let primaryControl = primaryControlDescriptor()
         let drivingLightControl = drivingLightControlDescriptor()
         let temperature = temperatureDescriptor()
-        let fallbackStatusData: [String: JSONValue]? = group == .light || group == .shutter ? nil : data
+        let thermostat = thermostatDescriptor()
+        let fallbackStatusData: [String: JSONValue]? =
+            group == .light || group == .shutter || group == .boiler ? nil : data
 
         return FavoritesSignature(
             uniqueId: uniqueId,
@@ -212,6 +238,7 @@ extension DeviceRecord {
             primaryControl: primaryControl,
             drivingLightControl: drivingLightControl,
             temperature: temperature,
+            thermostat: thermostat,
             fallbackStatusData: fallbackStatusData
         )
     }
@@ -288,7 +315,7 @@ extension DeviceRecord {
     }
 
     func temperatureDescriptor() -> TemperatureDescriptor? {
-        guard group == .thermo else { return nil }
+        guard group == .thermo || group == .boiler || thermostatDescriptor() != nil else { return nil }
 
         for key in Self.preferredTemperatureKeys {
             if let descriptor = temperatureDescriptor(forKey: key) {
@@ -307,6 +334,55 @@ extension DeviceRecord {
         }
 
         return nil
+    }
+
+    func humidityDescriptor() -> HumidityDescriptor? {
+        for key in Self.preferredHumidityKeys {
+            guard let value = numericValue(forKey: key) else { continue }
+            let unitSymbol = humidityUnitSymbol(forKey: key) ?? "%"
+            return HumidityDescriptor(
+                key: key,
+                value: value,
+                unitSymbol: unitSymbol
+            )
+        }
+
+        for key in data.keys.sorted() {
+            guard Self.isLikelyHumidityKey(key) else { continue }
+            guard let value = numericValue(forKey: key) else { continue }
+            let unitSymbol = humidityUnitSymbol(forKey: key) ?? "%"
+            return HumidityDescriptor(
+                key: key,
+                value: value,
+                unitSymbol: unitSymbol
+            )
+        }
+
+        return nil
+    }
+
+    func thermostatDescriptor() -> ThermostatDescriptor? {
+        guard group == .boiler || group == .thermo || isLikelyThermostatPayload() else {
+            return nil
+        }
+
+        let setpoint = thermostatSetpointDescriptor()
+        let temperature = thermostatTemperatureDescriptor()
+        let humidity = humidityDescriptor()
+
+        guard setpoint != nil || temperature != nil || humidity != nil else {
+            return nil
+        }
+
+        return ThermostatDescriptor(
+            temperature: temperature,
+            humidity: humidity,
+            setpointKey: setpoint?.key,
+            setpoint: setpoint?.value,
+            setpointRange: setpoint?.range ?? 5...30,
+            setpointStep: setpoint?.step ?? 0.5,
+            unitSymbol: setpoint?.unitSymbol ?? temperature?.unitSymbol
+        )
     }
 
     var statusText: String {
@@ -342,7 +418,7 @@ extension DeviceRecord {
     }
 
     private func sliderDescriptor(forKey key: String) -> DeviceControlDescriptor? {
-        guard let value = data[key]?.numberValue else { return nil }
+        guard let value = numericValue(forKey: key) else { return nil }
         let range = metadataRange(forKey: key) ?? 0...100
         return DeviceControlDescriptor(kind: .slider, key: key, isOn: value > 0, value: value, range: range)
     }
@@ -363,10 +439,20 @@ extension DeviceRecord {
 
     private func firstNumberDescriptor() -> DeviceControlDescriptor? {
         for (key, value) in data {
-            if let numberValue = value.numberValue {
+            if let numberValue = value.numberValue ?? value.stringValue.flatMap(Double.init) {
                 let range = metadataRange(forKey: key) ?? 0...100
                 return DeviceControlDescriptor(kind: .slider, key: key, isOn: numberValue > 0, value: numberValue, range: range)
             }
+        }
+        return nil
+    }
+
+    private func numericValue(forKey key: String) -> Double? {
+        if let value = data[key]?.numberValue {
+            return value
+        }
+        if let raw = data[key]?.stringValue {
+            return Double(raw)
         }
         return nil
     }
@@ -379,7 +465,7 @@ extension DeviceRecord {
     }
 
     private func temperatureDescriptor(forKey key: String) -> TemperatureDescriptor? {
-        guard let value = data[key]?.numberValue else { return nil }
+        guard let value = numericValue(forKey: key) else { return nil }
         return TemperatureDescriptor(
             key: key,
             value: value,
@@ -434,9 +520,145 @@ extension DeviceRecord {
         }
     }
 
+    private func humidityUnitSymbol(forKey key: String) -> String? {
+        let metadataObject = metadata?[key]?.objectValue
+        let metadataCandidates = [
+            metadataObject?["unit"]?.stringValue,
+            metadataObject?["unity"]?.stringValue,
+            metadataObject?["symbol"]?.stringValue,
+            metadataObject?["uom"]?.stringValue
+        ]
+
+        if let rawUnit = metadataCandidates.compactMap({ $0 }).first {
+            return normalizedHumidityUnitSymbol(rawUnit)
+        }
+
+        let dataCandidates = [
+            data["\(key)_unit"]?.stringValue,
+            data["\(key)Unit"]?.stringValue,
+            data["humidityUnit"]?.stringValue,
+            data["unit"]?.stringValue
+        ]
+
+        if let rawUnit = dataCandidates.compactMap({ $0 }).first {
+            return normalizedHumidityUnitSymbol(rawUnit)
+        }
+
+        return nil
+    }
+
+    private func normalizedHumidityUnitSymbol(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        switch trimmed.lowercased() {
+        case "na", "n/a", "none", "null", "-":
+            return nil
+        case "%", "percent", "percentage", "pct":
+            return "%"
+        default:
+            return trimmed
+        }
+    }
+
+    private func thermostatTemperatureDescriptor() -> TemperatureDescriptor? {
+        for key in Self.preferredThermostatTemperatureKeys {
+            if let descriptor = temperatureDescriptor(forKey: key) {
+                return descriptor
+            }
+        }
+        return nil
+    }
+
+    private func isLikelyThermostatPayload() -> Bool {
+        for key in data.keys {
+            if Self.isLikelySetpointKey(key) || Self.isLikelyHumidityKey(key) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private struct ThermostatSetpointDescriptor {
+        let key: String
+        let value: Double
+        let range: ClosedRange<Double>
+        let step: Double
+        let unitSymbol: String?
+    }
+
+    private func thermostatSetpointDescriptor() -> ThermostatSetpointDescriptor? {
+        for key in Self.preferredSetpointKeys {
+            guard let value = numericValue(forKey: key) else { continue }
+            return ThermostatSetpointDescriptor(
+                key: key,
+                value: value,
+                range: thermostatSetpointRange(forKey: key),
+                step: thermostatSetpointStep(forKey: key),
+                unitSymbol: temperatureUnitSymbol(forKey: key)
+            )
+        }
+
+        for key in data.keys.sorted() {
+            guard Self.isLikelySetpointKey(key) else { continue }
+            guard let value = numericValue(forKey: key) else { continue }
+            return ThermostatSetpointDescriptor(
+                key: key,
+                value: value,
+                range: thermostatSetpointRange(forKey: key),
+                step: thermostatSetpointStep(forKey: key),
+                unitSymbol: temperatureUnitSymbol(forKey: key)
+            )
+        }
+
+        return nil
+    }
+
+    private func thermostatSetpointRange(forKey key: String) -> ClosedRange<Double> {
+        if let metadataRange = metadataRange(forKey: key) {
+            return metadataRange
+        }
+
+        if let companionRange = thermostatCompanionRange(forKey: key) {
+            return companionRange
+        }
+
+        return 5...30
+    }
+
+    private func thermostatCompanionRange(forKey key: String) -> ClosedRange<Double>? {
+        let companionKeys: (min: String, max: String)
+        switch key {
+        case "heatSetpoint":
+            companionKeys = ("minHeatSetpoint", "maxHeatSetpoint")
+        case "coolSetpoint":
+            companionKeys = ("minCoolSetpoint", "maxCoolSetpoint")
+        default:
+            companionKeys = ("minSetpoint", "maxSetpoint")
+        }
+
+        guard let minValue = numericValue(forKey: companionKeys.min),
+              let maxValue = numericValue(forKey: companionKeys.max),
+              minValue < maxValue else {
+            return nil
+        }
+        return minValue...maxValue
+    }
+
+    private func thermostatSetpointStep(forKey key: String) -> Double {
+        if let metadataStep = metadata?[key]?.objectValue?["step"]?.numberValue,
+           metadataStep > 0 {
+            return metadataStep
+        }
+        return 0.5
+    }
+
     private static let preferredTemperatureKeys = [
         "outTemperature",
         "temperature",
+        "ambientTemperature",
+        "regTemperature",
+        "devTemperature",
         "temp",
         "currentTemperature",
         "outdoorTemperature",
@@ -447,10 +669,50 @@ extension DeviceRecord {
         "devTemperature"
     ]
 
+    private static let preferredThermostatTemperatureKeys = [
+        "temperature",
+        "ambientTemperature",
+        "regTemperature",
+        "devTemperature",
+        "currentTemperature",
+        "outTemperature"
+    ]
+
+    private static let preferredSetpointKeys = [
+        "setpoint",
+        "currentSetpoint",
+        "localSetpoint",
+        "heatSetpoint",
+        "coolSetpoint",
+        "masterAbsSetpoint",
+        "masterSchedSetpoint"
+    ]
+
+    private static let preferredHumidityKeys = [
+        "hygroIn",
+        "humidity",
+        "hygrometry",
+        "humidityIn",
+        "relativeHumidity"
+    ]
+
     private static func isLikelyTemperatureKey(_ key: String) -> Bool {
         let normalized = key.lowercased()
         if normalized.hasPrefix("config") { return false }
         if normalized == "lightpower" || normalized == "jobsmp" { return false }
         return normalized.contains("temp") || normalized.contains("temperature")
+    }
+
+    private static func isLikelySetpointKey(_ key: String) -> Bool {
+        let normalized = key.lowercased()
+        if normalized.hasPrefix("min") || normalized.hasPrefix("max") {
+            return false
+        }
+        return normalized.contains("setpoint")
+    }
+
+    private static func isLikelyHumidityKey(_ key: String) -> Bool {
+        let normalized = key.lowercased()
+        return normalized.contains("hygro") || normalized.contains("humidity")
     }
 }

@@ -7,7 +7,6 @@ struct LightStoreFactory {
         LightStoreFactory { uniqueId in
             LightStore(
                 uniqueId: uniqueId,
-                initialDevice: nil,
                 dependencies: .init(
                     observeLight: { uniqueId in
                         await environment.repository.observeDevice(uniqueId: uniqueId)

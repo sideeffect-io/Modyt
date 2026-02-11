@@ -169,7 +169,7 @@ public enum TydomDeviceKind: Sendable, Equatable {
             return .energy
         case "sensorDFR":
             return .smoke
-        case "boiler", "sh_hvac", "electric", "aeraulic":
+        case "boiler", "sh_hvac", "electric", "aeraulic", "re2020ControlBoiler":
             return .boiler
         case "alarm":
             return .alarm

@@ -8,7 +8,6 @@ struct ShutterStoreFactory {
         ShutterStoreFactory { uniqueId in
             ShutterStore(
                 uniqueId: uniqueId,
-                initialDevice: nil,
                 dependencies: .init(
                     observeShutter: { uniqueId in
                         await environment.shutterRepository

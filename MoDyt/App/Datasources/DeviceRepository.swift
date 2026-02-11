@@ -92,7 +92,8 @@ actor DeviceRepository {
                     DashboardDeviceDescription(
                         uniqueId: device.uniqueId,
                         name: device.name,
-                        usage: device.usage
+                        usage: device.usage,
+                        resolvedGroup: Self.dashboardGroup(for: device)
                     )
                 }
         }
@@ -210,8 +211,44 @@ actor DeviceRepository {
         case .devices(let devices, _):
             log("Apply devices message count=\(devices.count)")
             await upsertDevices(devices)
+        case .areas(let areas, _):
+            log("Apply areas message count=\(areas.count)")
+            await applyAreasData(areas)
         default:
             break
+        }
+    }
+
+    private func applyAreasData(_ areas: [TydomArea]) async {
+        guard !areas.isEmpty else { return }
+        guard let deviceDAO = try? await requireDAO() else { return }
+        let devices = (try? await deviceDAO.list()) ?? []
+        guard !devices.isEmpty else { return }
+
+        var didUpdate = false
+
+        for area in areas {
+            guard let areaId = area.id else { continue }
+            let values = Self.extractAreaDataValues(from: area.payload)
+            guard !values.isEmpty else { continue }
+
+            for device in devices where Self.linkedAreaId(in: device.data) == areaId {
+                var mergedData = device.data
+                for (key, value) in values {
+                    mergedData[key] = value
+                }
+                guard mergedData != device.data else { continue }
+
+                var updated = device
+                updated.data = mergedData
+                updated.updatedAt = now()
+                _ = try? await deviceDAO.update(updated)
+                didUpdate = true
+            }
+        }
+
+        if didUpdate {
+            await notifyObservers()
         }
     }
 
@@ -270,6 +307,88 @@ actor DeviceRepository {
         default:
             false
         }
+    }
+
+    private static func linkedAreaId(in data: [String: JSONValue]) -> Int? {
+        if let value = data["__linkedAreaId"]?.numberValue {
+            return Int(value.rounded())
+        }
+        if let raw = data["__linkedAreaId"]?.stringValue {
+            return Int(raw)
+        }
+        return nil
+    }
+
+    private static func extractAreaDataValues(
+        from payload: [String: JSONValue]
+    ) -> [String: JSONValue] {
+        guard let entries = payload["data"]?.arrayValue else { return [:] }
+
+        var values: [String: JSONValue] = [:]
+        for entry in entries {
+            guard let object = entry.objectValue else { continue }
+            guard let name = object["name"]?.stringValue else { continue }
+            if let validity = object["validity"]?.stringValue, validity != "upToDate" {
+                continue
+            }
+            guard let value = object["value"] else { continue }
+            values[name] = value
+        }
+
+        return values
+    }
+
+    private static func dashboardGroup(for device: DeviceRecord) -> DeviceGroup {
+        let usageGroup = device.group
+        guard usageGroup == .other else { return usageGroup }
+
+        if device.thermostatDescriptor() != nil {
+            return .boiler
+        }
+        if isLikelyThermostatData(device.data, metadata: device.metadata) {
+            return .boiler
+        }
+        if device.temperatureDescriptor() != nil {
+            return .thermo
+        }
+
+        return usageGroup
+    }
+
+    private static func isLikelyThermostatData(
+        _ data: [String: JSONValue],
+        metadata: [String: JSONValue]?
+    ) -> Bool {
+        var keys = Set(data.keys.map { $0.lowercased() })
+        if let metadata {
+            keys.formUnion(metadata.keys.map { $0.lowercased() })
+        }
+
+        if keys.contains("__linkedareaid") {
+            return true
+        }
+
+        if keys.contains(where: {
+            $0.contains("setpoint")
+            || $0 == "thermiclevel"
+            || $0.contains("hvacmode")
+            || $0.contains("comfortmode")
+            || $0.contains("hygro")
+            || $0.contains("humidity")
+        }) {
+            return true
+        }
+
+        let hasTemperatureSignal = keys.contains(where: {
+            $0.contains("temperature")
+            || $0 == "temp"
+            || $0.hasSuffix("temp")
+        })
+        let hasThermostatControlSignal = keys.contains("authorization")
+            || keys.contains("delaythermiclevel")
+            || keys.contains("thermiclevel")
+
+        return hasTemperatureSignal && hasThermostatControlSignal
     }
 
     private static let createDevicesTableSQL = """
