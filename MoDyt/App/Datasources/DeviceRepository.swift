@@ -351,6 +351,9 @@ actor DeviceRepository {
         if device.temperatureDescriptor() != nil {
             return .thermo
         }
+        if device.smokeDetectorDescriptor() != nil {
+            return .smoke
+        }
         if device.energyConsumptionDescriptor() != nil {
             return .energy
         }

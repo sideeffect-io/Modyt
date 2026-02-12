@@ -138,3 +138,45 @@ This is the condensed, non-duplicative engineering memory for the project.
 - Practical correctness over uncertain metadata assumptions.
 - Prefer deterministic behavior and semantic dedup over heuristic/time-window hacks.
 - Optimize for smooth interactions and responsive animations.
+
+## 10) Session Learnings — Smoke/Temperature/Sunlight Battery (2026-02-12)
+
+### Mistakes to Avoid (and how)
+
+- Do not add a battery badge in UI before battery data exists in the descriptor layer.
+  - First propagate battery signals in `DeviceRecord` descriptor mapping, then render.
+- Avoid layout clipping in fixed-size cards.
+  - Keep visual sizes consistent (for example gauge diameter == frame size) and validate in card constraints.
+- Do not assume sensor battery percentage is always available.
+  - For `sensorThermo`/`sensorSun`, treat `battDefect` as primary signal and `battery`/`battLevel` as optional.
+- Avoid mixing unrelated working-tree changes while implementing.
+  - Always diff scoped paths before finalizing (`git diff -- <path>`).
+
+### Tips, Tricks, Commands
+
+- Inspect payload semantics quickly:
+  - `rg -n "sensorThermo|sensorSun|battDefect|battLevel|battery" <paths>`
+- Get precise line references for large files:
+  - `nl -ba <file> | sed -n '<start>,<end>p'`
+- Keep review focused on touched files:
+  - `git diff --name-only -- <paths...>`
+  - `git diff -- <path>`
+- For iOS validation in this repo:
+  - Prefer XcodeBuildMCP first (`discover_projs`, `session_set_defaults`, `build_sim`, `test_sim`)
+  - If tooling is sandbox-blocked, report limitations explicitly.
+
+### Architectural Patterns, Best Practices, Layers
+
+- Keep the card architecture symmetrical: `View` + `Store` + `StoreFactory`, with parsing in `DeviceRecord`.
+- Reuse a shared domain representation (`BatteryStatusDescriptor`) instead of re-deriving battery logic per feature.
+- Preserve read-only card boundaries: no control intents/effects for sensor-only cards.
+- Keep presentation derivation local in views (badge label/symbol/tint) from normalized descriptor state.
+- Maintain accessibility parity when adding visual indicators (include battery state in accessibility value).
+
+### Coding Preferences Observed in This Session
+
+- You prefer consistent cross-card UX patterns (same battery badge treatment as smoke card).
+- You care about semantic icon correctness (SF Symbol must match device meaning).
+- You prefer compact, centered card composition where grouped status elements visually align.
+- You prefer payload-driven implementation decisions, validated against gateway/client traces.
+- You value practical, incremental changes with minimal architectural drift.

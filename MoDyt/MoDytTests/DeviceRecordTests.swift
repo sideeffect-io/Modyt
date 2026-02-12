@@ -91,6 +91,8 @@ struct DeviceRecordTests {
         #expect(descriptor?.key == "temperature")
         #expect(descriptor?.value == 18.4)
         #expect(descriptor?.unitSymbol == "°C")
+        #expect(descriptor?.batteryStatus?.batteryLevelKey == "battery")
+        #expect(descriptor?.batteryStatus?.batteryLevel == 92)
     }
 
     @Test
@@ -240,6 +242,83 @@ struct DeviceRecordTests {
 
         #expect(descriptor?.value == 1.2)
         #expect(descriptor?.unitSymbol == "kWh")
+    }
+
+    @Test
+    func sunlightDescriptorExtractsBatteryStatus() {
+        let device = TestSupport.makeDevice(
+            uniqueId: "sun-1",
+            name: "Garden Sun",
+            usage: "sensorSun",
+            data: [
+                "lightPower": .number(620),
+                "battDefect": .bool(false),
+                "battery": .number(87)
+            ]
+        )
+
+        let descriptor = device.sunlightDescriptor()
+
+        #expect(descriptor?.key == "lightPower")
+        #expect(descriptor?.batteryStatus?.batteryDefectKey == "battDefect")
+        #expect(descriptor?.batteryStatus?.batteryDefect == false)
+        #expect(descriptor?.batteryStatus?.batteryLevelKey == "battery")
+        #expect(descriptor?.batteryStatus?.batteryLevel == 87)
+    }
+
+    @Test
+    func smokeDetectorDescriptorExtractsSmokeAndBatteryDefect() {
+        let device = TestSupport.makeDevice(
+            uniqueId: "smoke-1",
+            name: "Hallway Smoke",
+            usage: "sensorDFR",
+            data: [
+                "techSmokeDefect": .bool(false),
+                "battDefect": .bool(true)
+            ]
+        )
+
+        let descriptor = device.smokeDetectorDescriptor()
+
+        #expect(device.group == .smoke)
+        #expect(descriptor?.smokeKey == "techSmokeDefect")
+        #expect(descriptor?.smokeDetected == false)
+        #expect(descriptor?.batteryDefectKey == "battDefect")
+        #expect(descriptor?.batteryDefect == true)
+        #expect(descriptor?.health == .notOk)
+    }
+
+    @Test
+    func smokeDetectorDescriptorExtractsBatteryLevel() {
+        let device = TestSupport.makeDevice(
+            uniqueId: "smoke-2",
+            name: "Kitchen Smoke",
+            usage: "sensorDFR",
+            data: [
+                "techSmokeDefect": .bool(false),
+                "battLevel": .number(84)
+            ]
+        )
+
+        let descriptor = device.smokeDetectorDescriptor()
+
+        #expect(descriptor?.batteryLevelKey == "battLevel")
+        #expect(descriptor?.batteryLevel == 84)
+        #expect(descriptor?.health == .ok)
+    }
+
+    @Test
+    func smokeDetectorDescriptorIsNilWithoutSmokeSignal() {
+        let device = TestSupport.makeDevice(
+            uniqueId: "smoke-3",
+            name: "Attic Smoke",
+            usage: "sensorDFR",
+            data: [
+                "battDefect": .bool(false)
+            ]
+        )
+
+        #expect(device.smokeDetectorDescriptor() == nil)
     }
 
     @Test

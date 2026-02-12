@@ -22,6 +22,8 @@ struct SunlightDescriptorTests {
         #expect(descriptor?.value == 860)
         #expect(descriptor?.range == 0...1400)
         #expect(descriptor?.unitSymbol == "W/m2")
+        #expect(descriptor?.batteryStatus?.batteryLevelKey == "battery")
+        #expect(descriptor?.batteryStatus?.batteryLevel == 95)
     }
 
     @Test
@@ -56,7 +58,7 @@ struct SunlightStoreTests {
     func initUsesInitialDescriptor() {
         let store = SunlightStore(
             uniqueId: "sun-10",
-            initialDevice: makeSunlightDevice(uniqueId: "sun-10", value: 320),
+            initialDevice: makeSunlightDevice(uniqueId: "sun-10", value: 320, batteryDefect: false),
             dependencies: .init(
                 observeSunlight: { _ in
                     AsyncStream { continuation in
@@ -68,6 +70,7 @@ struct SunlightStoreTests {
 
         #expect(store.descriptor?.value == 320)
         #expect(store.descriptor?.unitSymbol == "W/m2")
+        #expect(store.descriptor?.batteryStatus?.batteryDefect == false)
     }
 
     @Test
@@ -104,12 +107,25 @@ struct SunlightStoreTests {
         #expect(store.descriptor == nil)
     }
 
-    private func makeSunlightDevice(uniqueId: String, value: Double) -> DeviceRecord {
+    private func makeSunlightDevice(
+        uniqueId: String,
+        value: Double,
+        batteryDefect: Bool? = nil,
+        batteryLevel: Double? = nil
+    ) -> DeviceRecord {
+        var data: [String: JSONValue] = ["lightPower": .number(value)]
+        if let batteryDefect {
+            data["battDefect"] = .bool(batteryDefect)
+        }
+        if let batteryLevel {
+            data["battery"] = .number(batteryLevel)
+        }
+
         TestSupport.makeDevice(
             uniqueId: uniqueId,
             name: "Ensoleillement",
             usage: "unknownSunSensor",
-            data: ["lightPower": .number(value)],
+            data: data,
             metadata: ["lightPower": .object(["unit": .string("W/m2")])]
         )
     }

@@ -9,7 +9,7 @@ struct TemperatureStoreTests {
     func initUsesInitialThermoDescriptor() {
         let store = TemperatureStore(
             uniqueId: "thermo-1",
-            initialDevice: makeThermoDevice(uniqueId: "thermo-1", value: 20.5),
+            initialDevice: makeThermoDevice(uniqueId: "thermo-1", value: 20.5, batteryLevel: 78),
             dependencies: .init(
                 observeTemperature: { _ in
                     AsyncStream { continuation in
@@ -21,6 +21,7 @@ struct TemperatureStoreTests {
 
         #expect(store.descriptor?.value == 20.5)
         #expect(store.descriptor?.unitSymbol == "°C")
+        #expect(store.descriptor?.batteryStatus?.batteryLevel == 78)
     }
 
     @Test
@@ -57,12 +58,25 @@ struct TemperatureStoreTests {
         #expect(store.descriptor == nil)
     }
 
-    private func makeThermoDevice(uniqueId: String, value: Double) -> DeviceRecord {
+    private func makeThermoDevice(
+        uniqueId: String,
+        value: Double,
+        batteryLevel: Double? = nil,
+        batteryDefect: Bool? = nil
+    ) -> DeviceRecord {
+        var data: [String: JSONValue] = ["outTemperature": .number(value)]
+        if let batteryLevel {
+            data["battery"] = .number(batteryLevel)
+        }
+        if let batteryDefect {
+            data["battDefect"] = .bool(batteryDefect)
+        }
+
         TestSupport.makeDevice(
             uniqueId: uniqueId,
             name: "Outdoor Temperature",
             usage: "sensorThermo",
-            data: ["outTemperature": .number(value)],
+            data: data,
             metadata: ["outTemperature": .object(["unit": .string("degC")])]
         )
     }

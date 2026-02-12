@@ -16,23 +16,40 @@ struct SunlightView: View {
         let valueLabel = descriptor.map { Int($0.value.rounded()).formatted() } ?? "--"
         let unitLabel = descriptor?.unitSymbol ?? "W/m2"
 
-        return HStack(alignment: .center, spacing: 12) {
-            SunlightGauge(normalizedValue: normalizedValue)
-                .frame(width: 60, height: 60)
+        return VStack(spacing: 10) {
+            HStack(alignment: .center, spacing: 12) {
+                SunlightGauge(normalizedValue: normalizedValue)
+                    .frame(width: 60, height: 60)
 
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(valueLabel)
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(valueLabel)
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
 
-                Text(unitLabel)
-                    .font(.system(.caption2, design: .rounded).weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    Text(unitLabel)
+                        .font(.system(.caption2, design: .rounded).weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .fixedSize(horizontal: true, vertical: false)
+
+            if let battery = BatteryPresentation(status: descriptor?.batteryStatus) {
+                HStack(spacing: 6) {
+                    Image(systemName: battery.symbolName)
+                        .font(.system(.caption2, design: .rounded).weight(.semibold))
+                    Text(battery.label)
+                        .font(.system(.caption2, design: .rounded).weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+                .foregroundStyle(battery.tint)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.white.opacity(0.17), in: Capsule())
             }
         }
-        .fixedSize(horizontal: true, vertical: false)
         .frame(maxWidth: .infinity, alignment: .center)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Sunlight")
@@ -42,7 +59,47 @@ struct SunlightView: View {
     private func accessibilityValue(descriptor: SunlightDescriptor?) -> String {
         guard let descriptor else { return "Unavailable" }
         let valueLabel = descriptor.value.formatted(.number.precision(.fractionLength(0)))
-        return "\(valueLabel) \(descriptor.unitSymbol)"
+        var parts = ["\(valueLabel) \(descriptor.unitSymbol)"]
+        if let battery = BatteryPresentation(status: descriptor.batteryStatus) {
+            parts.append(battery.label)
+        }
+        return parts.joined(separator: ", ")
+    }
+}
+
+private struct BatteryPresentation {
+    let label: String
+    let symbolName: String
+    let tint: Color
+
+    init?(status: BatteryStatusDescriptor?) {
+        guard let status else { return nil }
+
+        if let level = status.normalizedBatteryLevel {
+            let roundedLevel = Int(level.rounded())
+            label = "Battery \(roundedLevel)%"
+            symbolName = Self.symbolName(for: level)
+            tint = roundedLevel <= 20 ? .orange : AppColors.cloud
+            return
+        }
+
+        guard let hasBatteryIssue = status.batteryDefect else { return nil }
+        label = hasBatteryIssue ? "Battery low" : "Battery OK"
+        symbolName = hasBatteryIssue ? "battery.25" : "battery.100"
+        tint = hasBatteryIssue ? .orange : AppColors.cloud
+    }
+
+    private static func symbolName(for level: Double) -> String {
+        switch level {
+        case 76...:
+            return "battery.100"
+        case 51...:
+            return "battery.75"
+        case 26...:
+            return "battery.50"
+        default:
+            return "battery.25"
+        }
     }
 }
 

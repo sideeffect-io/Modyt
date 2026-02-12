@@ -138,10 +138,27 @@ struct DrivingLightControlDescriptor: Sendable, Equatable {
     }
 }
 
+struct BatteryStatusDescriptor: Sendable, Equatable {
+    let batteryDefectKey: String?
+    let batteryDefect: Bool?
+    let batteryLevelKey: String?
+    let batteryLevel: Double?
+
+    var hasBatteryIssue: Bool {
+        batteryDefect == true
+    }
+
+    var normalizedBatteryLevel: Double? {
+        guard let batteryLevel else { return nil }
+        return min(max(batteryLevel, 0), 100)
+    }
+}
+
 struct TemperatureDescriptor: Sendable, Equatable {
     let key: String
     let value: Double
     let unitSymbol: String?
+    let batteryStatus: BatteryStatusDescriptor?
 }
 
 struct HumidityDescriptor: Sendable, Equatable {
@@ -169,6 +186,7 @@ struct SunlightDescriptor: Sendable, Equatable {
     let value: Double
     let range: ClosedRange<Double>
     let unitSymbol: String
+    let batteryStatus: BatteryStatusDescriptor?
 
     var clampedValue: Double {
         min(max(value, range.lowerBound), range.upperBound)
@@ -198,6 +216,48 @@ struct EnergyConsumptionDescriptor: Sendable, Equatable {
     }
 }
 
+struct SmokeDetectorDescriptor: Sendable, Equatable {
+    enum Health: Sendable, Equatable {
+        case ok
+        case notOk
+    }
+
+    let smokeKey: String
+    let smokeDetected: Bool
+    let batteryDefectKey: String?
+    let batteryDefect: Bool?
+    let batteryLevelKey: String?
+    let batteryLevel: Double?
+
+    var health: Health {
+        smokeDetected || batteryDefect == true ? .notOk : .ok
+    }
+
+    var batteryStatus: BatteryStatusDescriptor? {
+        guard batteryDefectKey != nil
+                || batteryDefect != nil
+                || batteryLevelKey != nil
+                || batteryLevel != nil else {
+            return nil
+        }
+
+        return BatteryStatusDescriptor(
+            batteryDefectKey: batteryDefectKey,
+            batteryDefect: batteryDefect,
+            batteryLevelKey: batteryLevelKey,
+            batteryLevel: batteryLevel
+        )
+    }
+
+    var hasBatteryIssue: Bool {
+        batteryStatus?.hasBatteryIssue == true
+    }
+
+    var normalizedBatteryLevel: Double? {
+        batteryStatus?.normalizedBatteryLevel
+    }
+}
+
 extension DeviceRecord {
     struct ObservationSignature: Sendable, Equatable {
         let uniqueId: String
@@ -211,6 +271,7 @@ extension DeviceRecord {
         let drivingLightControl: DrivingLightControlDescriptor?
         let temperature: TemperatureDescriptor?
         let thermostat: ThermostatDescriptor?
+        let smokeDetector: SmokeDetectorDescriptor?
         let sunlight: SunlightDescriptor?
         let energyConsumption: EnergyConsumptionDescriptor?
         let fallbackData: [String: JSONValue]?
@@ -228,6 +289,7 @@ extension DeviceRecord {
         let drivingLightControl: DrivingLightControlDescriptor?
         let temperature: TemperatureDescriptor?
         let thermostat: ThermostatDescriptor?
+        let smokeDetector: SmokeDetectorDescriptor?
         let sunlight: SunlightDescriptor?
         let energyConsumption: EnergyConsumptionDescriptor?
         let fallbackStatusData: [String: JSONValue]?
@@ -238,6 +300,7 @@ extension DeviceRecord {
         let drivingLightControl = drivingLightControlDescriptor()
         let temperature = temperatureDescriptor()
         let thermostat = thermostatDescriptor()
+        let smokeDetector = smokeDetectorDescriptor()
         let sunlight = sunlightDescriptor()
         let energyConsumption = energyConsumptionDescriptor()
         let fallbackData: [String: JSONValue]? =
@@ -245,6 +308,7 @@ extension DeviceRecord {
             && drivingLightControl == nil
             && temperature == nil
             && thermostat == nil
+            && smokeDetector == nil
             && sunlight == nil
             && energyConsumption == nil) ? data : nil
 
@@ -260,6 +324,7 @@ extension DeviceRecord {
             drivingLightControl: drivingLightControl,
             temperature: temperature,
             thermostat: thermostat,
+            smokeDetector: smokeDetector,
             sunlight: sunlight,
             energyConsumption: energyConsumption,
             fallbackData: fallbackData
@@ -271,12 +336,14 @@ extension DeviceRecord {
         let drivingLightControl = drivingLightControlDescriptor()
         let temperature = temperatureDescriptor()
         let thermostat = thermostatDescriptor()
+        let smokeDetector = smokeDetectorDescriptor()
         let sunlight = sunlightDescriptor()
         let energyConsumption = energyConsumptionDescriptor()
         let fallbackStatusData: [String: JSONValue]? =
             group == .light
             || group == .shutter
             || group == .boiler
+            || smokeDetector != nil
             || sunlight != nil
             || energyConsumption != nil ? nil : data
 
@@ -292,6 +359,7 @@ extension DeviceRecord {
             drivingLightControl: drivingLightControl,
             temperature: temperature,
             thermostat: thermostat,
+            smokeDetector: smokeDetector,
             sunlight: sunlight,
             energyConsumption: energyConsumption,
             fallbackStatusData: fallbackStatusData
@@ -440,6 +508,28 @@ extension DeviceRecord {
         )
     }
 
+    func smokeDetectorDescriptor() -> SmokeDetectorDescriptor? {
+        guard group == .smoke || group == .other else { return nil }
+
+        let smokeSignal = firstSignalValue(
+            keys: Self.preferredSmokeDefectKeys,
+            valueProvider: normalizedBoolValue(forKey:)
+        ) ?? firstLikelySmokeSignal()
+
+        guard let smokeSignal else { return nil }
+
+        let batteryStatus = batteryStatusDescriptor()
+
+        return SmokeDetectorDescriptor(
+            smokeKey: smokeSignal.key,
+            smokeDetected: smokeSignal.value,
+            batteryDefectKey: batteryStatus?.batteryDefectKey,
+            batteryDefect: batteryStatus?.batteryDefect,
+            batteryLevelKey: batteryStatus?.batteryLevelKey,
+            batteryLevel: batteryStatus?.batteryLevel
+        )
+    }
+
     func sunlightDescriptor() -> SunlightDescriptor? {
         guard group == .weather || group == .other else { return nil }
 
@@ -548,6 +638,85 @@ extension DeviceRecord {
         return nil
     }
 
+    private func normalizedBoolValue(forKey key: String) -> Bool? {
+        if let value = data[key]?.boolValue {
+            return value
+        }
+        if let number = data[key]?.numberValue {
+            return number != 0
+        }
+        guard let raw = data[key]?.stringValue else { return nil }
+        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "1", "true", "on", "yes":
+            return true
+        case "0", "false", "off", "no":
+            return false
+        default:
+            return nil
+        }
+    }
+
+    private func firstSignalValue<Value>(
+        keys: [String],
+        valueProvider: (String) -> Value?
+    ) -> (key: String, value: Value)? {
+        for key in keys {
+            guard let value = valueProvider(key) else { continue }
+            return (key, value)
+        }
+        return nil
+    }
+
+    private func firstLikelySmokeSignal() -> (key: String, value: Bool)? {
+        for key in data.keys.sorted() {
+            guard Self.isLikelySmokeStateKey(key) else { continue }
+            guard let value = normalizedBoolValue(forKey: key) else { continue }
+            return (key, value)
+        }
+        return nil
+    }
+
+    private func firstLikelyBatteryDefectSignal() -> (key: String, value: Bool)? {
+        for key in data.keys.sorted() {
+            guard Self.isLikelyBatteryDefectKey(key) else { continue }
+            guard let value = normalizedBoolValue(forKey: key) else { continue }
+            return (key, value)
+        }
+        return nil
+    }
+
+    private func firstLikelyBatteryLevelSignal() -> (key: String, value: Double)? {
+        for key in data.keys.sorted() {
+            guard Self.isLikelyBatteryLevelKey(key) else { continue }
+            guard let value = numericValue(forKey: key) else { continue }
+            return (key, value)
+        }
+        return nil
+    }
+
+    private func batteryStatusDescriptor() -> BatteryStatusDescriptor? {
+        let batteryDefectSignal = firstSignalValue(
+            keys: Self.preferredBatteryDefectKeys,
+            valueProvider: normalizedBoolValue(forKey:)
+        ) ?? firstLikelyBatteryDefectSignal()
+
+        let batteryLevelSignal = firstSignalValue(
+            keys: Self.preferredBatteryLevelKeys,
+            valueProvider: numericValue(forKey:)
+        ) ?? firstLikelyBatteryLevelSignal()
+
+        guard batteryDefectSignal != nil || batteryLevelSignal != nil else {
+            return nil
+        }
+
+        return BatteryStatusDescriptor(
+            batteryDefectKey: batteryDefectSignal?.key,
+            batteryDefect: batteryDefectSignal?.value,
+            batteryLevelKey: batteryLevelSignal?.key,
+            batteryLevel: batteryLevelSignal?.value
+        )
+    }
+
     private func metadataRange(forKey key: String) -> ClosedRange<Double>? {
         guard let object = metadata?[key]?.objectValue else { return nil }
         guard let minValue = object["min"]?.numberValue,
@@ -560,7 +729,8 @@ extension DeviceRecord {
         return TemperatureDescriptor(
             key: key,
             value: value,
-            unitSymbol: temperatureUnitSymbol(forKey: key)
+            unitSymbol: temperatureUnitSymbol(forKey: key),
+            batteryStatus: batteryStatusDescriptor()
         )
     }
 
@@ -574,7 +744,8 @@ extension DeviceRecord {
             key: key,
             value: value,
             range: Self.defaultSunlightRange,
-            unitSymbol: unit.symbol
+            unitSymbol: unit.symbol,
+            batteryStatus: batteryStatusDescriptor()
         )
     }
 
@@ -922,6 +1093,28 @@ extension DeviceRecord {
         "masterSchedSetpoint"
     ]
 
+    private static let preferredSmokeDefectKeys = [
+        "techSmokeDefect",
+        "smokeDefect",
+        "smokeDetected",
+        "smokeAlarm",
+        "fireAlarm"
+    ]
+
+    private static let preferredBatteryDefectKeys = [
+        "battDefect",
+        "batteryCmdDefect",
+        "batteryDefect",
+        "batteryLow",
+        "battLow"
+    ]
+
+    private static let preferredBatteryLevelKeys = [
+        "battLevel",
+        "batteryLevel",
+        "battery"
+    ]
+
     private static let preferredHumidityKeys = [
         "hygroIn",
         "humidity",
@@ -966,6 +1159,32 @@ extension DeviceRecord {
             return false
         }
         return normalized.contains("setpoint")
+    }
+
+    private static func isLikelySmokeStateKey(_ key: String) -> Bool {
+        let normalized = key.lowercased()
+        guard normalized.contains("smoke") || normalized.contains("fire") else { return false }
+        return normalized.contains("defect")
+            || normalized.contains("alarm")
+            || normalized.contains("detect")
+            || normalized.hasSuffix("state")
+    }
+
+    private static func isLikelyBatteryDefectKey(_ key: String) -> Bool {
+        let normalized = key.lowercased()
+        guard normalized.contains("batt") || normalized.contains("battery") else { return false }
+        return normalized.contains("defect")
+            || normalized.contains("fault")
+            || normalized.contains("low")
+    }
+
+    private static func isLikelyBatteryLevelKey(_ key: String) -> Bool {
+        let normalized = key.lowercased()
+        guard normalized.contains("batt") || normalized.contains("battery") else { return false }
+        if normalized.contains("defect") || normalized.contains("fault") || normalized.contains("low") {
+            return false
+        }
+        return normalized.contains("level") || normalized == "battery"
     }
 
     private static func isLikelyHumidityKey(_ key: String) -> Bool {

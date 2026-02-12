@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct DashboardDeviceCardView: View {
     @Environment(\.dashboardDeviceCardStoreFactory) private var dashboardDeviceCardStoreFactory
@@ -41,6 +42,7 @@ struct DashboardDeviceCardView: View {
                 && device.group != .light
                 && device.group != .thermo
                 && device.group != .boiler
+                && device.group != .smoke
                 && device.group != .weather
                 && device.group != .energy {
                 Text(device.group.title)
@@ -61,6 +63,8 @@ struct DashboardDeviceCardView: View {
             return isHeatPumpDevice(device) ? "heat.waves" : "thermometer"
         case .weather:
             return "sun.max.fill"
+        case .smoke:
+            return smokeSymbolName()
         default:
             return device.group.symbolName
         }
@@ -85,9 +89,26 @@ struct DashboardDeviceCardView: View {
             SunlightView(uniqueId: device.uniqueId)
         case .energy:
             EnergyConsumptionView(uniqueId: device.uniqueId)
+        case .smoke:
+            SmokeView(uniqueId: device.uniqueId)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         default:
             EmptyView()
         }
+    }
+
+    private func smokeSymbolName() -> String {
+        let preferredSymbols = [
+            "fire.extinguisher.fill",
+            "sensor.fill",
+            "flame.fill"
+        ]
+
+        for symbol in preferredSymbols where UIImage(systemName: symbol) != nil {
+            return symbol
+        }
+
+        return "exclamationmark.triangle.fill"
     }
 
     private func isHeatPumpDevice(_ device: DashboardDeviceDescription) -> Bool {
