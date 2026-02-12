@@ -4,6 +4,8 @@ import DeltaDoreClient
 struct AppEnvironment: Sendable {
     let client: DeltaDoreClient
     let repository: DeviceRepository
+    let sceneRepository: SceneRepository
+    let dashboardRepository: DashboardRepository
     let shutterRepository: ShutterRepository
     let setOnDidDisconnect: @Sendable (@escaping @MainActor () -> Void) async -> Void
     let requestRefreshAll: @Sendable () async -> Void
@@ -21,6 +23,11 @@ struct AppEnvironment: Sendable {
             #endif
         }
         let repository = DeviceRepository(databasePath: databaseURL.path, log: log)
+        let sceneRepository = SceneRepository(databasePath: databaseURL.path, log: log)
+        let dashboardRepository = DashboardRepository(
+            deviceRepository: repository,
+            sceneRepository: sceneRepository
+        )
         let shutterRepository = ShutterRepository(
             databasePath: databaseURL.path,
             deviceRepository: repository,
@@ -71,6 +78,8 @@ struct AppEnvironment: Sendable {
         return AppEnvironment(
             client: client,
             repository: repository,
+            sceneRepository: sceneRepository,
+            dashboardRepository: dashboardRepository,
             shutterRepository: shutterRepository,
             setOnDidDisconnect: setOnDidDisconnect,
             requestRefreshAll: requestRefreshAll,

@@ -10,7 +10,11 @@ struct DashboardDeviceCardStoreFactory {
                 uniqueId: uniqueId,
                 dependencies: .init(
                     toggleFavorite: { uniqueId in
-                        await environment.repository.toggleFavorite(uniqueId: uniqueId)
+                        if SceneRecord.isSceneUniqueId(uniqueId) {
+                            await environment.sceneRepository.toggleFavorite(uniqueId: uniqueId)
+                        } else {
+                            await environment.repository.toggleFavorite(uniqueId: uniqueId)
+                        }
                     }
                 )
             )

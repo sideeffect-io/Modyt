@@ -37,6 +37,11 @@ enum TestSupport {
 
         let databasePath = temporaryDatabasePath()
         let repository = DeviceRepository(databasePath: databasePath, log: { _ in })
+        let sceneRepository = SceneRepository(databasePath: databasePath, log: { _ in })
+        let dashboardRepository = DashboardRepository(
+            deviceRepository: repository,
+            sceneRepository: sceneRepository
+        )
         let shutterRepository = ShutterRepository(
             databasePath: databasePath,
             deviceRepository: repository,
@@ -45,6 +50,8 @@ enum TestSupport {
         return AppEnvironment(
             client: client,
             repository: repository,
+            sceneRepository: sceneRepository,
+            dashboardRepository: dashboardRepository,
             shutterRepository: shutterRepository,
             setOnDidDisconnect: { _ in },
             requestRefreshAll: {},

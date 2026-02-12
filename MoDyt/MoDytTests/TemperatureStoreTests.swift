@@ -72,7 +72,7 @@ struct TemperatureStoreTests {
             data["battDefect"] = .bool(batteryDefect)
         }
 
-        TestSupport.makeDevice(
+        return TestSupport.makeDevice(
             uniqueId: uniqueId,
             name: "Outdoor Temperature",
             usage: "sensorThermo",

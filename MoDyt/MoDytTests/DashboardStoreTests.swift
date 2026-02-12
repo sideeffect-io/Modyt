@@ -31,7 +31,7 @@ struct DashboardStoreTests {
         let streamBox = BufferedStreamBox<[DashboardDeviceDescription]>()
         let store = DashboardStore(
             dependencies: .init(
-                observeFavoriteDevices: { streamBox.stream },
+                observeFavorites: { streamBox.stream },
                 reorderFavorite: { _, _ in },
                 refreshAll: {}
             )
@@ -55,7 +55,7 @@ struct DashboardStoreTests {
         let observeCounter = LockedCounter()
         let store = DashboardStore(
             dependencies: .init(
-                observeFavoriteDevices: {
+                observeFavorites: {
                     observeCounter.increment()
                     return streamBox.stream
                 },
@@ -76,7 +76,7 @@ struct DashboardStoreTests {
         let recorder = TestRecorder<String>()
         let store = DashboardStore(
             dependencies: .init(
-                observeFavoriteDevices: {
+                observeFavorites: {
                     AsyncStream { continuation in
                         continuation.finish()
                     }

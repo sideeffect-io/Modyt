@@ -88,16 +88,22 @@ actor DeviceRepository {
                     let rhsOrder = rhs.dashboardOrder ?? rhs.favoriteOrder ?? Int.max
                     return lhsOrder < rhsOrder
                 }
-                .map { device in
-                    DashboardDeviceDescription(
-                        uniqueId: device.uniqueId,
-                        name: device.name,
-                        usage: device.usage,
-                        resolvedGroup: Self.dashboardGroup(for: device)
-                    )
-                }
+                .map(Self.makeDashboardDescription(from:))
         }
         .removeDuplicates()
+    }
+
+    func favoriteDescriptionsSnapshot() async -> [DashboardDeviceDescription] {
+        guard let deviceDAO = try? await requireDAO() else { return [] }
+        let devices = (try? await deviceDAO.list()) ?? []
+        return devices
+            .filter(\.isFavorite)
+            .sorted { lhs, rhs in
+                let lhsOrder = lhs.dashboardOrder ?? lhs.favoriteOrder ?? Int.max
+                let rhsOrder = rhs.dashboardOrder ?? rhs.favoriteOrder ?? Int.max
+                return lhsOrder < rhsOrder
+            }
+            .map(Self.makeDashboardDescription(from:))
     }
 
     func observeDevice(uniqueId: String) -> some AsyncSequence<DeviceRecord?, Never> & Sendable {
@@ -204,6 +210,30 @@ actor DeviceRepository {
         }
 
         await notifyObservers()
+    }
+
+    func applyDashboardOrders(_ orders: [String: Int]) async {
+        guard !orders.isEmpty else { return }
+        guard let deviceDAO = try? await requireDAO() else { return }
+
+        var didUpdate = false
+        for (uniqueId, order) in orders {
+            guard var existing = try? await deviceDAO.read(.text(uniqueId)) else { continue }
+            guard existing.isFavorite else { continue }
+            guard existing.dashboardOrder != order || existing.favoriteOrder != order else {
+                continue
+            }
+
+            existing.dashboardOrder = order
+            existing.favoriteOrder = order
+            existing.updatedAt = now()
+            _ = try? await deviceDAO.update(existing)
+            didUpdate = true
+        }
+
+        if didUpdate {
+            await notifyObservers()
+        }
     }
 
     func applyMessage(_ message: TydomMessage) async {
@@ -362,6 +392,17 @@ actor DeviceRepository {
         }
 
         return usageGroup
+    }
+
+    private static func makeDashboardDescription(from device: DeviceRecord) -> DashboardDeviceDescription {
+        DashboardDeviceDescription(
+            uniqueId: device.uniqueId,
+            name: device.name,
+            usage: device.usage,
+            resolvedGroup: Self.dashboardGroup(for: device),
+            dashboardOrder: device.dashboardOrder ?? device.favoriteOrder,
+            source: .device
+        )
     }
 
     private static func isLikelyThermostatData(

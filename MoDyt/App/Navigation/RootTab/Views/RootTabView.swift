@@ -45,6 +45,16 @@ struct RootTabView: View {
                 .clearNavigationContainerBackground()
             }
 
+            Tab("Scenes", systemImage: "sparkles.rectangle.stack") {
+                NavigationStack {
+                    TabBackgroundContainer {
+                        ScenesView()
+                            .hideChromeBackgroundForMobileTabs()
+                    }
+                }
+                .clearNavigationContainerBackground()
+            }
+
             Tab("Settings", systemImage: "gearshape") {
                 NavigationStack {
                     TabBackgroundContainer {

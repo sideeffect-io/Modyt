@@ -7,11 +7,14 @@ struct DashboardStoreFactory {
         DashboardStoreFactory {
             DashboardStore(
                 dependencies: .init(
-                    observeFavoriteDevices: {
-                        await environment.repository.observeFavoriteDescriptions()
+                    observeFavorites: {
+                        await environment.dashboardRepository.observeFavorites()
                     },
                     reorderFavorite: { sourceId, targetId in
-                        await environment.repository.reorderDashboard(from: sourceId, to: targetId)
+                        await environment.dashboardRepository.reorderFavorite(
+                            from: sourceId,
+                            to: targetId
+                        )
                     },
                     refreshAll: {
                         await environment.requestRefreshAll()

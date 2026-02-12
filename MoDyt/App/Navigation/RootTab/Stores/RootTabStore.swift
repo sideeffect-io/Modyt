@@ -162,6 +162,8 @@ final class RootTabStore {
             await sendText(TydomCommand.devicesData().request)
             log("Send areas-data")
             await sendText(TydomCommand.areasData().request)
+            log("Send scenarios-file")
+            await sendText(TydomCommand.scenariosFile().request)
             log("Send refresh-all")
             await sendText(TydomCommand.refreshAll().request)
         }

@@ -48,7 +48,7 @@ enum DashboardReducer {
 @MainActor
 final class DashboardStore {
     struct Dependencies {
-        let observeFavoriteDevices: @Sendable () async -> any AsyncSequence<[DashboardDeviceDescription], Never> & Sendable
+        let observeFavorites: @Sendable () async -> any AsyncSequence<[DashboardDeviceDescription], Never> & Sendable
         let reorderFavorite: @Sendable (String, String) async -> Void
         let refreshAll: @Sendable () async -> Void
     }
@@ -61,7 +61,7 @@ final class DashboardStore {
     init(dependencies: Dependencies) {
         self.state = .initial
         self.worker = Worker(
-            observeFavoriteDevices: dependencies.observeFavoriteDevices,
+            observeFavorites: dependencies.observeFavorites,
             reorderFavorite: dependencies.reorderFavorite,
             refreshAll: dependencies.refreshAll
         )
@@ -102,16 +102,16 @@ final class DashboardStore {
     }
 
     private actor Worker {
-        private let observeFavoriteDevices: @Sendable () async -> any AsyncSequence<[DashboardDeviceDescription], Never> & Sendable
+        private let observeFavoritesSource: @Sendable () async -> any AsyncSequence<[DashboardDeviceDescription], Never> & Sendable
         private let reorderFavoriteAction: @Sendable (String, String) async -> Void
         private let refreshAllAction: @Sendable () async -> Void
 
         init(
-            observeFavoriteDevices: @escaping @Sendable () async -> any AsyncSequence<[DashboardDeviceDescription], Never> & Sendable,
+            observeFavorites: @escaping @Sendable () async -> any AsyncSequence<[DashboardDeviceDescription], Never> & Sendable,
             reorderFavorite: @escaping @Sendable (String, String) async -> Void,
             refreshAll: @escaping @Sendable () async -> Void
         ) {
-            self.observeFavoriteDevices = observeFavoriteDevices
+            self.observeFavoritesSource = observeFavorites
             self.reorderFavoriteAction = reorderFavorite
             self.refreshAllAction = refreshAll
         }
@@ -119,7 +119,7 @@ final class DashboardStore {
         func observeFavorites(
             onUpdate: @escaping @Sendable ([DashboardDeviceDescription]) async -> Void
         ) async {
-            let stream = await observeFavoriteDevices()
+            let stream = await observeFavoritesSource()
             for await favoriteDevices in stream {
                 guard !Task.isCancelled else { return }
                 await onUpdate(favoriteDevices)

@@ -17,7 +17,47 @@ struct DashboardDeviceCardView: View {
         }
     }
 
+    @ViewBuilder
     private func cardContent(
+        for device: DashboardDeviceDescription,
+        onFavoriteTapped: @escaping () -> Void
+    ) -> some View {
+        if device.isScene {
+            sceneCardContent(for: device, onFavoriteTapped: onFavoriteTapped)
+        } else {
+            deviceCardContent(for: device, onFavoriteTapped: onFavoriteTapped)
+        }
+    }
+
+    private func sceneCardContent(
+        for device: DashboardDeviceDescription,
+        onFavoriteTapped: @escaping () -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center) {
+                Image(systemName: iconSystemName(for: device))
+                    .font(.system(size: 22, weight: .semibold))
+                    .frame(width: 36, height: 36)
+                Spacer()
+                FavoriteOrbButton(
+                    isFavorite: true,
+                    size: 32,
+                    action: onFavoriteTapped
+                )
+            }
+
+            Text(device.name)
+                .font(.system(.headline, design: .rounded))
+                .lineLimit(2)
+
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(height: dashboardCardHeight, alignment: .top)
+        .glassCard(cornerRadius: 22)
+    }
+
+    private func deviceCardContent(
         for device: DashboardDeviceDescription,
         onFavoriteTapped: @escaping () -> Void
     ) -> some View {
@@ -58,6 +98,10 @@ struct DashboardDeviceCardView: View {
     }
 
     private func iconSystemName(for device: DashboardDeviceDescription) -> String {
+        if device.isScene {
+            return sceneSymbolName(picto: device.scenePicto, type: device.sceneType)
+        }
+
         switch device.group {
         case .boiler:
             return isHeatPumpDevice(device) ? "heat.waves" : "thermometer"

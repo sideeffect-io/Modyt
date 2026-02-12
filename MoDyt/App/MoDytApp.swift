@@ -16,6 +16,7 @@ struct MoDytApp: App {
     private let heatPumpStoreFactory: HeatPumpStoreFactory
     private let thermostatStoreFactory: ThermostatStoreFactory
     private let devicesStoreFactory: DevicesStoreFactory
+    private let scenesStoreFactory: ScenesStoreFactory
     private let settingsStoreFactory: SettingsStoreFactory
 
     init() {
@@ -34,6 +35,7 @@ struct MoDytApp: App {
         heatPumpStoreFactory = .live(environment: environment)
         thermostatStoreFactory = .live(environment: environment)
         devicesStoreFactory = .live(environment: environment)
+        scenesStoreFactory = .live(environment: environment)
         settingsStoreFactory = .live(environment: environment)
     }
 
@@ -54,6 +56,7 @@ struct MoDytApp: App {
                 .environment(\.heatPumpStoreFactory, heatPumpStoreFactory)
                 .environment(\.thermostatStoreFactory, thermostatStoreFactory)
                 .environment(\.devicesStoreFactory, devicesStoreFactory)
+                .environment(\.scenesStoreFactory, scenesStoreFactory)
                 .environment(\.settingsStoreFactory, settingsStoreFactory)
         }
     }

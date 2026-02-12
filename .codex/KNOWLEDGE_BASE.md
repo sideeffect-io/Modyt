@@ -180,3 +180,42 @@ This is the condensed, non-duplicative engineering memory for the project.
 - You prefer compact, centered card composition where grouped status elements visually align.
 - You prefer payload-driven implementation decisions, validated against gateway/client traces.
 - You value practical, incremental changes with minimal architectural drift.
+
+## 11) Session Learnings — Scenes + Dashboard Favorites (2026-02-12)
+
+### Mistakes to Avoid (and how)
+
+- Do not keep mixed-source reorder logic (device + scene) inside `DashboardStoreFactory` closures.
+  - Move cross-repository orchestration to a dedicated `DashboardRepository` actor and unit-test it.
+- Do not block drag and drop by source type in dashboard tiles.
+  - Allow cross-source reordering (scene <-> device) and persist global dashboard order back to both repositories.
+- Do not rely on per-feature icons for scenes when UX requires consistency.
+  - Use one shared scene symbol function and return a single icon for all scenes.
+- Do not assume stream-based async tests are deterministic with too few yields.
+  - Use targeted tests and sufficient async settling; prefer semantic assertions over timing-sensitive expectations.
+
+### Tips, Tricks, Commands
+
+- Validate only touched suites while iterating:
+  - `test_sim` with `-parallel-testing-enabled NO -only-testing:MoDytTests/DashboardRepositoryTests -only-testing:MoDytTests/DashboardStoreTests`
+- Quickly inspect architecture drift around new repository boundaries:
+  - `rg -n "observeFavorites|reorderFavorite|DashboardRepository" MoDyt -g '*.swift'`
+- For simulator instability (device clone stuck), retry with targeted tests first, then full suite.
+
+### Architectural Patterns, Layers, Best Practices
+
+- Apply strict feature symmetry for new tabs/features:
+  - `View` -> `Store` -> `StoreFactory` -> `Repository`.
+- Keep reducers pure and lightweight; push integration complexity to actor-isolated repositories.
+- Use repository composition for cross-aggregate operations:
+  - `DashboardRepository` composes `DeviceRepository` and `SceneRepository` for merged favorites and reorder writes.
+- Keep environment wiring explicit in `AppEnvironment` to preserve testability and readability.
+
+### Coding Preferences Observed
+
+- You prefer readable DI over clever closure injection when behavior grows complex.
+- You prefer testable architectural wrappers for non-trivial orchestration logic.
+- You want consistent UI semantics:
+  - same icon for all scenes in Scenes/Dashboard
+  - scenes favorites visible on dashboard
+  - drag and drop should work uniformly across cards.

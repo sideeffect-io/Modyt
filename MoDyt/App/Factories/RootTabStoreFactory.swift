@@ -15,6 +15,7 @@ struct RootTabStoreFactory {
                     log: environment.log,
                     preparePersistence: {
                         try? await environment.repository.startIfNeeded()
+                        try? await environment.sceneRepository.startIfNeeded()
                         try? await environment.shutterRepository.startIfNeeded()
                     },
                     decodeMessages: {
@@ -22,6 +23,7 @@ struct RootTabStoreFactory {
                     },
                     applyMessage: { message in
                         await environment.repository.applyMessage(message)
+                        await environment.sceneRepository.applyMessage(message)
                     },
                     sendText: { text in
                         try? await environment.client.send(text: text)
