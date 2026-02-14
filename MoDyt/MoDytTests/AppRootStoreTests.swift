@@ -19,16 +19,6 @@ struct AppRootStoreTests {
 
     @MainActor
     @Test
-    func appActiveStateIsUpdated() {
-        let coordinator = AppRootStore()
-
-        coordinator.send(.setAppActive(false))
-
-        #expect(coordinator.state.isAppActive == false)
-    }
-
-    @MainActor
-    @Test
     func didDisconnectSwitchesBackToAuthenticationRoute() {
         let coordinator = AppRootStore()
         coordinator.send(.authenticated)

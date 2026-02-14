@@ -25,4 +25,9 @@ struct SceneRecord: Codable, Identifiable, Sendable, Equatable {
     static func isSceneUniqueId(_ uniqueId: String) -> Bool {
         uniqueId.hasPrefix(uniqueIdPrefix)
     }
+
+    static func sceneId(from uniqueId: String) -> Int? {
+        guard isSceneUniqueId(uniqueId) else { return nil }
+        return Int(uniqueId.dropFirst(uniqueIdPrefix.count))
+    }
 }

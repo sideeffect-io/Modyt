@@ -98,4 +98,51 @@ struct DashboardStoreTests {
         #expect(entries.contains("reorder:device-1->device-2"))
         #expect(entries.contains("refresh"))
     }
+
+    @Test
+    func observationRestartsAfterStreamCompletion() async {
+        let firstStream = BufferedStreamBox<[DashboardDeviceDescription]>()
+        let secondStream = BufferedStreamBox<[DashboardDeviceDescription]>()
+        let observeCounter = Counter()
+
+        let store = DashboardStore(
+            dependencies: .init(
+                observeFavorites: {
+                    await observeCounter.increment()
+                    let attempt = await observeCounter.value
+                    switch attempt {
+                    case 1:
+                        return firstStream.stream
+                    case 2:
+                        return secondStream.stream
+                    default:
+                        return AsyncStream { continuation in
+                            continuation.finish()
+                        }
+                    }
+                },
+                reorderFavorite: { _, _ in },
+                refreshAll: {}
+            )
+        )
+
+        store.send(.onAppear)
+        firstStream.yield([
+            DashboardDeviceDescription(uniqueId: "first", name: "First", usage: "light")
+        ])
+        await settleAsyncState(iterations: 12)
+        #expect(store.state.favoriteDevices.map(\.uniqueId) == ["first"])
+
+        firstStream.finish()
+        await settleAsyncState(iterations: 16)
+
+        store.send(.onAppear)
+        secondStream.yield([
+            DashboardDeviceDescription(uniqueId: "second", name: "Second", usage: "light")
+        ])
+        await settleAsyncState(iterations: 16)
+
+        #expect(await observeCounter.value == 2)
+        #expect(store.state.favoriteDevices.map(\.uniqueId) == ["second"])
+    }
 }

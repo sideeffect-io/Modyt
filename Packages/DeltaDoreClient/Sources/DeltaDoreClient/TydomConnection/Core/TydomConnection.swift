@@ -2,6 +2,7 @@ import Foundation
 #if canImport(Network)
 import Network
 import Security
+import os
 #endif
 
 /// WebSocket connection to a Tydom gateway using HTTP Digest authentication.
@@ -83,6 +84,10 @@ public actor TydomConnection {
 
     public func setAppActive(_ isActive: Bool) async {
         await activityStore.setActive(isActive)
+        if isActive, let socketTask, receiveTask == nil {
+            log("Resuming WebSocket receive loop after app became active.")
+            startReceiving(from: socketTask)
+        }
     }
 
     func isAppActive() async -> Bool {
@@ -431,17 +436,15 @@ public actor TydomConnection {
         return options
     }
 
-    private final class ConnectionGate: @unchecked Sendable {
-        private let lock = NSLock()
-        private var didResume = false
+    private final class ConnectionGate: Sendable {
+        private let didResumeLock = OSAllocatedUnfairLock(initialState: false)
 
         func resumeOnce(_ continuation: CheckedContinuation<Void, Error>, result: Result<Void, Error>) {
-            lock.lock()
-            let shouldResume = !didResume
-            if shouldResume {
+            let shouldResume = didResumeLock.withLock { didResume in
+                guard !didResume else { return false }
                 didResume = true
+                return true
             }
-            lock.unlock()
 
             guard shouldResume else { return }
             switch result {
@@ -537,7 +540,12 @@ public actor TydomConnection {
         isWebSocketOpen = true
     }
 
-    private func handleReceiveFailure(task: URLSessionWebSocketTask) {
+    private func handleReceiveFailure(task: URLSessionWebSocketTask) async {
+        let isActive = await activityStore.isAppActive()
+        if !isActive, task.closeCode == .invalid {
+            log("Ignoring receive failure while inactive; will probe on foreground.")
+            return
+        }
         if socketTask === task {
             socketTask = nil
         }

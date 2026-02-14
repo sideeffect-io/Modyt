@@ -33,24 +33,17 @@ struct DashboardDeviceCardView: View {
         for device: DashboardDeviceDescription,
         onFavoriteTapped: @escaping () -> Void
     ) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .center) {
-                Image(systemName: iconSystemName(for: device))
-                    .font(.system(size: 22, weight: .semibold))
-                    .frame(width: 36, height: 36)
-                Spacer()
-                FavoriteOrbButton(
-                    isFavorite: true,
-                    size: 32,
-                    action: onFavoriteTapped
-                )
-            }
-
-            Text(device.name)
-                .font(.system(.headline, design: .rounded))
-                .lineLimit(2)
+        VStack(alignment: .leading, spacing: 12) {
+            cardHeader(
+                for: device,
+                titleLineLimit: 2,
+                onFavoriteTapped: onFavoriteTapped
+            )
 
             Spacer(minLength: 0)
+
+            SceneExecutionView(uniqueId: device.uniqueId)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
         .padding(16)
         .frame(height: dashboardCardHeight, alignment: .top)
@@ -62,21 +55,11 @@ struct DashboardDeviceCardView: View {
         onFavoriteTapped: @escaping () -> Void
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center) {
-                Image(systemName: iconSystemName(for: device))
-                    .font(.system(size: 22, weight: .semibold))
-                    .frame(width: 36, height: 36)
-                Spacer()
-                FavoriteOrbButton(
-                    isFavorite: true,
-                    size: 32,
-                    action: onFavoriteTapped
-                )
-            }
-
-            Text(device.name)
-                .font(.system(.headline, design: .rounded))
-                .lineLimit(1)
+            cardHeader(
+                for: device,
+                titleLineLimit: 1,
+                onFavoriteTapped: onFavoriteTapped
+            )
 
             if device.group != .shutter
                 && device.group != .light
@@ -95,6 +78,30 @@ struct DashboardDeviceCardView: View {
         .padding(16)
         .frame(height: dashboardCardHeight, alignment: .top)
         .glassCard(cornerRadius: 22)
+    }
+
+    private func cardHeader(
+        for device: DashboardDeviceDescription,
+        titleLineLimit: Int,
+        onFavoriteTapped: @escaping () -> Void
+    ) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: iconSystemName(for: device))
+                .font(.system(size: 22, weight: .semibold))
+                .frame(width: 36, height: 36)
+
+            Text(device.name)
+                .font(.system(.headline, design: .rounded))
+                .lineLimit(titleLineLimit)
+                .minimumScaleFactor(0.9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            FavoriteOrbButton(
+                isFavorite: true,
+                size: 32,
+                action: onFavoriteTapped
+            )
+        }
     }
 
     private func iconSystemName(for device: DashboardDeviceDescription) -> String {
@@ -121,13 +128,16 @@ struct DashboardDeviceCardView: View {
             ShutterView(uniqueId: device.uniqueId, layout: .regular)
         case .light:
             LightView(uniqueId: device.uniqueId)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         case .thermo:
             TemperatureView(uniqueId: device.uniqueId)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         case .boiler:
             if isHeatPumpDevice(device) {
                 HeatPumpView(uniqueId: device.uniqueId)
             } else {
                 ThermostatView(uniqueId: device.uniqueId)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
         case .weather:
             SunlightView(uniqueId: device.uniqueId)

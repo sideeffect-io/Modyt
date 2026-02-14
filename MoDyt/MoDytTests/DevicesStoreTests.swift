@@ -81,4 +81,51 @@ struct DevicesStoreTests {
 
         #expect(await observeCounter.value == 1)
     }
+
+    @Test
+    func observationRestartsAfterStreamCompletion() async {
+        let firstStream = BufferedStreamBox<[DeviceRecord]>()
+        let secondStream = BufferedStreamBox<[DeviceRecord]>()
+        let observeCounter = Counter()
+
+        let store = DevicesStore(
+            dependencies: .init(
+                observeDevices: {
+                    await observeCounter.increment()
+                    let attempt = await observeCounter.value
+                    switch attempt {
+                    case 1:
+                        return firstStream.stream
+                    case 2:
+                        return secondStream.stream
+                    default:
+                        return AsyncStream { continuation in
+                            continuation.finish()
+                        }
+                    }
+                },
+                toggleFavorite: { _ in },
+                refreshAll: {}
+            )
+        )
+
+        store.send(.onAppear)
+        firstStream.yield([
+            TestSupport.makeDevice(uniqueId: "light-1", name: "First", usage: "light", data: ["on": .bool(true)])
+        ])
+        await settleAsyncState(iterations: 12)
+        #expect(store.state.groupedDevices.flatMap(\.devices).map(\.name) == ["First"])
+
+        firstStream.finish()
+        await settleAsyncState(iterations: 16)
+
+        store.send(.onAppear)
+        secondStream.yield([
+            TestSupport.makeDevice(uniqueId: "light-2", name: "Second", usage: "light", data: ["on": .bool(false)])
+        ])
+        await settleAsyncState(iterations: 16)
+
+        #expect(await observeCounter.value == 2)
+        #expect(store.state.groupedDevices.flatMap(\.devices).map(\.name) == ["Second"])
+    }
 }

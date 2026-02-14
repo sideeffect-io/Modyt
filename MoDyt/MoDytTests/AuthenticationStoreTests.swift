@@ -198,4 +198,37 @@ struct AuthenticationStoreTests {
         #expect(!login.isConnecting)
         #expect(login.errorMessage != nil)
     }
+
+    @Test
+    func listSitesFailureReturnsToLoginWithErrorMessage() async {
+        struct ListSitesError: Error {}
+
+        let store = AuthenticationStore(
+            dependencies: .init(
+                inspectFlow: { .connectWithNewCredentials },
+                connectStored: {},
+                listSites: { _, _ in
+                    throw ListSitesError()
+                },
+                connectNew: { _, _, _ in }
+            )
+        )
+
+        store.send(.onAppear)
+        await settleAsyncState()
+
+        store.send(.loginEmailChanged("user@example.com"))
+        store.send(.loginPasswordChanged("secret"))
+        store.send(.loadSitesTapped)
+        await settleAsyncState(iterations: 16)
+
+        guard case .login(let login) = store.state.phase else {
+            #expect(Bool(false), "Expected login phase")
+            return
+        }
+
+        #expect(!login.isLoadingSites)
+        #expect(login.errorMessage != nil)
+        #expect(login.sites.isEmpty)
+    }
 }

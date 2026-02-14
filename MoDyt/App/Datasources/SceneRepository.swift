@@ -10,6 +10,7 @@ actor SceneRepository {
     private let databasePath: String
     private let now: @Sendable () -> Date
     private let log: @Sendable (String) -> Void
+    private let trackMessage: @Sendable (TydomMessage) async -> Void
     private var database: SQLiteDatabase?
     private var dao: DAO<SceneRecord>?
     private var observers: [UUID: AsyncStream<[SceneRecord]>.Continuation] = [:]
@@ -17,11 +18,13 @@ actor SceneRepository {
     init(
         databasePath: String,
         now: @escaping @Sendable () -> Date = Date.init,
-        log: @escaping @Sendable (String) -> Void = { _ in }
+        log: @escaping @Sendable (String) -> Void = { _ in },
+        trackMessage: @escaping @Sendable (TydomMessage) async -> Void = { _ in }
     ) {
         self.databasePath = databasePath
         self.now = now
         self.log = log
+        self.trackMessage = trackMessage
     }
 
     func startIfNeeded() async throws {
@@ -101,9 +104,20 @@ actor SceneRepository {
 
     func upsertScenes(_ scenes: [TydomScenario]) async {
         guard let sceneDAO = try? await requireDAO() else { return }
-        log("Upsert scenes count=\(scenes.count)")
+        let internalUniqueIds = Set(
+            scenes
+                .filter(\.isGatewayInternal)
+                .map { SceneRecord.uniqueId(for: $0.id) }
+        )
+        let visibleScenes = scenes.filter { !$0.isGatewayInternal }
 
-        for scene in scenes {
+        log("Upsert scenes count=\(scenes.count) visible=\(visibleScenes.count) internal=\(internalUniqueIds.count)")
+
+        for uniqueId in internalUniqueIds {
+            _ = try? await sceneDAO.delete(.text(uniqueId))
+        }
+
+        for scene in visibleScenes {
             let uniqueId = SceneRecord.uniqueId(for: scene.id)
             let existing = try? await sceneDAO.read(.text(uniqueId))
             let merged = merge(existing: existing, incoming: scene, now: now())
@@ -196,6 +210,8 @@ actor SceneRepository {
     }
 
     func applyMessage(_ message: TydomMessage) async {
+        await trackMessage(message)
+
         switch message {
         case .scenarios(let scenarios, _):
             log("Apply scenarios message count=\(scenarios.count)")
@@ -287,4 +303,10 @@ private func merge(
         dashboardOrder: existing?.dashboardOrder,
         updatedAt: now
     )
+}
+
+private extension TydomScenario {
+    var isGatewayInternal: Bool {
+        type.caseInsensitiveCompare("RE2020") == .orderedSame
+    }
 }

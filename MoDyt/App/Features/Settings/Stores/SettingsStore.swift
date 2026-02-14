@@ -3,9 +3,14 @@ import Observation
 
 struct SettingsState: Sendable, Equatable {
     var isDisconnecting: Bool
+    var didDisconnect: Bool
     var errorMessage: String?
 
-    static let initial = SettingsState(isDisconnecting: false, errorMessage: nil)
+    static let initial = SettingsState(
+        isDisconnecting: false,
+        didDisconnect: false,
+        errorMessage: nil
+    )
 }
 
 struct SettingsStoreError: LocalizedError, Sendable, Equatable {
@@ -32,6 +37,7 @@ enum SettingsReducer {
         case .disconnectTapped:
             guard !state.isDisconnecting else { return (state, effects) }
             state.isDisconnecting = true
+            state.didDisconnect = false
             state.errorMessage = nil
             effects = [.requestDisconnect]
 
@@ -39,8 +45,10 @@ enum SettingsReducer {
             state.isDisconnecting = false
             switch result {
             case .success:
+                state.didDisconnect = true
                 state.errorMessage = nil
             case .failure(let error):
+                state.didDisconnect = false
                 state.errorMessage = error.message
             }
         }

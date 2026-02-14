@@ -134,10 +134,50 @@ public struct DeltaDoreClient: Sendable {
         await connection.setAppActive(isActive)
     }
 
+    public func isCurrentConnectionAlive(timeout: TimeInterval = 2.0) async -> Bool {
+        guard let connection = await runtimeSession.currentConnection() else { return false }
+        let probeTimeout = max(0.2, timeout)
+        for attempt in 0..<2 {
+            do {
+                try await probeConnectionLiveness(
+                    using: connection,
+                    timeout: probeTimeout
+                )
+                return true
+            } catch {
+                if attempt == 0 {
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                }
+            }
+        }
+        return false
+    }
+
     public func disconnectCurrentConnection() async {
         guard let connection = await runtimeSession.currentConnection() else { return }
         await connection.disconnect()
         await runtimeSession.clearConnection()
+    }
+}
+
+private enum ConnectionProbeError: Error {
+    case timeout
+}
+
+private func probeConnectionLiveness(
+    using connection: TydomConnection,
+    timeout: TimeInterval
+) async throws {
+    try await withThrowingTaskGroup(of: Void.self) { group in
+        group.addTask {
+            try await connection.send(TydomCommand.ping())
+        }
+        group.addTask {
+            try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            throw ConnectionProbeError.timeout
+        }
+        _ = try await group.next()
+        group.cancelAll()
     }
 }
 

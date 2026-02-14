@@ -53,9 +53,9 @@ enum TestSupport {
             sceneRepository: sceneRepository,
             dashboardRepository: dashboardRepository,
             shutterRepository: shutterRepository,
-            setOnDidDisconnect: { _ in },
             requestRefreshAll: {},
             sendDeviceCommand: { _, _, _ in },
+            executeScene: { _ in .invalidSceneIdentifier },
             requestDisconnect: {},
             now: Date.init,
             log: { _ in }

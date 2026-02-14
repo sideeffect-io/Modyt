@@ -1,23 +1,38 @@
 import Foundation
 import Observation
-import DeltaDoreClient
 
 struct RootTabState: Sendable, Equatable {
     var isAppActive: Bool
+    var isForegroundReconnectInFlight: Bool
+    var didDisconnect: Bool
 
-    static let initial = RootTabState(isAppActive: true)
+    static let initial = RootTabState(
+        isAppActive: true,
+        isForegroundReconnectInFlight: false,
+        didDisconnect: false
+    )
 }
 
 enum RootTabEvent: Sendable {
     case onStart
     case setAppActive(Bool)
+    case foregroundRecoveryPhaseChanged(RootTabForegroundRecoveryPhase)
+    case disconnectCompleted
+}
+
+enum RootTabForegroundRecoveryPhase: Sendable, Equatable {
+    case alive
+    case reconnecting
+    case reconnected
+    case failed
 }
 
 enum RootTabEffect: Sendable, Equatable {
-    case preparePersistence
-    case startMessageStream
-    case sendBootstrapRequests
+    case bootstrapGateway
     case setAppActive(Bool)
+    case runForegroundRecovery
+    case restartGatewayBootstrap
+    case requestDisconnect
 }
 
 enum RootTabReducer {
@@ -30,16 +45,56 @@ enum RootTabReducer {
 
         switch event {
         case .onStart:
-            effects = [
-                .preparePersistence,
-                .startMessageStream,
-                .sendBootstrapRequests,
-                .setAppActive(state.isAppActive)
-            ]
+            effects = [.bootstrapGateway]
 
         case .setAppActive(let isActive):
+            let wasActive = state.isAppActive
             state.isAppActive = isActive
-            effects = [.setAppActive(isActive)]
+
+            if isActive {
+                if wasActive {
+                    effects = [.setAppActive(true)]
+                } else {
+                    state.isForegroundReconnectInFlight = false
+                    effects = [.runForegroundRecovery]
+                }
+            } else if wasActive {
+                state.isForegroundReconnectInFlight = false
+                effects = [.setAppActive(false)]
+            } else {
+                state.isForegroundReconnectInFlight = false
+            }
+
+        case .foregroundRecoveryPhaseChanged(let phase):
+            guard state.isAppActive else {
+                state.isForegroundReconnectInFlight = false
+                return (state, effects)
+            }
+
+            switch phase {
+            case .alive:
+                state.isForegroundReconnectInFlight = false
+                effects = [.setAppActive(true)]
+
+            case .reconnecting:
+                state.isForegroundReconnectInFlight = true
+                effects = []
+
+            case .reconnected:
+                state.isForegroundReconnectInFlight = false
+                effects = [
+                    .setAppActive(true),
+                    .restartGatewayBootstrap
+                ]
+
+            case .failed:
+                state.isForegroundReconnectInFlight = false
+                state.didDisconnect = false
+                effects = [.requestDisconnect]
+            }
+
+        case .disconnectCompleted:
+            state.didDisconnect = true
         }
 
         return (state, effects)
@@ -50,28 +105,26 @@ enum RootTabReducer {
 @MainActor
 final class RootTabStore {
     struct Dependencies {
-        let log: @Sendable (String) -> Void
-        let preparePersistence: @Sendable () async -> Void
-        let decodeMessages: @Sendable () async -> AsyncStream<TydomMessage>
-        let applyMessage: @Sendable (TydomMessage) async -> Void
-        let sendText: @Sendable (String) async -> Void
+        let bootstrapGateway: @Sendable () async -> Void
         let setAppActive: @Sendable (Bool) async -> Void
+        let runForegroundRecovery: @Sendable (
+            @escaping @MainActor (RootTabForegroundRecoveryPhase) -> Void
+        ) async -> Void
+        let requestDisconnect: @Sendable () async -> Void
     }
 
     private(set) var state: RootTabState
 
-    private let messageTask = TaskHandle()
+    private let bootstrapTask = TaskHandle()
     private let worker: Worker
 
     init(dependencies: Dependencies) {
         self.state = .initial
         self.worker = Worker(
-            log: dependencies.log,
-            preparePersistence: dependencies.preparePersistence,
-            decodeMessages: dependencies.decodeMessages,
-            applyMessage: dependencies.applyMessage,
-            sendText: dependencies.sendText,
-            setAppActive: dependencies.setAppActive
+            bootstrapGateway: dependencies.bootstrapGateway,
+            setAppActive: dependencies.setAppActive,
+            runForegroundRecovery: dependencies.runForegroundRecovery,
+            requestDisconnect: dependencies.requestDisconnect
         )
     }
 
@@ -89,87 +142,79 @@ final class RootTabStore {
 
     private func handle(_ effect: RootTabEffect) {
         switch effect {
-        case .preparePersistence:
-            Task { [worker] in
-                await worker.preparePersistence()
+        case .bootstrapGateway:
+            guard bootstrapTask.task == nil else { return }
+            bootstrapTask.task = Task { [worker] in
+                await worker.bootstrapGateway()
             }
 
-        case .startMessageStream:
-            guard messageTask.task == nil else { return }
-            messageTask.task = Task { [worker] in
-                await worker.streamMessages()
-            }
-
-        case .sendBootstrapRequests:
-            Task { [worker] in
-                await worker.sendBootstrapRequests()
+        case .restartGatewayBootstrap:
+            bootstrapTask.task = Task { [worker] in
+                await worker.bootstrapGateway()
             }
 
         case .setAppActive(let isActive):
             Task { [worker] in
                 await worker.setAppActive(isActive)
             }
+
+        case .runForegroundRecovery:
+            Task { [weak self, worker] in
+                await worker.runForegroundRecovery { phase in
+                    self?.receive(.foregroundRecoveryPhaseChanged(phase))
+                }
+            }
+
+        case .requestDisconnect:
+            Task { [weak self, worker] in
+                await worker.requestDisconnect()
+                self?.receive(.disconnectCompleted)
+            }
         }
     }
 
+    private func receive(_ event: RootTabEvent) {
+        send(event)
+    }
+
     private actor Worker {
-        private let log: @Sendable (String) -> Void
-        private let preparePersistenceAction: @Sendable () async -> Void
-        private let decodeMessages: @Sendable () async -> AsyncStream<TydomMessage>
-        private let applyMessage: @Sendable (TydomMessage) async -> Void
-        private let sendText: @Sendable (String) async -> Void
+        private let bootstrapGatewayAction: @Sendable () async -> Void
         private let setAppActiveAction: @Sendable (Bool) async -> Void
+        private let runForegroundRecoveryAction: @Sendable (
+            @escaping @MainActor (RootTabForegroundRecoveryPhase) -> Void
+        ) async -> Void
+        private let requestDisconnectAction: @Sendable () async -> Void
 
         init(
-            log: @escaping @Sendable (String) -> Void,
-            preparePersistence: @escaping @Sendable () async -> Void,
-            decodeMessages: @escaping @Sendable () async -> AsyncStream<TydomMessage>,
-            applyMessage: @escaping @Sendable (TydomMessage) async -> Void,
-            sendText: @escaping @Sendable (String) async -> Void,
-            setAppActive: @escaping @Sendable (Bool) async -> Void
+            bootstrapGateway: @escaping @Sendable () async -> Void,
+            setAppActive: @escaping @Sendable (Bool) async -> Void,
+            runForegroundRecovery: @escaping @Sendable (
+                @escaping @MainActor (RootTabForegroundRecoveryPhase) -> Void
+            ) async -> Void,
+            requestDisconnect: @escaping @Sendable () async -> Void
         ) {
-            self.log = log
-            self.preparePersistenceAction = preparePersistence
-            self.decodeMessages = decodeMessages
-            self.applyMessage = applyMessage
-            self.sendText = sendText
+            self.bootstrapGatewayAction = bootstrapGateway
             self.setAppActiveAction = setAppActive
+            self.runForegroundRecoveryAction = runForegroundRecovery
+            self.requestDisconnectAction = requestDisconnect
         }
 
-        func preparePersistence() async {
-            await preparePersistenceAction()
-        }
-
-        func streamMessages() async {
-            log("Message stream started")
-            let messages = await decodeMessages()
-            for await message in messages {
-                guard !Task.isCancelled else { return }
-                log("Message received \(describe(message))")
-                await applyMessage(message)
-            }
-            log("Message stream finished")
-        }
-
-        func sendBootstrapRequests() async {
-            log("Send configs-file")
-            await sendText(TydomCommand.configsFile().request)
-            log("Send devices-meta")
-            await sendText(TydomCommand.devicesMeta().request)
-            log("Send devices-cmeta")
-            await sendText(TydomCommand.devicesCmeta().request)
-            log("Send devices-data")
-            await sendText(TydomCommand.devicesData().request)
-            log("Send areas-data")
-            await sendText(TydomCommand.areasData().request)
-            log("Send scenarios-file")
-            await sendText(TydomCommand.scenariosFile().request)
-            log("Send refresh-all")
-            await sendText(TydomCommand.refreshAll().request)
+        func bootstrapGateway() async {
+            await bootstrapGatewayAction()
         }
 
         func setAppActive(_ isActive: Bool) async {
             await setAppActiveAction(isActive)
+        }
+
+        func runForegroundRecovery(
+            _ onPhase: @escaping @MainActor (RootTabForegroundRecoveryPhase) -> Void
+        ) async {
+            await runForegroundRecoveryAction(onPhase)
+        }
+
+        func requestDisconnect() async {
+            await requestDisconnectAction()
         }
     }
 }
@@ -186,33 +231,5 @@ private final class TaskHandle {
 
     deinit {
         task?.cancel()
-    }
-}
-
-private func describe(_ message: TydomMessage) -> String {
-    switch message {
-    case .devices(let devices, let transactionId):
-        return "devices count=\(devices.count) tx=\(transactionId ?? "nil")"
-    case .gatewayInfo(_, let transactionId):
-        return "gatewayInfo tx=\(transactionId ?? "nil")"
-    case .scenarios(let scenarios, let transactionId):
-        return "scenarios count=\(scenarios.count) tx=\(transactionId ?? "nil")"
-    case .groups(_, let transactionId):
-        return "groups tx=\(transactionId ?? "nil")"
-    case .moments(_, let transactionId):
-        return "moments tx=\(transactionId ?? "nil")"
-    case .areas(let areas, let transactionId):
-        return "areas count=\(areas.count) tx=\(transactionId ?? "nil")"
-    case .raw(let raw):
-        let origin = raw.uriOrigin ?? "nil"
-        let tx = raw.transactionId ?? "nil"
-        let bodyCount = raw.frame?.body?.count ?? 0
-        let preview = raw.frame?.body
-            .flatMap { data in
-                String(data: data.prefix(200), encoding: .isoLatin1)
-                    ?? String(decoding: data.prefix(200), as: UTF8.self)
-            } ?? ""
-        let suffix = preview.isEmpty ? "" : " bodyPreview=\(preview)"
-        return "raw bytes=\(raw.payload.count) uri=\(origin) tx=\(tx) body=\(bodyCount)\(suffix)"
     }
 }

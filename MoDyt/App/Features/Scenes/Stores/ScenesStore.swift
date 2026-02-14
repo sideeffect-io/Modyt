@@ -82,7 +82,13 @@ final class ScenesStore {
         switch effect {
         case .startObservingScenes:
             guard sceneTask.task == nil else { return }
-            sceneTask.task = Task { [weak self, worker] in
+            let taskHandle = sceneTask
+            sceneTask.task = Task { [weak self, worker, weak taskHandle] in
+                defer {
+                    Task { @MainActor [weak taskHandle] in
+                        taskHandle?.task = nil
+                    }
+                }
                 await worker.observeScenes { [weak self] scenes in
                     await self?.send(.scenesUpdated(scenes))
                 }

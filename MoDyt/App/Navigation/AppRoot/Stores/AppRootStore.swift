@@ -8,16 +8,13 @@ struct AppRootState {
     }
 
     var route: Route
-    var isAppActive: Bool
 
     static let initial = AppRootState(
-        route: .authentication,
-        isAppActive: true
+        route: .authentication
     )
 }
 
 enum AppRootEvent {
-    case setAppActive(Bool)
     case authenticated
     case didDisconnect
 }
@@ -33,9 +30,6 @@ final class AppRootStore {
 
     func send(_ event: AppRootEvent) {
         switch event {
-        case .setAppActive(let isAppActive):
-            state.isAppActive = isAppActive
-
         case .authenticated:
             state.route = .runtime
 

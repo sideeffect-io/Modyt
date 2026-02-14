@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(\.settingsStoreFactory) private var settingsStoreFactory
+    let onDidDisconnect: @MainActor () -> Void
 
     var body: some View {
         WithStoreView(factory: settingsStoreFactory.make) { store in
@@ -43,6 +44,10 @@ struct SettingsView: View {
             .glassCard(cornerRadius: 24)
             .padding(.horizontal, 20)
             .padding(.vertical, 24)
+            .onChange(of: store.state.didDisconnect) { _, didDisconnect in
+                guard didDisconnect else { return }
+                onDidDisconnect()
+            }
         }
     }
 }

@@ -3,6 +3,7 @@ import Foundation
 #if canImport(Network)
 import Network
 import Security
+import os
 
 public extension TydomGatewayDiscovery.Dependencies {
     static func live(
@@ -257,17 +258,15 @@ private struct IPv4Network {
     }
 }
 
-private final class ContinuationGate: @unchecked Sendable {
-    private let lock = NSLock()
-    private var didResume = false
+private final class ContinuationGate: Sendable {
+    private let didResumeLock = OSAllocatedUnfairLock(initialState: false)
 
     func resumeOnce<T: Sendable>(_ continuation: CheckedContinuation<T, Never>, value: T) {
-        lock.lock()
-        let shouldResume = !didResume
-        if shouldResume {
+        let shouldResume = didResumeLock.withLock { didResume in
+            guard !didResume else { return false }
             didResume = true
+            return true
         }
-        lock.unlock()
 
         if shouldResume {
             continuation.resume(returning: value)
@@ -275,21 +274,19 @@ private final class ContinuationGate: @unchecked Sendable {
     }
 }
 
-private final class LockedHosts: @unchecked Sendable {
-    private let lock = NSLock()
-    private var values: [String] = []
+private final class LockedHosts: Sendable {
+    private let valuesLock = OSAllocatedUnfairLock(initialState: [String]())
 
     func append(_ host: String) {
-        lock.lock()
-        values.append(host)
-        lock.unlock()
+        valuesLock.withLock { values in
+            values.append(host)
+        }
     }
 
     func snapshot() -> [String] {
-        lock.lock()
-        let snapshot = Array(Set(values))
-        lock.unlock()
-        return snapshot
+        valuesLock.withLock { values in
+            Array(Set(values))
+        }
     }
 }
 #endif

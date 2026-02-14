@@ -2,7 +2,6 @@ import SwiftUI
 
 struct AppRootView: View {
     @Environment(\.appCoordinatorStoreFactory) private var appCoordinatorStoreFactory
-    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         WithStoreView(factory: appCoordinatorStoreFactory.make ) { store in
@@ -10,9 +9,6 @@ struct AppRootView: View {
                 AppBackgroundView()
                     .ignoresSafeArea()
                 content(for: store)
-            }
-            .onChange(of: scenePhase) { _, newPhase in
-                store.send(.setAppActive(newPhase == .active))
             }
         }
     }
@@ -27,7 +23,6 @@ struct AppRootView: View {
 
         case .runtime:
             RootTabView(
-                isAppActive: store.state.isAppActive,
                 onDidDisconnect: {
                     store.send(.didDisconnect)
                 }

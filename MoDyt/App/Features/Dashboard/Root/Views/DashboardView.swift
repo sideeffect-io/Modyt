@@ -1,11 +1,13 @@
 import SwiftUI
 import DeltaDoreClient
+import UniformTypeIdentifiers
 
 struct DashboardView: View {
     @Environment(\.dashboardStoreFactory) private var dashboardStoreFactory
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    @State private var draggedId: String?
+    @State private var dragSourceId: String?
+    @State private var dropTargetId: String?
 
     var body: some View {
         WithStoreView(factory: dashboardStoreFactory.make) { store in
@@ -73,18 +75,69 @@ struct DashboardView: View {
             )
         )
         .overlay {
-            if draggedId == device.uniqueId {
+            if dropTargetId == device.uniqueId {
                 RoundedRectangle(cornerRadius: 22)
                     .stroke(.white.opacity(0.6), lineWidth: 2)
             }
         }
-        .draggable(device.uniqueId)
-        .dropDestination(for: String.self) { items, _ in
-            guard let sourceId = items.first else { return false }
-            store.send(.reorderFavorite(sourceId, device.uniqueId))
-            return true
-        } isTargeted: { isTargeted in
-            draggedId = isTargeted ? device.uniqueId : nil
+        .overlay(alignment: .topTrailing) {
+            if dropTargetId == device.uniqueId {
+                Image(systemName: "arrow.left.arrow.right.circle.fill")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(10)
+            }
         }
+        .onDrag {
+            dragSourceId = device.uniqueId
+            return NSItemProvider(object: device.uniqueId as NSString)
+        }
+        .onDrop(
+            of: [UTType.text],
+            delegate: DashboardCardDropDelegate(
+                targetId: device.uniqueId,
+                dragSourceId: $dragSourceId,
+                dropTargetId: $dropTargetId,
+                onReorder: { sourceId, targetId in
+                    store.send(.reorderFavorite(sourceId, targetId))
+                }
+            )
+        )
+    }
+}
+
+private struct DashboardCardDropDelegate: DropDelegate {
+    let targetId: String
+    @Binding var dragSourceId: String?
+    @Binding var dropTargetId: String?
+    let onReorder: (String, String) -> Void
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [UTType.text])
+    }
+
+    func dropEntered(info: DropInfo) {
+        guard dragSourceId != targetId else { return }
+        dropTargetId = targetId
+    }
+
+    func dropExited(info: DropInfo) {
+        guard dropTargetId == targetId else { return }
+        dropTargetId = nil
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        defer {
+            dropTargetId = nil
+            dragSourceId = nil
+        }
+
+        guard let sourceId = dragSourceId, sourceId != targetId else { return false }
+        onReorder(sourceId, targetId)
+        return true
     }
 }

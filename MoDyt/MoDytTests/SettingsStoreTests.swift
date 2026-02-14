@@ -20,6 +20,7 @@ struct SettingsStoreTests {
 
         await settleAsyncState()
         #expect(!store.state.isDisconnecting)
+        #expect(store.state.didDisconnect)
         #expect(store.state.errorMessage == nil)
         #expect(await recorder.values == ["disconnect"])
     }
@@ -38,6 +39,7 @@ struct SettingsStoreTests {
         await settleAsyncState()
 
         #expect(!store.state.isDisconnecting)
+        #expect(!store.state.didDisconnect)
         #expect(store.state.errorMessage != nil)
     }
 
@@ -58,6 +60,7 @@ struct SettingsStoreTests {
         await settleAsyncState()
 
         #expect(!store.state.isDisconnecting)
+        #expect(store.state.didDisconnect)
         #expect(await recorder.values == ["disconnect"])
     }
 }

@@ -66,6 +66,10 @@ This is the condensed, non-duplicative engineering memory for the project.
 
 - `DashboardStore` observes favorite descriptions; per-device control ownership belongs to device feature stores.
 - `DashboardDeviceCardStore` is favorite-toggle behavior only; control logic lives in feature stores.
+- `RootTabStore` should stay lifecycle-focused (`onStart`, `setAppActive`) and depend on two capabilities only:
+  - gateway bootstrap orchestration
+  - app-active forwarding
+- Gateway protocol wiring (persistence prep, websocket stream consumption, bootstrap requests, repository apply) belongs to `RootTabStoreFactory` bootstrap layer, not `RootTabStore`.
 
 ### Sensor Data Semantics
 

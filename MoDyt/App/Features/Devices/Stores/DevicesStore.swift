@@ -89,7 +89,13 @@ final class DevicesStore {
         switch effect {
         case .startObservingDevices:
             guard deviceTask.task == nil else { return }
-            deviceTask.task = Task { [weak self, worker] in
+            let taskHandle = deviceTask
+            deviceTask.task = Task { [weak self, worker, weak taskHandle] in
+                defer {
+                    Task { @MainActor [weak taskHandle] in
+                        taskHandle?.task = nil
+                    }
+                }
                 await worker.observeDevices { [weak self] groupedDevices in
                     await self?.send(.devicesUpdated(groupedDevices))
                 }

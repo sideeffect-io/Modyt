@@ -83,7 +83,13 @@ final class DashboardStore {
         switch effect {
         case .startObservingFavorites:
             guard favoritesTask.task == nil else { return }
-            favoritesTask.task = Task { [weak self, worker] in
+            let taskHandle = favoritesTask
+            favoritesTask.task = Task { [weak self, worker, weak taskHandle] in
+                defer {
+                    Task { @MainActor [weak taskHandle] in
+                        taskHandle?.task = nil
+                    }
+                }
                 await worker.observeFavorites { [weak self] favoriteDevices in
                     await self?.send(.favoritesUpdated(favoriteDevices))
                 }

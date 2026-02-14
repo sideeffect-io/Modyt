@@ -78,6 +78,53 @@ struct ScenesStoreTests {
         #expect(await observeCounter.value == 1)
     }
 
+    @Test
+    func observationRestartsAfterStreamCompletion() async {
+        let firstStream = BufferedStreamBox<[SceneRecord]>()
+        let secondStream = BufferedStreamBox<[SceneRecord]>()
+        let observeCounter = Counter()
+
+        let store = ScenesStore(
+            dependencies: .init(
+                observeScenes: {
+                    await observeCounter.increment()
+                    let attempt = await observeCounter.value
+                    switch attempt {
+                    case 1:
+                        return firstStream.stream
+                    case 2:
+                        return secondStream.stream
+                    default:
+                        return AsyncStream { continuation in
+                            continuation.finish()
+                        }
+                    }
+                },
+                toggleFavorite: { _ in },
+                refreshAll: {}
+            )
+        )
+
+        store.send(.onAppear)
+        firstStream.yield([
+            makeScene(uniqueId: "scene_1", sceneId: 1, name: "First")
+        ])
+        await settleAsyncState(iterations: 12)
+        #expect(store.state.scenes.map(\.name) == ["First"])
+
+        firstStream.finish()
+        await settleAsyncState(iterations: 16)
+
+        store.send(.onAppear)
+        secondStream.yield([
+            makeScene(uniqueId: "scene_2", sceneId: 2, name: "Second")
+        ])
+        await settleAsyncState(iterations: 16)
+
+        #expect(await observeCounter.value == 2)
+        #expect(store.state.scenes.map(\.name) == ["Second"])
+    }
+
     private func makeScene(uniqueId: String, sceneId: Int, name: String) -> SceneRecord {
         SceneRecord(
             uniqueId: uniqueId,

@@ -4,59 +4,23 @@ import DeltaDoreClient
 @testable import MoDyt
 
 struct DeviceRecordTests {
-    @Test
-    func drivingLightControlDescriptorUsesPowerAndLevelKeys() {
+    @Test(arguments: DrivingLightDescriptorCase.allCases)
+    func drivingLightControlDescriptorMapsExpectedValues(_ testCase: DrivingLightDescriptorCase) throws {
         let device = TestSupport.makeDevice(
-            uniqueId: "light-1",
-            name: "Driveway",
+            uniqueId: testCase.uniqueId,
+            name: testCase.name,
             usage: "light",
-            data: ["on": .bool(true), "level": .number(50)],
-            metadata: ["level": .object(["min": .number(0), "max": .number(200)])]
+            data: testCase.data,
+            metadata: testCase.metadata
         )
 
-        let descriptor = device.drivingLightControlDescriptor()
+        let descriptor = try #require(device.drivingLightControlDescriptor())
 
-        #expect(descriptor?.powerKey == "on")
-        #expect(descriptor?.levelKey == "level")
-        #expect(descriptor?.isOn == true)
-        #expect(descriptor?.level == 50)
-        #expect(descriptor?.percentage == 25)
-    }
-
-    @Test
-    func drivingLightControlDescriptorFallsBackToStateWhenLevelIsMissing() {
-        let device = TestSupport.makeDevice(
-            uniqueId: "light-2",
-            name: "Garage",
-            usage: "light",
-            data: ["state": .bool(false)]
-        )
-
-        let descriptor = device.drivingLightControlDescriptor()
-
-        #expect(descriptor?.powerKey == "state")
-        #expect(descriptor?.levelKey == nil)
-        #expect(descriptor?.isOn == false)
-        #expect(descriptor?.level == 0)
-        #expect(descriptor?.percentage == 0)
-    }
-
-    @Test
-    func drivingLightControlDescriptorFallsBackToLevelWhenPowerIsMissing() {
-        let device = TestSupport.makeDevice(
-            uniqueId: "light-3",
-            name: "Porch",
-            usage: "light",
-            data: ["level": .number(35)],
-            metadata: ["level": .object(["min": .number(0), "max": .number(70)])]
-        )
-
-        let descriptor = device.drivingLightControlDescriptor()
-
-        #expect(descriptor?.powerKey == nil)
-        #expect(descriptor?.levelKey == "level")
-        #expect(descriptor?.isOn == true)
-        #expect(descriptor?.percentage == 50)
+        #expect(descriptor.powerKey == testCase.expectedPowerKey)
+        #expect(descriptor.levelKey == testCase.expectedLevelKey)
+        #expect(descriptor.isOn == testCase.expectedIsOn)
+        #expect(descriptor.level == testCase.expectedLevel)
+        #expect(descriptor.percentage == testCase.expectedPercentage)
     }
 
     @Test
@@ -72,7 +36,7 @@ struct DeviceRecordTests {
     }
 
     @Test
-    func temperatureDescriptorUsesPreferredKeyAndNormalizesUnit() {
+    func temperatureDescriptorUsesPreferredKeyAndNormalizesUnit() throws {
         let device = TestSupport.makeDevice(
             uniqueId: "thermo-1",
             name: "Outdoor Sensor",
@@ -86,17 +50,18 @@ struct DeviceRecordTests {
             ]
         )
 
-        let descriptor = device.temperatureDescriptor()
+        let descriptor = try #require(device.temperatureDescriptor())
+        let batteryStatus = try #require(descriptor.batteryStatus)
 
-        #expect(descriptor?.key == "temperature")
-        #expect(descriptor?.value == 18.4)
-        #expect(descriptor?.unitSymbol == "°C")
-        #expect(descriptor?.batteryStatus?.batteryLevelKey == "battery")
-        #expect(descriptor?.batteryStatus?.batteryLevel == 92)
+        #expect(descriptor.key == "temperature")
+        #expect(descriptor.value == 18.4)
+        #expect(descriptor.unitSymbol == "°C")
+        #expect(batteryStatus.batteryLevelKey == "battery")
+        #expect(batteryStatus.batteryLevel == 92)
     }
 
     @Test
-    func temperatureDescriptorPrefersOutTemperatureOverConfigValue() {
+    func temperatureDescriptorPrefersOutTemperatureOverConfigValue() throws {
         let device = TestSupport.makeDevice(
             uniqueId: "thermo-2",
             name: "Outdoor Probe",
@@ -111,11 +76,11 @@ struct DeviceRecordTests {
             ]
         )
 
-        let descriptor = device.temperatureDescriptor()
+        let descriptor = try #require(device.temperatureDescriptor())
 
-        #expect(descriptor?.key == "outTemperature")
-        #expect(descriptor?.value == 11.0)
-        #expect(descriptor?.unitSymbol == "°C")
+        #expect(descriptor.key == "outTemperature")
+        #expect(descriptor.value == 11.0)
+        #expect(descriptor.unitSymbol == "°C")
     }
 
     @Test
@@ -145,7 +110,7 @@ struct DeviceRecordTests {
     }
 
     @Test
-    func thermostatDescriptorBuildsFromBoilerData() {
+    func thermostatDescriptorBuildsFromBoilerData() throws {
         let device = TestSupport.makeDevice(
             uniqueId: "boiler-1",
             name: "Living Thermostat",
@@ -166,19 +131,21 @@ struct DeviceRecordTests {
             ]
         )
 
-        let descriptor = device.thermostatDescriptor()
+        let descriptor = try #require(device.thermostatDescriptor())
+        let temperature = try #require(descriptor.temperature)
+        let humidity = try #require(descriptor.humidity)
 
-        #expect(descriptor?.temperature?.value == 21.4)
-        #expect(descriptor?.humidity?.value == 48)
-        #expect(descriptor?.setpointKey == "setpoint")
-        #expect(descriptor?.setpoint == 22.5)
-        #expect(descriptor?.setpointRange == 10...30)
-        #expect(descriptor?.setpointStep == 0.5)
-        #expect(descriptor?.unitSymbol == "°C")
+        #expect(temperature.value == 21.4)
+        #expect(humidity.value == 48)
+        #expect(descriptor.setpointKey == "setpoint")
+        #expect(descriptor.setpoint == 22.5)
+        #expect(descriptor.setpointRange == 10...30)
+        #expect(descriptor.setpointStep == 0.5)
+        #expect(descriptor.unitSymbol == "°C")
     }
 
     @Test
-    func thermostatDescriptorSupportsRe2020ControlBoilerPayload() {
+    func thermostatDescriptorSupportsRe2020ControlBoilerPayload() throws {
         let device = TestSupport.makeDevice(
             uniqueId: "thermic-1",
             name: "Thermostat",
@@ -194,17 +161,19 @@ struct DeviceRecordTests {
             ]
         )
 
-        let descriptor = device.thermostatDescriptor()
+        let descriptor = try #require(device.thermostatDescriptor())
+        let temperature = try #require(descriptor.temperature)
+        let humidity = try #require(descriptor.humidity)
 
         #expect(device.group == .boiler)
-        #expect(descriptor?.temperature?.key == "ambientTemperature")
-        #expect(descriptor?.humidity?.key == "hygroIn")
-        #expect(descriptor?.setpoint == 25.0)
-        #expect(descriptor?.canAdjustSetpoint == true)
+        #expect(temperature.key == "ambientTemperature")
+        #expect(humidity.key == "hygroIn")
+        #expect(descriptor.setpoint == 25.0)
+        #expect(descriptor.canAdjustSetpoint == true)
     }
 
     @Test
-    func energyConsumptionDescriptorUsesEnergyIndexAndDefaultRange() {
+    func energyConsumptionDescriptorUsesEnergyIndexAndDefaultRange() throws {
         let device = TestSupport.makeDevice(
             uniqueId: "energy-1",
             name: "Consumption",
@@ -214,16 +183,16 @@ struct DeviceRecordTests {
             ]
         )
 
-        let descriptor = device.energyConsumptionDescriptor()
+        let descriptor = try #require(device.energyConsumptionDescriptor())
 
-        #expect(descriptor?.key == "energyIndex_ELEC")
-        #expect(descriptor?.value == 186.5)
-        #expect(descriptor?.range == 0...864)
-        #expect(descriptor?.unitSymbol == "kWh")
+        #expect(descriptor.key == "energyIndex_ELEC")
+        #expect(descriptor.value == 186.5)
+        #expect(descriptor.range == 0...864)
+        #expect(descriptor.unitSymbol == "kWh")
     }
 
     @Test
-    func energyConsumptionDescriptorConvertsWhToKWh() {
+    func energyConsumptionDescriptorConvertsWhToKWh() throws {
         let device = TestSupport.makeDevice(
             uniqueId: "energy-2",
             name: "Consumption",
@@ -238,14 +207,14 @@ struct DeviceRecordTests {
             ]
         )
 
-        let descriptor = device.energyConsumptionDescriptor()
+        let descriptor = try #require(device.energyConsumptionDescriptor())
 
-        #expect(descriptor?.value == 1.2)
-        #expect(descriptor?.unitSymbol == "kWh")
+        #expect(descriptor.value == 1.2)
+        #expect(descriptor.unitSymbol == "kWh")
     }
 
     @Test
-    func sunlightDescriptorExtractsBatteryStatus() {
+    func sunlightDescriptorExtractsBatteryStatus() throws {
         let device = TestSupport.makeDevice(
             uniqueId: "sun-1",
             name: "Garden Sun",
@@ -257,17 +226,18 @@ struct DeviceRecordTests {
             ]
         )
 
-        let descriptor = device.sunlightDescriptor()
+        let descriptor = try #require(device.sunlightDescriptor())
+        let batteryStatus = try #require(descriptor.batteryStatus)
 
-        #expect(descriptor?.key == "lightPower")
-        #expect(descriptor?.batteryStatus?.batteryDefectKey == "battDefect")
-        #expect(descriptor?.batteryStatus?.batteryDefect == false)
-        #expect(descriptor?.batteryStatus?.batteryLevelKey == "battery")
-        #expect(descriptor?.batteryStatus?.batteryLevel == 87)
+        #expect(descriptor.key == "lightPower")
+        #expect(batteryStatus.batteryDefectKey == "battDefect")
+        #expect(batteryStatus.batteryDefect == false)
+        #expect(batteryStatus.batteryLevelKey == "battery")
+        #expect(batteryStatus.batteryLevel == 87)
     }
 
     @Test
-    func smokeDetectorDescriptorExtractsSmokeAndBatteryDefect() {
+    func smokeDetectorDescriptorExtractsSmokeAndBatteryDefect() throws {
         let device = TestSupport.makeDevice(
             uniqueId: "smoke-1",
             name: "Hallway Smoke",
@@ -278,18 +248,18 @@ struct DeviceRecordTests {
             ]
         )
 
-        let descriptor = device.smokeDetectorDescriptor()
+        let descriptor = try #require(device.smokeDetectorDescriptor())
 
         #expect(device.group == .smoke)
-        #expect(descriptor?.smokeKey == "techSmokeDefect")
-        #expect(descriptor?.smokeDetected == false)
-        #expect(descriptor?.batteryDefectKey == "battDefect")
-        #expect(descriptor?.batteryDefect == true)
-        #expect(descriptor?.health == .notOk)
+        #expect(descriptor.smokeKey == "techSmokeDefect")
+        #expect(descriptor.smokeDetected == false)
+        #expect(descriptor.batteryDefectKey == "battDefect")
+        #expect(descriptor.batteryDefect == true)
+        #expect(descriptor.health == .notOk)
     }
 
     @Test
-    func smokeDetectorDescriptorExtractsBatteryLevel() {
+    func smokeDetectorDescriptorExtractsBatteryLevel() throws {
         let device = TestSupport.makeDevice(
             uniqueId: "smoke-2",
             name: "Kitchen Smoke",
@@ -300,11 +270,11 @@ struct DeviceRecordTests {
             ]
         )
 
-        let descriptor = device.smokeDetectorDescriptor()
+        let descriptor = try #require(device.smokeDetectorDescriptor())
 
-        #expect(descriptor?.batteryLevelKey == "battLevel")
-        #expect(descriptor?.batteryLevel == 84)
-        #expect(descriptor?.health == .ok)
+        #expect(descriptor.batteryLevelKey == "battLevel")
+        #expect(descriptor.batteryLevel == 84)
+        #expect(descriptor.health == .ok)
     }
 
     @Test
@@ -379,4 +349,52 @@ struct DeviceRecordTests {
         statusChange.data["open"] = .bool(true)
         #expect(!baseline.isEquivalentForFavorites(to: statusChange))
     }
+}
+
+private struct DrivingLightDescriptorCase: Sendable {
+    let uniqueId: String
+    let name: String
+    let data: [String: JSONValue]
+    let metadata: [String: JSONValue]?
+    let expectedPowerKey: String?
+    let expectedLevelKey: String?
+    let expectedIsOn: Bool
+    let expectedLevel: Double
+    let expectedPercentage: Int
+
+    static let allCases: [DrivingLightDescriptorCase] = [
+        .init(
+            uniqueId: "light-1",
+            name: "Driveway",
+            data: ["on": .bool(true), "level": .number(50)],
+            metadata: ["level": .object(["min": .number(0), "max": .number(200)])],
+            expectedPowerKey: "on",
+            expectedLevelKey: "level",
+            expectedIsOn: true,
+            expectedLevel: 50,
+            expectedPercentage: 25
+        ),
+        .init(
+            uniqueId: "light-2",
+            name: "Garage",
+            data: ["state": .bool(false)],
+            metadata: nil,
+            expectedPowerKey: "state",
+            expectedLevelKey: nil,
+            expectedIsOn: false,
+            expectedLevel: 0,
+            expectedPercentage: 0
+        ),
+        .init(
+            uniqueId: "light-3",
+            name: "Porch",
+            data: ["level": .number(35)],
+            metadata: ["level": .object(["min": .number(0), "max": .number(70)])],
+            expectedPowerKey: nil,
+            expectedLevelKey: "level",
+            expectedIsOn: true,
+            expectedLevel: 35,
+            expectedPercentage: 50
+        )
+    ]
 }
