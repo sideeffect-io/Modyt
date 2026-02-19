@@ -9,10 +9,23 @@ struct LightStoreFactory {
                 uniqueId: uniqueId,
                 dependencies: .init(
                     observeLight: { uniqueId in
-                        await environment.repository.observeDevice(uniqueId: uniqueId)
+                        if GroupRecord.isGroupUniqueId(uniqueId) {
+                            return await environment.groupRepository.observeGroupControlDevice(uniqueId: uniqueId)
+                        }
+                        return await environment.repository.observeDevice(uniqueId: uniqueId)
                     },
                     applyOptimisticChanges: { uniqueId, changes in
-                        await environment.repository.applyOptimisticUpdates(uniqueId: uniqueId, changes: changes)
+                        if GroupRecord.isGroupUniqueId(uniqueId) {
+                            await environment.groupRepository.applyOptimisticControlChanges(
+                                uniqueId: uniqueId,
+                                changes: changes
+                            )
+                        } else {
+                            await environment.repository.applyOptimisticUpdates(
+                                uniqueId: uniqueId,
+                                changes: changes
+                            )
+                        }
                     },
                     sendCommand: { uniqueId, key, value in
                         await environment.sendDeviceCommand(uniqueId, key, value)

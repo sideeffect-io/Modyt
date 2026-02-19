@@ -21,9 +21,12 @@ struct ScenesStoreTests {
             makeScene(uniqueId: "scene_2", sceneId: 2, name: "Evening"),
             makeScene(uniqueId: "scene_1", sceneId: 1, name: "Morning")
         ])
-        await settleAsyncState()
+        let didUpdate = await waitUntil {
+            store.state.scenes.map(\.name) == ["Evening", "Morning"]
+        }
         streamBox.finish()
 
+        #expect(didUpdate)
         #expect(store.state.scenes.map(\.name) == ["Evening", "Morning"])
     }
 
@@ -48,8 +51,13 @@ struct ScenesStoreTests {
 
         store.send(.toggleFavorite("scene_10"))
         store.send(.refreshRequested)
-        await settleAsyncState()
+        let didDispatch = await waitUntil {
+            let entries = await recorder.values
+            return entries.contains("toggle:scene_10")
+                && entries.contains("refresh")
+        }
 
+        #expect(didDispatch)
         let entries = await recorder.values
         #expect(entries.contains("toggle:scene_10"))
         #expect(entries.contains("refresh"))
@@ -73,8 +81,11 @@ struct ScenesStoreTests {
 
         store.send(.onAppear)
         store.send(.onAppear)
-        await settleAsyncState()
+        let observedOnce = await waitUntil {
+            await observeCounter.value == 1
+        }
 
+        #expect(observedOnce)
         #expect(await observeCounter.value == 1)
     }
 
@@ -109,18 +120,27 @@ struct ScenesStoreTests {
         firstStream.yield([
             makeScene(uniqueId: "scene_1", sceneId: 1, name: "First")
         ])
-        await settleAsyncState(iterations: 12)
+        let didLoadFirst = await waitUntil {
+            store.state.scenes.map(\.name) == ["First"]
+        }
+        #expect(didLoadFirst)
         #expect(store.state.scenes.map(\.name) == ["First"])
 
         firstStream.finish()
-        await settleAsyncState(iterations: 16)
+        let firstFinished = await waitUntil {
+            await observeCounter.value >= 1
+        }
+        #expect(firstFinished)
 
         store.send(.onAppear)
         secondStream.yield([
             makeScene(uniqueId: "scene_2", sceneId: 2, name: "Second")
         ])
-        await settleAsyncState(iterations: 16)
+        let didLoadSecond = await waitUntil {
+            store.state.scenes.map(\.name) == ["Second"]
+        }
 
+        #expect(didLoadSecond)
         #expect(await observeCounter.value == 2)
         #expect(store.state.scenes.map(\.name) == ["Second"])
     }

@@ -24,7 +24,13 @@ struct DeltaDoreCLI {
             ) else {
                 return
             }
-            await runCLI(connection: connection, stdout: stdout, stderr: stderr)
+            await runCLI(
+                connection: connection,
+                stdout: stdout,
+                stderr: stderr,
+                rawWebSocketOutput: options.rawWebSocketOutput,
+                disablePingPolling: options.disablePingPolling
+            )
         case .runStored(let options):
             guard let connection = await connectStored(
                 options: options,
@@ -33,7 +39,13 @@ struct DeltaDoreCLI {
             ) else {
                 return
             }
-            await runCLI(connection: connection, stdout: stdout, stderr: stderr)
+            await runCLI(
+                connection: connection,
+                stdout: stdout,
+                stderr: stderr,
+                rawWebSocketOutput: options.rawWebSocketOutput,
+                disablePingPolling: options.disablePingPolling
+            )
         case .runNew(let options):
             guard let connection = await connectNew(
                 options: options,
@@ -42,7 +54,13 @@ struct DeltaDoreCLI {
             ) else {
                 return
             }
-            await runCLI(connection: connection, stdout: stdout, stderr: stderr)
+            await runCLI(
+                connection: connection,
+                stdout: stdout,
+                stderr: stderr,
+                rawWebSocketOutput: options.rawWebSocketOutput,
+                disablePingPolling: options.disablePingPolling
+            )
         }
     }
 }

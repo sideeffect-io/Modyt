@@ -35,6 +35,7 @@ public actor TydomConnection {
     private var socketTask: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
     private var keepAliveTask: Task<Void, Never>?
+    private var keepAliveEnabled = true
     private var webSocketDelegate: InsecureTLSDelegate?
     private var isWebSocketOpen = false
 #if canImport(Network)
@@ -43,7 +44,10 @@ public actor TydomConnection {
 
     private let messageStream: AsyncStream<Data>
     private var messageContinuation: AsyncStream<Data>.Continuation?
-    private let activityStore = TydomAppActivityStore()
+    private let rawMessageStream: AsyncStream<Data>
+    private var rawMessageContinuation: AsyncStream<Data>.Continuation?
+    private let activityStore: TydomAppActivityStore
+    private let postPutPollingController: TydomPostPutPollingController
 
     public init(
         configuration: Configuration,
@@ -66,7 +70,19 @@ public actor TydomConnection {
         let streamResult = AsyncStream<Data>.makeStream()
         self.messageStream = streamResult.stream
         self.messageContinuation = streamResult.continuation
-
+        let rawStreamResult = AsyncStream<Data>.makeStream()
+        self.rawMessageStream = rawStreamResult.stream
+        self.rawMessageContinuation = rawStreamResult.continuation
+        let activityStore = TydomAppActivityStore()
+        self.activityStore = activityStore
+        self.postPutPollingController = TydomPostPutPollingController(
+            configuration: .init(intervalSeconds: 3, onlyWhenActive: configuration.polling.onlyWhenActive),
+            dependencies: .init(
+                isActive: { await activityStore.isAppActive() },
+                sleep: dependencies.sleep,
+                log: log
+            )
+        )
     }
 
     deinit {
@@ -82,6 +98,10 @@ public actor TydomConnection {
         messageStream
     }
 
+    public func rawMessages() -> AsyncStream<Data> {
+        rawMessageStream
+    }
+
     public func setAppActive(_ isActive: Bool) async {
         await activityStore.setActive(isActive)
         if isActive, let socketTask, receiveTask == nil {
@@ -90,8 +110,24 @@ public actor TydomConnection {
         }
     }
 
+    public func setKeepAliveEnabled(_ isEnabled: Bool) {
+        keepAliveEnabled = isEnabled
+        if isEnabled {
+            if socketTask != nil, receiveTask != nil {
+                startKeepAlive()
+            }
+        } else {
+            keepAliveTask?.cancel()
+            keepAliveTask = nil
+        }
+    }
+
     func isAppActive() async -> Bool {
         await activityStore.isAppActive()
+    }
+
+    func isPostPutPollingActive(uniqueId: String) async -> Bool {
+        await postPutPollingController.isActive(uniqueId: uniqueId)
     }
 
     public func connect(
@@ -155,12 +191,13 @@ public actor TydomConnection {
         }
     }
 
-    public func disconnect() {
+    public func disconnect() async {
         isWebSocketOpen = false
         receiveTask?.cancel()
         receiveTask = nil
         keepAliveTask?.cancel()
         keepAliveTask = nil
+        await postPutPollingController.stopAll()
 
         socketTask?.cancel(with: .goingAway, reason: nil)
         socketTask = nil
@@ -178,9 +215,13 @@ public actor TydomConnection {
             log("Send failed: not connected.")
             throw ConnectionError.notConnected
         }
+        let postPutTarget = TydomPostPutPollingController.target(fromOutgoingRequestData: data)
         let payload = applyOutgoingPrefix(to: data)
         log("WebSocket send bytes=\(payload.count) preview=\(preview(payload))")
         try await task.send(.data(payload))
+        if let postPutTarget {
+            await startPostPutPolling(for: postPutTarget)
+        }
     }
 
     public func send(text: String) async throws {
@@ -188,9 +229,14 @@ public actor TydomConnection {
             log("Send failed: not connected.")
             throw ConnectionError.notConnected
         }
-        let payload = applyOutgoingPrefix(to: Data(text.utf8))
+        let data = Data(text.utf8)
+        let postPutTarget = TydomPostPutPollingController.target(fromOutgoingRequestData: data)
+        let payload = applyOutgoingPrefix(to: data)
         log("WebSocket send bytes=\(payload.count) preview=\(preview(payload))")
         try await task.send(.data(payload))
+        if let postPutTarget {
+            await startPostPutPolling(for: postPutTarget)
+        }
     }
 
     public func pingAndWaitForResponse(
@@ -215,7 +261,7 @@ public actor TydomConnection {
             break
         }
         if closeAfterSuccess {
-            disconnect()
+            await disconnect()
         }
         return true
     }
@@ -460,7 +506,7 @@ public actor TydomConnection {
     private func startKeepAlive() {
         keepAliveTask?.cancel()
         let config = configuration.keepAlive
-        guard config.isEnabled else { return }
+        guard config.isEnabled, keepAliveEnabled else { return }
         keepAliveTask = Task { [weak self] in
             guard let self else { return }
             let sleepNanoseconds = UInt64(config.intervalSeconds) * 1_000_000_000
@@ -551,9 +597,25 @@ public actor TydomConnection {
         }
     }
 
-    private func handleIncoming(_ data: Data) {
+    private func handleIncoming(_ data: Data) async {
+        rawMessageContinuation?.yield(data)
         let cleaned = stripIncomingPrefix(from: data)
         messageContinuation?.yield(cleaned)
+    }
+
+    private func startPostPutPolling(for target: TydomPostPutPollingController.Target) async {
+        await postPutPollingController.start(for: target) { [weak self] path in
+            guard let self else { return }
+            do {
+                try await self.send(TydomCommand.pollDeviceData(url: path))
+            } catch {
+                await self.logPostPutPollingSendFailure(path: path, error: error)
+            }
+        }
+    }
+
+    private func logPostPutPollingSendFailure(path: String, error: Error) {
+        log("Post-PUT polling send failed path=\(path) error=\(error)")
     }
 
     private func resolvePassword(using session: URLSession) async throws -> String {

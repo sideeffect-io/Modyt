@@ -96,6 +96,12 @@ actor SceneRepository {
             .map(Self.makeDashboardDescription(from:))
     }
 
+    func hasAnyData() async -> Bool {
+        guard let sceneDAO = try? await requireDAO() else { return false }
+        let scenes = (try? await sceneDAO.list()) ?? []
+        return scenes.isEmpty == false
+    }
+
     func listScenes() async throws -> [SceneRecord] {
         let sceneDAO = try await requireDAO()
         let scenes = try await sceneDAO.list()

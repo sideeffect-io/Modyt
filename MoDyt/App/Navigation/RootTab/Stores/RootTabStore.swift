@@ -2,29 +2,43 @@ import Foundation
 import Observation
 
 struct RootTabState: Sendable, Equatable {
+    struct InitialLoad: Sendable, Equatable {
+        var errorMessage: String?
+    }
+
     var isAppActive: Bool
     var isForegroundReconnectInFlight: Bool
     var didDisconnect: Bool
+    var isInitialLoadBlocking: Bool
+    var initialLoad: InitialLoad
 
     static let initial = RootTabState(
         isAppActive: true,
         isForegroundReconnectInFlight: false,
-        didDisconnect: false
+        didDisconnect: false,
+        isInitialLoadBlocking: true,
+        initialLoad: InitialLoad(errorMessage: nil)
     )
+}
+
+enum RootTabBootstrapResult: Sendable, Equatable {
+    case completed
+    case failed(String)
+}
+
+enum RootTabForegroundRecoveryResult: Sendable, Equatable {
+    case alive
+    case reconnected
+    case failed
 }
 
 enum RootTabEvent: Sendable {
     case onStart
     case setAppActive(Bool)
-    case foregroundRecoveryPhaseChanged(RootTabForegroundRecoveryPhase)
+    case foregroundRecoveryFinished(RootTabForegroundRecoveryResult)
+    case bootstrapFinished(RootTabBootstrapResult)
     case disconnectCompleted
-}
-
-enum RootTabForegroundRecoveryPhase: Sendable, Equatable {
-    case alive
-    case reconnecting
-    case reconnected
-    case failed
+    case retryInitialLoad
 }
 
 enum RootTabEffect: Sendable, Equatable {
@@ -55,7 +69,7 @@ enum RootTabReducer {
                 if wasActive {
                     effects = [.setAppActive(true)]
                 } else {
-                    state.isForegroundReconnectInFlight = false
+                    state.isForegroundReconnectInFlight = true
                     effects = [.runForegroundRecovery]
                 }
             } else if wasActive {
@@ -65,36 +79,43 @@ enum RootTabReducer {
                 state.isForegroundReconnectInFlight = false
             }
 
-        case .foregroundRecoveryPhaseChanged(let phase):
+        case .foregroundRecoveryFinished(let result):
             guard state.isAppActive else {
                 state.isForegroundReconnectInFlight = false
                 return (state, effects)
             }
 
-            switch phase {
+            state.isForegroundReconnectInFlight = false
+            switch result {
             case .alive:
-                state.isForegroundReconnectInFlight = false
                 effects = [.setAppActive(true)]
-
-            case .reconnecting:
-                state.isForegroundReconnectInFlight = true
-                effects = []
-
             case .reconnected:
-                state.isForegroundReconnectInFlight = false
                 effects = [
                     .setAppActive(true),
                     .restartGatewayBootstrap
                 ]
-
             case .failed:
-                state.isForegroundReconnectInFlight = false
                 state.didDisconnect = false
                 effects = [.requestDisconnect]
             }
 
+        case .bootstrapFinished(let result):
+            switch result {
+            case .completed:
+                state.initialLoad.errorMessage = nil
+                state.isInitialLoadBlocking = false
+            case .failed(let message):
+                state.initialLoad.errorMessage = message
+                state.isInitialLoadBlocking = true
+            }
+
         case .disconnectCompleted:
             state.didDisconnect = true
+
+        case .retryInitialLoad:
+            state.initialLoad.errorMessage = nil
+            state.isInitialLoadBlocking = true
+            effects = [.restartGatewayBootstrap]
         }
 
         return (state, effects)
@@ -105,11 +126,9 @@ enum RootTabReducer {
 @MainActor
 final class RootTabStore {
     struct Dependencies {
-        let bootstrapGateway: @Sendable () async -> Void
+        let bootstrapGateway: @Sendable () async -> RootTabBootstrapResult
         let setAppActive: @Sendable (Bool) async -> Void
-        let runForegroundRecovery: @Sendable (
-            @escaping @MainActor (RootTabForegroundRecoveryPhase) -> Void
-        ) async -> Void
+        let runForegroundRecovery: @Sendable () async -> RootTabForegroundRecoveryResult
         let requestDisconnect: @Sendable () async -> Void
     }
 
@@ -144,13 +163,17 @@ final class RootTabStore {
         switch effect {
         case .bootstrapGateway:
             guard bootstrapTask.task == nil else { return }
-            bootstrapTask.task = Task { [worker] in
-                await worker.bootstrapGateway()
+            bootstrapTask.task = Task { [weak self, worker] in
+                let result = await worker.bootstrapGateway()
+                guard !Task.isCancelled else { return }
+                self?.receive(.bootstrapFinished(result))
             }
 
         case .restartGatewayBootstrap:
-            bootstrapTask.task = Task { [worker] in
-                await worker.bootstrapGateway()
+            bootstrapTask.task = Task { [weak self, worker] in
+                let result = await worker.bootstrapGateway()
+                guard !Task.isCancelled else { return }
+                self?.receive(.bootstrapFinished(result))
             }
 
         case .setAppActive(let isActive):
@@ -160,9 +183,9 @@ final class RootTabStore {
 
         case .runForegroundRecovery:
             Task { [weak self, worker] in
-                await worker.runForegroundRecovery { phase in
-                    self?.receive(.foregroundRecoveryPhaseChanged(phase))
-                }
+                let result = await worker.runForegroundRecovery()
+                guard !Task.isCancelled else { return }
+                self?.receive(.foregroundRecoveryFinished(result))
             }
 
         case .requestDisconnect:
@@ -178,19 +201,15 @@ final class RootTabStore {
     }
 
     private actor Worker {
-        private let bootstrapGatewayAction: @Sendable () async -> Void
+        private let bootstrapGatewayAction: @Sendable () async -> RootTabBootstrapResult
         private let setAppActiveAction: @Sendable (Bool) async -> Void
-        private let runForegroundRecoveryAction: @Sendable (
-            @escaping @MainActor (RootTabForegroundRecoveryPhase) -> Void
-        ) async -> Void
+        private let runForegroundRecoveryAction: @Sendable () async -> RootTabForegroundRecoveryResult
         private let requestDisconnectAction: @Sendable () async -> Void
 
         init(
-            bootstrapGateway: @escaping @Sendable () async -> Void,
+            bootstrapGateway: @escaping @Sendable () async -> RootTabBootstrapResult,
             setAppActive: @escaping @Sendable (Bool) async -> Void,
-            runForegroundRecovery: @escaping @Sendable (
-                @escaping @MainActor (RootTabForegroundRecoveryPhase) -> Void
-            ) async -> Void,
+            runForegroundRecovery: @escaping @Sendable () async -> RootTabForegroundRecoveryResult,
             requestDisconnect: @escaping @Sendable () async -> Void
         ) {
             self.bootstrapGatewayAction = bootstrapGateway
@@ -199,7 +218,7 @@ final class RootTabStore {
             self.requestDisconnectAction = requestDisconnect
         }
 
-        func bootstrapGateway() async {
+        func bootstrapGateway() async -> RootTabBootstrapResult {
             await bootstrapGatewayAction()
         }
 
@@ -207,10 +226,8 @@ final class RootTabStore {
             await setAppActiveAction(isActive)
         }
 
-        func runForegroundRecovery(
-            _ onPhase: @escaping @MainActor (RootTabForegroundRecoveryPhase) -> Void
-        ) async {
-            await runForegroundRecoveryAction(onPhase)
+        func runForegroundRecovery() async -> RootTabForegroundRecoveryResult {
+            await runForegroundRecoveryAction()
         }
 
         func requestDisconnect() async {

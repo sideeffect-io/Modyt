@@ -16,8 +16,6 @@ struct AsyncSequenceRemoveDuplicatesTests {
             }
         }
 
-        await settleAsyncState()
-
         continuation?.yield(1)
         continuation?.yield(1)
         continuation?.yield(2)

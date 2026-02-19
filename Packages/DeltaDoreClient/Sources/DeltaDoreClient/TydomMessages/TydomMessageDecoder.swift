@@ -24,11 +24,23 @@ enum TydomMessageDecoder {
         guard raw.parseError == nil else {
             return TydomDecodedEnvelope(raw: raw, payload: .none)
         }
-        guard let frame = raw.frame, let body = frame.body, body.isEmpty == false else {
+        guard let frame = raw.frame else {
             return TydomDecodedEnvelope(raw: raw, payload: .none)
         }
 
         let uriOrigin = raw.uriOrigin
+
+        if uriOrigin == "/ping" {
+            return TydomDecodedEnvelope(raw: raw, payload: .none, effects: [.pongReceived])
+        }
+
+        if let echo = decodeEchoMessage(raw: raw, frame: frame) {
+            return TydomDecodedEnvelope(raw: raw, payload: .echo(echo))
+        }
+
+        guard let body = frame.body, body.isEmpty == false else {
+            return TydomDecodedEnvelope(raw: raw, payload: .none)
+        }
 
         if uriOrigin == "/info" {
             if let info = decodeGatewayInfo(body) {
@@ -38,8 +50,12 @@ enum TydomMessageDecoder {
         }
 
         if uriOrigin == "/configs/file" {
-            if let mutations = decodeConfigsFile(body) {
-                return TydomDecodedEnvelope(raw: raw, payload: .none, cacheMutations: mutations)
+            if let result = decodeConfigsFile(body) {
+                return TydomDecodedEnvelope(
+                    raw: raw,
+                    payload: .groupMetadata(result.groupMetadata),
+                    cacheMutations: result.cacheMutations
+                )
             }
             return TydomDecodedEnvelope(raw: raw, payload: .none)
         }
@@ -64,11 +80,20 @@ enum TydomMessageDecoder {
         }
 
         if isDevicesData(uriOrigin) {
-            if let updates = decodeDevicesData(body) {
+            if let updates = decodeDevicesData(body, uriOrigin: uriOrigin) {
                 let withData = updates.filter { $0.data.isEmpty == false }.count
                 DeltaDoreDebugLog.log(
                     "Decode devices data updates=\(updates.count) withData=\(withData)"
                 )
+                let positionUpdates = updates.compactMap { update -> String? in
+                    guard let value = tracePositionValue(in: update.data) else { return nil }
+                    return "\(update.uniqueId):\(value)"
+                }
+                if positionUpdates.isEmpty == false {
+                    DeltaDoreDebugLog.log(
+                        "ShutterTrace decoder uri=\(uriOrigin ?? "nil") tx=\(raw.transactionId ?? "nil") updates=\(positionUpdates.joined(separator: ","))"
+                    )
+                }
                 return TydomDecodedEnvelope(raw: raw, payload: .deviceUpdates(updates))
             }
             DeltaDoreDebugLog.log(
@@ -86,10 +111,6 @@ enum TydomMessageDecoder {
 
         if uriOrigin == "/events" {
             return TydomDecodedEnvelope(raw: raw, payload: .none, effects: [.refreshAll])
-        }
-
-        if uriOrigin == "/ping" {
-            return TydomDecodedEnvelope(raw: raw, payload: .none, effects: [.pongReceived])
         }
 
         if uriOrigin == "/groups/file" {
@@ -123,6 +144,24 @@ enum TydomMessageDecoder {
         return TydomDecodedEnvelope(raw: raw, payload: .none)
     }
 
+    private static func decodeEchoMessage(
+        raw: TydomRawMessage,
+        frame: TydomHTTPFrame
+    ) -> TydomEchoMessage? {
+        guard case .response(let response) = frame else { return nil }
+        guard response.body?.isEmpty != false else { return nil }
+        guard let uriOrigin = raw.uriOrigin, uriOrigin.isEmpty == false else { return nil }
+        guard let transactionId = raw.transactionId, transactionId.isEmpty == false else { return nil }
+
+        return TydomEchoMessage(
+            uriOrigin: uriOrigin,
+            transactionId: transactionId,
+            statusCode: response.status,
+            reason: response.reason,
+            headers: response.headers
+        )
+    }
+
     private static func decodeGatewayInfo(_ data: Data) -> TydomGatewayInfo? {
         guard let payload = try? JSONDecoder().decode([String: JSONValue].self, from: data) else {
             return nil
@@ -130,8 +169,10 @@ enum TydomMessageDecoder {
         return TydomGatewayInfo(payload: payload)
     }
 
-    private static func decodeDevicesData(_ data: Data) -> [TydomDeviceUpdate]? {
-        guard let payload = decodePayloadArray(DevicesDataPayload.self, from: data) else { return nil }
+    private static func decodeDevicesData(_ data: Data, uriOrigin: String?) -> [TydomDeviceUpdate]? {
+        guard let payload = decodePayloadArray(DevicesDataPayload.self, from: data) else {
+            return decodeDeviceEndpointData(data, uriOrigin: uriOrigin)
+        }
 
         var updates: [TydomDeviceUpdate] = []
         for device in payload {
@@ -149,7 +190,11 @@ enum TydomMessageDecoder {
                 ))
             }
         }
-        return updates
+        if updates.isEmpty == false {
+            return updates
+        }
+
+        return decodeDeviceEndpointData(data, uriOrigin: uriOrigin)
     }
 
     private static func extractDataValues(from endpoint: DevicesDataPayload.Endpoint) -> [String: JSONValue] {
@@ -174,6 +219,32 @@ enum TydomMessageDecoder {
             }
         }
         return values
+    }
+
+    private static func decodeDeviceEndpointData(_ data: Data, uriOrigin: String?) -> [TydomDeviceUpdate]? {
+        guard let payload = try? JSONDecoder().decode(DeviceEndpointDataPayload.self, from: data) else {
+            return nil
+        }
+        guard let ids = parseDeviceEndpointIds(from: uriOrigin) else {
+            return nil
+        }
+        let endpoint = DevicesDataPayload.Endpoint(
+            id: ids.endpointId,
+            error: payload.error,
+            data: payload.data,
+            link: payload.link
+        )
+        let values = extractDataValues(from: endpoint)
+        let update = TydomDeviceUpdate(
+            id: ids.deviceId,
+            endpointId: ids.endpointId,
+            uniqueId: "\(ids.endpointId)_\(ids.deviceId)",
+            data: values,
+            metadata: nil,
+            cdataEntries: nil,
+            source: .data
+        )
+        return [update]
     }
 
     private static func decodeDevicesCData(_ data: Data) -> [TydomDeviceUpdate]? {
@@ -228,6 +299,22 @@ enum TydomMessageDecoder {
         return path.contains("/devices/") && path.contains("/data")
     }
 
+    private static func parseDeviceEndpointIds(from path: String?) -> (deviceId: Int, endpointId: Int)? {
+        guard let path else { return nil }
+        let normalized = path
+            .split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+            .first
+            .map(String.init) ?? path
+        let components = normalized.split(separator: "/").map(String.init)
+        guard components.count == 5 else { return nil }
+        guard components[0] == "devices" else { return nil }
+        guard components[2] == "endpoints" else { return nil }
+        guard components[4] == "data" else { return nil }
+        guard let deviceId = Int(components[1]) else { return nil }
+        guard let endpointId = Int(components[3]) else { return nil }
+        return (deviceId, endpointId)
+    }
+
     private static func isDevicesCData(_ path: String?) -> Bool {
         guard let path else { return false }
         if path == "/devices/cdata" { return true }
@@ -241,7 +328,22 @@ enum TydomMessageDecoder {
         return nil
     }
 
-    private static func decodeConfigsFile(_ data: Data) -> [TydomCacheMutation]? {
+    private static func tracePositionValue(in data: [String: JSONValue]) -> String? {
+        if let position = data["position"] {
+            return position.traceString
+        }
+        if let level = data["level"] {
+            return level.traceString
+        }
+        return nil
+    }
+
+    private struct ConfigsFileDecodeResult {
+        let cacheMutations: [TydomCacheMutation]
+        let groupMetadata: [TydomGroupMetadata]
+    }
+
+    private static func decodeConfigsFile(_ data: Data) -> ConfigsFileDecodeResult? {
         guard let payload = try? JSONDecoder().decode(ConfigsFilePayload.self, from: data) else {
             return nil
         }
@@ -267,7 +369,23 @@ enum TydomMessageDecoder {
                 mutations.append(.scenarioMetadata(metadata))
             }
         }
-        return mutations
+
+        let groupMetadata = (payload.groups ?? []).map { group in
+            TydomGroupMetadata(
+                id: group.id,
+                name: group.name ?? "Group \(group.id)",
+                usage: group.usage ?? "unknown",
+                picto: group.picto,
+                isGroupUser: group.isGroupUser ?? false,
+                isGroupAll: group.isGroupAll ?? false,
+                payload: group.payload
+            )
+        }
+
+        return ConfigsFileDecodeResult(
+            cacheMutations: mutations,
+            groupMetadata: groupMetadata
+        )
     }
 
     private static func decodeDevicesMeta(_ data: Data) -> [TydomCacheMutation]? {
@@ -299,9 +417,26 @@ enum TydomMessageDecoder {
         let consoNames = Set(["energyIndex", "energyInstant", "energyDistrib", "energyHisto"])
         for device in payload {
             for endpoint in device.endpoints {
-                for entry in endpoint.cmetadata ?? [] {
+                let uniqueId = "\(endpoint.id)_\(device.id)"
+                let cmetadataEntries = endpoint.cmetadata ?? []
+
+                if cmetadataEntries.isEmpty == false {
+                    let metadata: [String: JSONValue] = [
+                        "__cmetadata": .array(
+                            cmetadataEntries.map { .object($0.payload) }
+                        )
+                    ]
+                    let entry = TydomDeviceCacheEntry(
+                        uniqueId: uniqueId,
+                        name: nil,
+                        usage: nil,
+                        metadata: metadata
+                    )
+                    mutations.append(.deviceEntry(entry))
+                }
+
+                for entry in cmetadataEntries {
                     if consoNames.contains(entry.name) {
-                        let uniqueId = "\(endpoint.id)_\(device.id)"
                         let entry = TydomDeviceCacheEntry(uniqueId: uniqueId, name: "Tywatt", usage: "conso", metadata: nil)
                         mutations.append(.deviceEntry(entry))
                     }
@@ -371,11 +506,9 @@ enum TydomMessageDecoder {
     }
 
     private static func decodeGroupsFile(_ data: Data) -> [TydomGroup]? {
-        guard let payload = try? JSONDecoder().decode([String: JSONValue].self, from: data) else { return nil }
-        guard let groups = payload["groups"]?.arrayValue else { return [] }
-        return groups.compactMap { value in
-            value.objectValue.map { TydomGroup(payload: $0) }
-        }
+        guard let payload = try? JSONDecoder().decode(JSONValue.self, from: data) else { return nil }
+        guard let groups = extractGroupValues(from: payload) else { return nil }
+        return groups.compactMap(decodeGroupMembership(from:))
     }
 
     private static func decodeMomentsFile(_ data: Data) -> [TydomMoment]? {
@@ -413,6 +546,73 @@ enum TydomMessageDecoder {
 
         return nil
     }
+
+    private static func extractGroupValues(from payload: JSONValue) -> [JSONValue]? {
+        if let array = payload.arrayValue {
+            return array
+        }
+
+        guard let object = payload.objectValue else { return nil }
+        if let groups = object["groups"]?.arrayValue {
+            return groups
+        }
+        if let wrapped = object["payload"]?.arrayValue {
+            return wrapped
+        }
+        if let wrappedObject = object["payload"]?.objectValue {
+            return [.object(wrappedObject)]
+        }
+        return []
+    }
+
+    private static func decodeGroupMembership(from value: JSONValue) -> TydomGroup? {
+        guard let object = value.objectValue else { return nil }
+        let payload = object["payload"]?.objectValue ?? object
+        guard let id = intValue(from: payload["id"]) else { return nil }
+
+        let devices = (payload["devices"]?.arrayValue ?? []).compactMap { value in
+            decodeGroupDeviceMember(from: value)
+        }
+        let areas = (payload["areas"]?.arrayValue ?? []).compactMap { value in
+            decodeGroupAreaMember(from: value)
+        }
+
+        return TydomGroup(
+            id: id,
+            devices: devices,
+            areas: areas,
+            payload: payload
+        )
+    }
+
+    private static func decodeGroupDeviceMember(from value: JSONValue) -> TydomGroup.DeviceMember? {
+        guard let object = value.objectValue else { return nil }
+        guard let id = intValue(from: object["id"]) else { return nil }
+
+        let endpoints: [TydomGroup.DeviceMember.EndpointMember] = (object["endpoints"]?.arrayValue ?? []).compactMap { value in
+            guard let endpoint = value.objectValue else { return nil }
+            guard let endpointId = intValue(from: endpoint["id"]) else { return nil }
+            return TydomGroup.DeviceMember.EndpointMember(id: endpointId)
+        }
+
+        return TydomGroup.DeviceMember(id: id, endpoints: endpoints)
+    }
+
+    private static func decodeGroupAreaMember(from value: JSONValue) -> TydomGroup.AreaMember? {
+        guard let object = value.objectValue else { return nil }
+        guard let id = intValue(from: object["id"]) else { return nil }
+        return TydomGroup.AreaMember(id: id)
+    }
+
+    private static func intValue(from value: JSONValue?) -> Int? {
+        if let number = value?.numberValue {
+            return Int(number.rounded())
+        }
+        if let string = value?.stringValue {
+            return Int(string)
+        }
+        return nil
+    }
 }
 
 private struct DevicesDataPayload: Decodable {
@@ -437,6 +637,13 @@ private struct DevicesDataPayload: Decodable {
         let value: JSONValue?
         let validity: String?
     }
+}
+
+private struct DeviceEndpointDataPayload: Decodable {
+    let id: Int
+    let error: Int?
+    let data: [DevicesDataPayload.Entry]?
+    let link: DevicesDataPayload.Link?
 }
 
 private struct DevicesCDataPayload: Decodable {
@@ -487,9 +694,32 @@ private extension String {
     }
 }
 
+private extension JSONValue {
+    var traceString: String {
+        switch self {
+        case .string(let text):
+            return "\"\(text)\""
+        case .number(let number):
+            if number.rounded(.towardZero) == number {
+                return String(Int(number))
+            }
+            return String(number)
+        case .bool(let flag):
+            return flag ? "true" : "false"
+        case .object(let value):
+            return "object(keys:\(value.keys.sorted()))"
+        case .array(let value):
+            return "array(count:\(value.count))"
+        case .null:
+            return "null"
+        }
+    }
+}
+
 private struct ConfigsFilePayload: Decodable {
     let endpoints: [Endpoint]
     let scenarios: [Scenario]?
+    let groups: [GroupMetadata]?
 
     struct Endpoint: Decodable {
         let idEndpoint: Int
@@ -518,6 +748,42 @@ private struct ConfigsFilePayload: Decodable {
             case type
             case picto
             case ruleId = "rule_id"
+        }
+    }
+
+    struct GroupMetadata: Decodable {
+        let id: Int
+        let name: String?
+        let usage: String?
+        let picto: String?
+        let isGroupUser: Bool?
+        let isGroupAll: Bool?
+        let payload: [String: JSONValue]
+
+        private enum CodingKeys: String, CodingKey {
+            case id
+            case name
+            case usage
+            case picto
+            case isGroupUser = "is_group_user"
+            case isGroupAll = "group_all"
+        }
+
+        init(from decoder: Decoder) throws {
+            let keyed = try decoder.container(keyedBy: CodingKeys.self)
+            self.id = try keyed.decode(Int.self, forKey: .id)
+            self.name = try keyed.decodeIfPresent(String.self, forKey: .name)
+            self.usage = try keyed.decodeIfPresent(String.self, forKey: .usage)
+            self.picto = try keyed.decodeIfPresent(String.self, forKey: .picto)
+            self.isGroupUser = try keyed.decodeIfPresent(Bool.self, forKey: .isGroupUser)
+            self.isGroupAll = try keyed.decodeIfPresent(Bool.self, forKey: .isGroupAll)
+
+            let raw = try decoder.container(keyedBy: DynamicCodingKey.self)
+            var payload: [String: JSONValue] = [:]
+            for key in raw.allKeys {
+                payload[key.stringValue] = try raw.decode(JSONValue.self, forKey: key)
+            }
+            self.payload = payload
         }
     }
 }
@@ -574,15 +840,48 @@ private struct DevicesCMetaPayload: Decodable {
     struct CMetaEntry: Decodable {
         let name: String
         let parameters: [CMetaParameter]?
+        let payload: [String: JSONValue]
+
+        private enum CodingKeys: String, CodingKey {
+            case name
+            case parameters
+        }
+
+        init(from decoder: Decoder) throws {
+            let keyed = try decoder.container(keyedBy: CodingKeys.self)
+            self.name = try keyed.decode(String.self, forKey: .name)
+            self.parameters = try keyed.decodeIfPresent([CMetaParameter].self, forKey: .parameters)
+
+            let raw = try decoder.container(keyedBy: DynamicCodingKey.self)
+            var payload: [String: JSONValue] = [:]
+            for key in raw.allKeys {
+                payload[key.stringValue] = try raw.decode(JSONValue.self, forKey: key)
+            }
+            self.payload = payload
+        }
     }
 
     struct CMetaParameter: Decodable {
         let name: String
         let enumValues: [String]
+        let payload: [String: JSONValue]
 
         private enum CodingKeys: String, CodingKey {
             case name
             case enumValues = "enum_values"
+        }
+
+        init(from decoder: Decoder) throws {
+            let keyed = try decoder.container(keyedBy: CodingKeys.self)
+            self.name = try keyed.decode(String.self, forKey: .name)
+            self.enumValues = try keyed.decodeIfPresent([String].self, forKey: .enumValues) ?? []
+
+            let raw = try decoder.container(keyedBy: DynamicCodingKey.self)
+            var payload: [String: JSONValue] = [:]
+            for key in raw.allKeys {
+                payload[key.stringValue] = try raw.decode(JSONValue.self, forKey: key)
+            }
+            self.payload = payload
         }
     }
 }

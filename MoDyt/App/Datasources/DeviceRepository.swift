@@ -113,6 +113,18 @@ actor DeviceRepository {
         .removeDuplicates(by: Self.areObservedDevicesEquivalent)
     }
 
+    func hasAnyData() async -> Bool {
+        guard let deviceDAO = try? await requireDAO() else { return false }
+        let devices = (try? await deviceDAO.list()) ?? []
+        return devices.isEmpty == false
+    }
+
+    func hasLinkedAreaDevices() async -> Bool {
+        guard let deviceDAO = try? await requireDAO() else { return false }
+        let devices = (try? await deviceDAO.list()) ?? []
+        return devices.contains { Self.linkedAreaId(in: $0.data) != nil }
+    }
+
     func device(uniqueId: String) async -> DeviceRecord? {
         guard let deviceDAO = try? await requireDAO() else { return nil }
         return try? await deviceDAO.read(.text(uniqueId))
@@ -124,12 +136,21 @@ actor DeviceRepository {
         return devices.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
-    func upsertDevices(_ devices: [TydomDevice]) async {
+    func upsertDevices(
+        _ devices: [TydomDevice],
+        transactionId: String? = nil,
+        source: String = "manual"
+    ) async {
         guard let deviceDAO = try? await requireDAO() else { return }
-        log("Upsert devices count=\(devices.count)")
+        log("Upsert devices count=\(devices.count) source=\(source) tx=\(transactionId ?? "nil")")
         for device in devices {
             let existing = try? await deviceDAO.read(.text(device.uniqueId))
             let merged = merge(existing: existing, incoming: device, now: now())
+            if Self.shouldTraceShutter(existing: existing, incoming: device, merged: merged) {
+                log(
+                    "ShutterTrace repository upsert source=\(source) tx=\(transactionId ?? "nil") uniqueId=\(device.uniqueId) usage=\(device.usage) existing=\(Self.positionTrace(in: existing?.data)) incoming=\(Self.positionTrace(in: device.data)) merged=\(Self.positionTrace(in: merged.data)) descriptor=\(Self.descriptorTrace(for: merged))"
+                )
+            }
             if existing == nil {
                 _ = try? await deviceDAO.create(merged)
             } else {
@@ -238,12 +259,22 @@ actor DeviceRepository {
 
     func applyMessage(_ message: TydomMessage) async {
         switch message {
-        case .devices(let devices, _):
-            log("Apply devices message count=\(devices.count)")
-            await upsertDevices(devices)
+        case .devices(let devices, let transactionId):
+            log("Apply devices message count=\(devices.count) tx=\(transactionId ?? "nil")")
+            await upsertDevices(
+                devices,
+                transactionId: transactionId,
+                source: "message"
+            )
         case .areas(let areas, _):
             log("Apply areas message count=\(areas.count)")
             await applyAreasData(areas)
+        case .echo(let echo):
+            let looksLikeDeviceDataPath = echo.uriOrigin.contains("/devices/")
+                && echo.uriOrigin.contains("/data")
+            log(
+                "Ignore echo message status=\(echo.statusCode) tx=\(echo.transactionId) uri=\(echo.uriOrigin) deviceDataLike=\(looksLikeDeviceDataPath)"
+            )
         default:
             break
         }
@@ -304,6 +335,10 @@ actor DeviceRepository {
         let devices = (try? await deviceDAO.list()) ?? []
         let sorted = devices.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         log("Notify observers count=\(sorted.count)")
+        let shutterSnapshot = sorted.compactMap(Self.shutterSnapshotEntry(for:))
+        if shutterSnapshot.isEmpty == false {
+            log("ShutterTrace repository notify snapshot=\(shutterSnapshot.joined(separator: ","))")
+        }
         for continuation in observers.values {
             continuation.yield(sorted)
         }
@@ -405,6 +440,48 @@ actor DeviceRepository {
         )
     }
 
+    private static func shouldTraceShutter(
+        existing: DeviceRecord?,
+        incoming: TydomDevice,
+        merged: DeviceRecord
+    ) -> Bool {
+        if DeviceGroup.from(usage: incoming.usage) == .shutter { return true }
+        if existing?.group == .shutter || merged.group == .shutter { return true }
+        if incoming.data["position"] != nil || incoming.data["level"] != nil { return true }
+        return false
+    }
+
+    private static func descriptorTrace(for record: DeviceRecord) -> String {
+        guard let descriptor = record.primaryControlDescriptor() else {
+            return "none"
+        }
+        return "key=\(descriptor.key) value=\(formatNumber(descriptor.value)) range=\(formatNumber(descriptor.range.lowerBound))...\(formatNumber(descriptor.range.upperBound)) kind=\(descriptor.kind)"
+    }
+
+    private static func positionTrace(in data: [String: JSONValue]?) -> String {
+        guard let data else { return "nil" }
+        if let value = data["position"] {
+            return "position:\(value.traceString)"
+        }
+        if let value = data["level"] {
+            return "level:\(value.traceString)"
+        }
+        return "none"
+    }
+
+    private static func shutterSnapshotEntry(for device: DeviceRecord) -> String? {
+        guard device.group == .shutter else { return nil }
+        let value = positionTrace(in: device.data)
+        return "\(device.uniqueId):\(value)"
+    }
+
+    private static func formatNumber(_ value: Double) -> String {
+        if value.rounded(.towardZero) == value {
+            return String(Int(value))
+        }
+        return String(format: "%.3f", value)
+    }
+
     private static func isLikelyThermostatData(
         _ data: [String: JSONValue],
         metadata: [String: JSONValue]?
@@ -493,4 +570,26 @@ private func mergeDictionaries(
         }
     }
     return merged
+}
+
+private extension JSONValue {
+    var traceString: String {
+        switch self {
+        case .string(let text):
+            return "\"\(text)\""
+        case .number(let number):
+            if number.rounded(.towardZero) == number {
+                return String(Int(number))
+            }
+            return String(number)
+        case .bool(let flag):
+            return flag ? "true" : "false"
+        case .null:
+            return "null"
+        case .object(let value):
+            return "object(keys:\(value.keys.sorted()))"
+        case .array(let value):
+            return "array(count:\(value.count))"
+        }
+    }
 }

@@ -37,7 +37,10 @@
 				MoDytTests/DashboardRepositoryTests.swift,
 				MoDytTests/DashboardStoreTests.swift,
 				MoDytTests/DeviceRecordTests.swift,
+				MoDytTests/DeviceRepositoryCommandEchoTests.swift,
 				MoDytTests/DevicesStoreTests.swift,
+				MoDytTests/GroupRepositoryTests.swift,
+				MoDytTests/GroupsStoreTests.swift,
 				MoDytTests/HeatPumpStoreTests.swift,
 				MoDytTests/LightStoreTests.swift,
 				MoDytTests/MoDytTests.swift,
@@ -66,7 +69,10 @@
 				MoDytTests/DashboardRepositoryTests.swift,
 				MoDytTests/DashboardStoreTests.swift,
 				MoDytTests/DeviceRecordTests.swift,
+				MoDytTests/DeviceRepositoryCommandEchoTests.swift,
 				MoDytTests/DevicesStoreTests.swift,
+				MoDytTests/GroupRepositoryTests.swift,
+				MoDytTests/GroupsStoreTests.swift,
 				MoDytTests/HeatPumpStoreTests.swift,
 				MoDytTests/LightStoreTests.swift,
 				MoDytTests/MoDytTests.swift,
@@ -446,7 +452,7 @@
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
 				SWIFT_APPROACHABLE_CONCURRENCY = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-					SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				XROS_DEPLOYMENT_TARGET = 26.2;
@@ -506,7 +512,7 @@
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
 				SWIFT_APPROACHABLE_CONCURRENCY = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-					SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				XROS_DEPLOYMENT_TARGET = 26.2;

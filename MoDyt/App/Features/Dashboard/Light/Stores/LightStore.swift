@@ -15,17 +15,20 @@ final class LightStore {
         let applyOptimisticChanges: @Sendable (String, [String: JSONValue]) async -> Void
         let sendCommand: @Sendable (String, String, JSONValue) async -> Void
         let now: () -> Date
+        let pendingEchoSuppressionWindow: TimeInterval
 
         init(
             observeLight: @escaping @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable,
             applyOptimisticChanges: @escaping @Sendable (String, [String: JSONValue]) async -> Void,
             sendCommand: @escaping @Sendable (String, String, JSONValue) async -> Void,
-            now: @escaping () -> Date = Date.init
+            now: @escaping () -> Date = Date.init,
+            pendingEchoSuppressionWindow: TimeInterval = 0.9
         ) {
             self.observeLight = observeLight
             self.applyOptimisticChanges = applyOptimisticChanges
             self.sendCommand = sendCommand
             self.now = now
+            self.pendingEchoSuppressionWindow = pendingEchoSuppressionWindow
         }
     }
 
@@ -34,9 +37,12 @@ final class LightStore {
     private let uniqueId: String
     private let dependencies: Dependencies
     private let observationTask = TaskHandle()
+    private let pendingTimeoutTask = TaskHandle()
     private let worker: Worker
     private var pendingDescriptor: DrivingLightControlDescriptor?
     private var pendingDescriptorExpiresAt: Date?
+    private var suppressedIncomingDescriptor: DrivingLightControlDescriptor?
+    private var pendingGeneration: UInt64 = 0
 
     init(
         uniqueId: String,
@@ -145,8 +151,23 @@ final class LightStore {
     }
 
     private func registerPendingDescriptor(_ descriptor: DrivingLightControlDescriptor) {
+        pendingGeneration &+= 1
         pendingDescriptor = descriptor
-        pendingDescriptorExpiresAt = dependencies.now().addingTimeInterval(Self.pendingEchoSuppressionWindow)
+        pendingDescriptorExpiresAt = dependencies.now().addingTimeInterval(
+            dependencies.pendingEchoSuppressionWindow
+        )
+        suppressedIncomingDescriptor = nil
+
+        let generation = pendingGeneration
+        let delay = dependencies.pendingEchoSuppressionWindow
+        pendingTimeoutTask.task = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: Self.nanoseconds(for: delay))
+            } catch {
+                return
+            }
+            self?.reconcilePendingDescriptorOnTimeout(generation: generation)
+        }
     }
 
     private func shouldSuppressIncoming(_ incoming: DrivingLightControlDescriptor) -> Bool {
@@ -158,6 +179,7 @@ final class LightStore {
         }
 
         if let pendingDescriptorExpiresAt, dependencies.now() < pendingDescriptorExpiresAt {
+            suppressedIncomingDescriptor = incoming
             return true
         }
 
@@ -168,6 +190,20 @@ final class LightStore {
     private func clearPendingDescriptor() {
         pendingDescriptor = nil
         pendingDescriptorExpiresAt = nil
+        suppressedIncomingDescriptor = nil
+        pendingTimeoutTask.cancel()
+    }
+
+    private func reconcilePendingDescriptorOnTimeout(generation: UInt64) {
+        guard generation == pendingGeneration else { return }
+        guard pendingDescriptor != nil else { return }
+        guard let pendingDescriptorExpiresAt, dependencies.now() >= pendingDescriptorExpiresAt else { return }
+
+        let reconciledDescriptor = suppressedIncomingDescriptor
+        clearPendingDescriptor()
+        guard let reconciledDescriptor else { return }
+        guard descriptor != reconciledDescriptor else { return }
+        descriptor = reconciledDescriptor
     }
 
     private func matchesPendingDescriptor(
@@ -187,7 +223,15 @@ final class LightStore {
     }
 
     private static let pendingNormalizedTolerance: Double = 0.03
-    private static let pendingEchoSuppressionWindow: TimeInterval = 0.9
+
+    private static func nanoseconds(for duration: TimeInterval) -> UInt64 {
+        let clamped = max(duration, 0)
+        let scaled = clamped * 1_000_000_000
+        if scaled >= Double(UInt64.max) {
+            return UInt64.max
+        }
+        return UInt64(scaled)
+    }
 
     private static let fallbackDescriptor = DrivingLightControlDescriptor(
         powerKey: "on",

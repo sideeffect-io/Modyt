@@ -12,6 +12,8 @@ struct DashboardDeviceCardStoreFactory {
                     toggleFavorite: { uniqueId in
                         if SceneRecord.isSceneUniqueId(uniqueId) {
                             await environment.sceneRepository.toggleFavorite(uniqueId: uniqueId)
+                        } else if GroupRecord.isGroupUniqueId(uniqueId) {
+                            await environment.groupRepository.toggleFavorite(uniqueId: uniqueId)
                         } else {
                             await environment.repository.toggleFavorite(uniqueId: uniqueId)
                         }

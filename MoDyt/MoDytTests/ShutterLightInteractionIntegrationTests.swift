@@ -3,155 +3,218 @@ import Testing
 import DeltaDoreClient
 @testable import MoDyt
 
-struct ShutterLightInteractionIntegrationTests {
+struct NewShutterRepositoryTests {
     @Test
-    func unchangedShutterTimestampDoesNotCommitPendingTarget() async {
+    func observeShutterTargets_initializesMissingRowsFromDevicePositions() async {
         let databasePath = TestSupport.temporaryDatabasePath()
         let deviceRepository = DeviceRepository(databasePath: databasePath, log: { _ in })
-        let shutterRepository = ShutterRepository(
+        let repository = ShutterRepository(
             databasePath: databasePath,
             deviceRepository: deviceRepository,
-            autoObserveDevices: false,
             log: { _ in }
         )
 
-        let shutterUniqueId = "1_100"
-        let lightUniqueId = "1_200"
-        let t0 = Date(timeIntervalSince1970: 1000)
-        let t1 = Date(timeIntervalSince1970: 1001)
-        let t2 = Date(timeIntervalSince1970: 1002)
-        let t3 = Date(timeIntervalSince1970: 1003)
-
-        await shutterRepository.syncDevices([
-            makeShutterDevice(uniqueId: shutterUniqueId, level: 100, updatedAt: t0),
-            makeLightDevice(uniqueId: lightUniqueId, isOn: false)
+        await deviceRepository.upsertDevices([
+            makeTydomShutter(uniqueId: "1001_1", id: 1, endpointId: 1001, level: 24),
+            makeTydomShutter(uniqueId: "1002_1", id: 1, endpointId: 1002, level: 88)
         ])
 
-        await shutterRepository.setTarget(uniqueId: shutterUniqueId, targetStep: .half, originStep: .open)
-        var snapshot = await currentSnapshot(for: shutterUniqueId, in: shutterRepository)
-        #expect(snapshot?.actualStep == .open)
-        #expect(snapshot?.targetStep == .half)
-
-        // First target echo keeps optimistic target pending.
-        await shutterRepository.syncDevices([
-            makeShutterDevice(uniqueId: shutterUniqueId, level: 50, updatedAt: t1),
-            makeLightDevice(uniqueId: lightUniqueId, isOn: false)
-        ])
-        snapshot = await currentSnapshot(for: shutterUniqueId, in: shutterRepository)
-        #expect(snapshot?.actualStep == .open)
-        #expect(snapshot?.targetStep == .half)
-
-        // Light-only change with unchanged shutter timestamp must not commit the pending target.
-        await shutterRepository.syncDevices([
-            makeShutterDevice(uniqueId: shutterUniqueId, level: 50, updatedAt: t1),
-            makeLightDevice(uniqueId: lightUniqueId, isOn: true)
-        ])
-        snapshot = await currentSnapshot(for: shutterUniqueId, in: shutterRepository)
-        #expect(snapshot?.actualStep == .open, "after light update snapshot=\(String(describing: snapshot))")
-        #expect(snapshot?.targetStep == .half, "after light update snapshot=\(String(describing: snapshot))")
-
-        // Stale origin payload while pending keeps the pending state.
-        await shutterRepository.syncDevices([
-            makeShutterDevice(uniqueId: shutterUniqueId, level: 100, updatedAt: t2),
-            makeLightDevice(uniqueId: lightUniqueId, isOn: false)
-        ])
-        snapshot = await currentSnapshot(for: shutterUniqueId, in: shutterRepository)
-        #expect(snapshot?.actualStep == .open, "after stale origin snapshot=\(String(describing: snapshot))")
-        #expect(snapshot?.targetStep == .half, "after stale origin snapshot=\(String(describing: snapshot))")
-
-        // Later target payload with a new shutter timestamp commits.
-        await shutterRepository.syncDevices([
-            makeShutterDevice(uniqueId: shutterUniqueId, level: 50, updatedAt: t3),
-            makeLightDevice(uniqueId: lightUniqueId, isOn: false)
-        ])
-        snapshot = await currentSnapshot(for: shutterUniqueId, in: shutterRepository)
-        #expect(snapshot?.actualStep == .half, "final snapshot=\(String(describing: snapshot))")
-        #expect(snapshot?.targetStep == nil, "final snapshot=\(String(describing: snapshot))")
-    }
-
-    @Test
-    func unchangedShutterControlWithNewTimestampDoesNotCommitPendingTarget() async {
-        let databasePath = TestSupport.temporaryDatabasePath()
-        let deviceRepository = DeviceRepository(databasePath: databasePath, log: { _ in })
-        let shutterRepository = ShutterRepository(
-            databasePath: databasePath,
-            deviceRepository: deviceRepository,
-            autoObserveDevices: false,
-            log: { _ in }
+        let stream = await repository.observeShutterTargets(
+            uniqueIds: ["1001_1", "1002_1", "1003_1"]
         )
-
-        let shutterUniqueId = "1_300"
-        let lightUniqueId = "1_400"
-        let t0 = Date(timeIntervalSince1970: 2000)
-        let t1 = Date(timeIntervalSince1970: 2001)
-        let t2 = Date(timeIntervalSince1970: 2002)
-        let t3 = Date(timeIntervalSince1970: 2003)
-
-        await shutterRepository.syncDevices([
-            makeShutterDevice(uniqueId: shutterUniqueId, level: 100, updatedAt: t0),
-            makeLightDevice(uniqueId: lightUniqueId, isOn: false)
-        ])
-
-        await shutterRepository.setTarget(uniqueId: shutterUniqueId, targetStep: .half, originStep: .open)
-
-        // First target echo keeps optimistic target pending.
-        await shutterRepository.syncDevices([
-            makeShutterDevice(uniqueId: shutterUniqueId, level: 50, updatedAt: t1),
-            makeLightDevice(uniqueId: lightUniqueId, isOn: false)
-        ])
-
-        // Same shutter control value with a new timestamp must not commit.
-        await shutterRepository.syncDevices([
-            makeShutterDevice(uniqueId: shutterUniqueId, level: 50, updatedAt: t2),
-            makeLightDevice(uniqueId: lightUniqueId, isOn: true)
-        ])
-
-        var snapshot = await currentSnapshot(for: shutterUniqueId, in: shutterRepository)
-        #expect(snapshot?.actualStep == .open, "after unchanged control snapshot=\(String(describing: snapshot))")
-        #expect(snapshot?.targetStep == .half, "after unchanged control snapshot=\(String(describing: snapshot))")
-
-        // A true shutter movement to origin should still be reflected while pending.
-        await shutterRepository.syncDevices([
-            makeShutterDevice(uniqueId: shutterUniqueId, level: 100, updatedAt: t3),
-            makeLightDevice(uniqueId: lightUniqueId, isOn: true)
-        ])
-
-        snapshot = await currentSnapshot(for: shutterUniqueId, in: shutterRepository)
-        #expect(snapshot?.actualStep == .open, "after true movement snapshot=\(String(describing: snapshot))")
-        #expect(snapshot?.targetStep == .half, "after true movement snapshot=\(String(describing: snapshot))")
-    }
-
-    private func currentSnapshot(
-        for uniqueId: String,
-        in repository: ShutterRepository
-    ) async -> ShutterSnapshot? {
-        let stream = await repository.observeShutter(uniqueId: uniqueId)
         var iterator = stream.makeAsyncIterator()
-        return await iterator.next() ?? nil
+        let snapshot = await iterator.next()
+
+        #expect(snapshot == [24, 88, 0])
     }
 
-    private func makeShutterDevice(
+    @Test
+    func setShutterTarget_createsAndUpdatesTargetRow() async {
+        let databasePath = TestSupport.temporaryDatabasePath()
+        let deviceRepository = DeviceRepository(databasePath: databasePath, log: { _ in })
+        let repository = ShutterRepository(
+            databasePath: databasePath,
+            deviceRepository: deviceRepository,
+            log: { _ in }
+        )
+        let uniqueId = "2001_2"
+
+        await repository.setShutterTarget(uniqueId: uniqueId, targetPosition: 110)
+
+        let stream = await repository.observeShutterTargets(uniqueIds: [uniqueId])
+        var iterator = stream.makeAsyncIterator()
+
+        let createdSnapshot = await iterator.next()
+        #expect(createdSnapshot == [100])
+
+        await repository.setShutterTarget(uniqueId: uniqueId, targetPosition: 44)
+        let updatedSnapshot = await iterator.next()
+        #expect(updatedSnapshot == [44])
+    }
+
+    @Test
+    func observeShuttersPositions_combinesActualAndTargetAveragesIntoSteps() async {
+        let databasePath = TestSupport.temporaryDatabasePath()
+        let deviceRepository = DeviceRepository(databasePath: databasePath, log: { _ in })
+        let repository = ShutterRepository(
+            databasePath: databasePath,
+            deviceRepository: deviceRepository,
+            log: { _ in }
+        )
+
+        await deviceRepository.upsertDevices([
+            makeTydomShutter(uniqueId: "3001_3", id: 3, endpointId: 3001, level: 0),
+            makeTydomShutter(uniqueId: "3002_3", id: 3, endpointId: 3002, level: 100)
+        ])
+
+        let stream = await repository.observeShuttersPositions(uniqueIds: ["3001_3", "3002_3"])
+        let recorder = TestRecorder<(ShutterStep, ShutterStep)>()
+
+        let observationTask = Task {
+            for await snapshot in stream {
+                await recorder.record((snapshot.actual, snapshot.target))
+            }
+        }
+        defer { observationTask.cancel() }
+
+        let receivedInitial = await waitUntil {
+            await recorder.values.contains(where: { $0 == (.half, .half) })
+        }
+        #expect(receivedInitial)
+
+        await repository.setShutterTarget(uniqueId: "3001_3", targetPosition: 90)
+        let receivedUpdatedTarget = await waitUntil {
+            await recorder.values.contains(where: { $0 == (.half, .open) })
+        }
+        #expect(receivedUpdatedTarget)
+    }
+
+    @Test
+    func setShuttersTarget_setsTargetForAllProvidedIds() async {
+        let databasePath = TestSupport.temporaryDatabasePath()
+        let deviceRepository = DeviceRepository(databasePath: databasePath, log: { _ in })
+        let repository = ShutterRepository(
+            databasePath: databasePath,
+            deviceRepository: deviceRepository,
+            log: { _ in }
+        )
+
+        let uniqueIds = ["4001_4", "4002_4", "4003_4"]
+        await repository.setShuttersTarget(uniqueIds: uniqueIds, step: .threeQuarter)
+
+        let stream = await repository.observeShutterTargets(uniqueIds: uniqueIds)
+        var iterator = stream.makeAsyncIterator()
+        let snapshot = await iterator.next()
+
+        #expect(snapshot == [75, 75, 75])
+    }
+
+    @Test
+    func observeShuttersPositions_normalizesActualUsingDescriptorRange() async {
+        let databasePath = TestSupport.temporaryDatabasePath()
+        let deviceRepository = DeviceRepository(databasePath: databasePath, log: { _ in })
+        let repository = ShutterRepository(
+            databasePath: databasePath,
+            deviceRepository: deviceRepository,
+            log: { _ in }
+        )
+
+        await deviceRepository.upsertDevices([
+            TydomDevice(
+                id: 1,
+                endpointId: 5001,
+                uniqueId: "5001_1",
+                name: "Shutter 5001_1",
+                usage: "shutter",
+                kind: .shutter,
+                data: ["position": .number(1)],
+                metadata: [
+                    "position": .object([
+                        "min": .number(0),
+                        "max": .number(1)
+                    ])
+                ]
+            )
+        ])
+
+        let stream = await repository.observeShuttersPositions(uniqueIds: ["5001_1"])
+        var iterator = stream.makeAsyncIterator()
+        let first = await iterator.next()
+
+        #expect(first?.actual == .open)
+        #expect(first?.target == .open)
+    }
+
+    @Test
+    func stalePersistedTarget_isResetToCurrentPositionOnObservation() async {
+        let databasePath = TestSupport.temporaryDatabasePath()
+        let deviceRepository = DeviceRepository(databasePath: databasePath, log: { _ in })
+        let clock = MutableNow()
+        let repository = ShutterRepository(
+            databasePath: databasePath,
+            deviceRepository: deviceRepository,
+            now: clock.now,
+            log: { _ in }
+        )
+
+        await deviceRepository.upsertDevices([
+            makeTydomShutter(uniqueId: "6001_6", id: 6, endpointId: 6001, level: 0)
+        ])
+
+        await repository.setShutterTarget(uniqueId: "6001_6", targetPosition: 100)
+        clock.advance(by: 120)
+
+        let stream = await repository.observeShuttersPositions(uniqueIds: ["6001_6"])
+        var iterator = stream.makeAsyncIterator()
+        let first = await iterator.next()
+
+        #expect(first?.actual == .closed)
+        #expect(first?.target == .closed)
+    }
+
+    private func makeTydomShutter(
         uniqueId: String,
-        level: Double,
-        updatedAt: Date
-    ) -> DeviceRecord {
-        var device = TestSupport.makeDevice(
+        id: Int,
+        endpointId: Int,
+        level: Double
+    ) -> TydomDevice {
+        TydomDevice(
+            id: id,
+            endpointId: endpointId,
             uniqueId: uniqueId,
-            name: "Main Shutter",
+            name: "Shutter \(uniqueId)",
             usage: "shutter",
+            kind: .shutter,
             data: ["level": .number(level)],
-            metadata: ["level": .object(["min": .number(0), "max": .number(100)])]
+            metadata: [
+                "level": .object([
+                    "min": .number(0),
+                    "max": .number(100)
+                ])
+            ]
         )
-        device.updatedAt = updatedAt
-        return device
+    }
+}
+
+private final class MutableNow: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current: Date = Date(timeIntervalSince1970: 1_700_000_000)
+
+    var now: @Sendable () -> Date {
+        { [weak self] in
+            self?.value ?? Date(timeIntervalSince1970: 1_700_000_000)
+        }
     }
 
-    private func makeLightDevice(uniqueId: String, isOn: Bool) -> DeviceRecord {
-        TestSupport.makeDevice(
-            uniqueId: uniqueId,
-            name: "Driveway Light",
-            usage: "light",
-            data: ["on": .bool(isOn)]
-        )
+    func advance(by seconds: TimeInterval) {
+        lock.lock()
+        current = current.addingTimeInterval(seconds)
+        lock.unlock()
+    }
+
+    private var value: Date {
+        lock.lock()
+        defer { lock.unlock() }
+        return current
     }
 }

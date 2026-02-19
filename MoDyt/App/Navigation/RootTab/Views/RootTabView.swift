@@ -26,18 +26,26 @@ struct RootTabView: View {
     @ViewBuilder
     private func content(for store: RootTabStore) -> some View {
         let isForegroundReconnectInFlight = store.state.isForegroundReconnectInFlight
+        let isInitialLoadBlocking = store.state.isInitialLoadBlocking
+        let shouldBlockInteraction = isForegroundReconnectInFlight || isInitialLoadBlocking
         
         ZStack {
             tabContent()
-                .blur(radius: isForegroundReconnectInFlight ? 3 : 0)
-                .allowsHitTesting(!isForegroundReconnectInFlight)
+                .blur(radius: shouldBlockInteraction ? 3 : 0)
+                .allowsHitTesting(!shouldBlockInteraction)
             
-            if isForegroundReconnectInFlight {
+            if isInitialLoadBlocking {
+                InitialLoadOverlay(
+                    errorMessage: store.state.initialLoad.errorMessage,
+                    onRetry: { store.send(.retryInitialLoad) }
+                )
+                .transition(.opacity)
+            } else if isForegroundReconnectInFlight {
                 ForegroundReconnectOverlay()
                     .transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: isForegroundReconnectInFlight)
+        .animation(.easeInOut(duration: 0.2), value: shouldBlockInteraction)
     }
     
     @ViewBuilder
@@ -67,6 +75,16 @@ struct RootTabView: View {
                 NavigationStack {
                     TabBackgroundContainer {
                         ScenesView()
+                            .hideChromeBackgroundForMobileTabs()
+                    }
+                }
+                .clearNavigationContainerBackground()
+            }
+
+            Tab("Groups", systemImage: "square.grid.3x3.topleft.filled") {
+                NavigationStack {
+                    TabBackgroundContainer {
+                        GroupsView()
                             .hideChromeBackgroundForMobileTabs()
                     }
                 }
@@ -138,6 +156,47 @@ private struct ForegroundReconnectOverlay: View {
                     .foregroundStyle(.secondary)
             }
             .padding(32)
+            .glassCard(cornerRadius: 28, interactive: false)
+            .padding()
+        }
+    }
+}
+
+private struct InitialLoadOverlay: View {
+    let errorMessage: String?
+    let onRetry: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black
+                .opacity(0.16)
+                .ignoresSafeArea()
+
+            VStack(spacing: 16) {
+                if let errorMessage {
+                    Image(systemName: "wifi.exclamationmark")
+                        .font(.system(size: 30, weight: .semibold))
+                        .foregroundStyle(.secondary)
+
+                    Text("Gateway Sync Failed")
+                        .font(.system(.title3, design: .rounded).weight(.semibold))
+
+                    Text(errorMessage)
+                        .font(.system(.subheadline, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+
+                    Button("Retry", action: onRetry)
+                        .buttonStyle(.borderedProminent)
+                } else {
+                    ProgressView()
+                    Text("Loading devices, scenes, and groups")
+                        .font(.system(.title3, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(28)
+            .frame(maxWidth: 360)
             .glassCard(cornerRadius: 28, interactive: false)
             .padding()
         }

@@ -4,18 +4,31 @@ import DeltaDoreClient
 func runCLI(
     connection: TydomConnection,
     stdout: ConsoleWriter,
-    stderr: ConsoleWriter
+    stderr: ConsoleWriter,
+    rawWebSocketOutput: Bool,
+    disablePingPolling: Bool
 ) async {
+    await connection.setKeepAliveEnabled(!disablePingPolling)
     await connection.setAppActive(true)
 
-    let initialPingOk = await send(command: .ping(), connection: connection, stderr: stderr)
-    guard initialPingOk else {
-        await stderr.writeLine("Connection closed before initial ping.")
-        await connection.disconnect()
-        return
+    if !disablePingPolling {
+        let initialPingOk = await send(command: .ping(), connection: connection, stderr: stderr)
+        guard initialPingOk else {
+            await stderr.writeLine("Connection closed before initial ping.")
+            await connection.disconnect()
+            return
+        }
     }
 
     let messageTask = Task {
+        if rawWebSocketOutput {
+            let stream = await connection.rawMessages()
+            for await payload in stream {
+                await stdout.write(rawFrameText(from: payload))
+            }
+            return
+        }
+
         let stream = await connection.decodedMessages(logger: { message in
             Task { await stderr.writeLine("[polling] \(message)") }
         })
@@ -60,6 +73,16 @@ func runCLI(
     await connection.disconnect()
     messageTask.cancel()
     await stdout.writeLine("Disconnected.")
+}
+
+private func rawFrameText(from payload: Data) -> String {
+    if let text = String(data: payload, encoding: .utf8) {
+        return text.hasSuffix("\n") ? text : text + "\n"
+    }
+    if let text = String(data: payload, encoding: .isoLatin1) {
+        return text.hasSuffix("\n") ? text : text + "\n"
+    }
+    return payload.base64EncodedString() + "\n"
 }
 
 func connectAuto(

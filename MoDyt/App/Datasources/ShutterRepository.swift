@@ -1,309 +1,389 @@
 import Foundation
-import DeltaDoreClient
 import Persistence
-
-struct ShutterSnapshot: Sendable, Equatable {
-    let uniqueId: String
-    let descriptor: DeviceControlDescriptor
-    let actualStep: ShutterStep
-    let targetStep: ShutterStep?
-
-    var effectiveTargetStep: ShutterStep {
-        targetStep ?? actualStep
-    }
-
-    var isInFlight: Bool {
-        guard let targetStep else { return false }
-        return actualStep != targetStep
-    }
-
-    func isEquivalentForUI(to other: ShutterSnapshot) -> Bool {
-        uniqueId == other.uniqueId &&
-        actualStep == other.actualStep &&
-        targetStep == other.targetStep &&
-        descriptor.kind == other.descriptor.kind &&
-        descriptor.key == other.descriptor.key &&
-        descriptor.range == other.descriptor.range
-    }
-
-    static func areEquivalentForUI(_ lhs: ShutterSnapshot?, _ rhs: ShutterSnapshot?) -> Bool {
-        switch (lhs, rhs) {
-        case (.none, .none):
-            true
-        case let (.some(left), .some(right)):
-            left.isEquivalentForUI(to: right)
-        default:
-            false
-        }
-    }
-}
 
 actor ShutterRepository {
     enum RepositoryError: Error {
         case notReady
     }
 
-    private struct ShutterUIRecord: Codable, Sendable, Equatable {
+    private struct TargetRecord: Codable, Sendable, Equatable {
         let uniqueId: String
-        var targetStep: Int?
-        var originStep: Int?
-        var ignoredEcho: Bool
-        var updatedAt: Date
+        var targetPosition: Int
+        var updatedAt: Date?
+    }
+
+    private struct TargetObserver {
+        let uniqueIds: [String]
+        let watchedIdSet: Set<String>
+        let continuation: AsyncStream<[Int]>.Continuation
     }
 
     private let databasePath: String
+    private let deviceRepository: DeviceRepository
     private let now: @Sendable () -> Date
     private let log: @Sendable (String) -> Void
-    private let deviceRepository: DeviceRepository
-    private let autoObserveDevices: Bool
 
     private var database: SQLiteDatabase?
-    private var uiStateDAO: DAO<ShutterUIRecord>?
-    private var uiStateById: [String: ShutterUIRecord] = [:]
-    private var descriptorsById: [String: DeviceControlDescriptor] = [:]
-    private var displayedActualById: [String: ShutterStep] = [:]
-    private var observers: [UUID: (uniqueId: String, continuation: AsyncStream<ShutterSnapshot?>.Continuation)] = [:]
-    private var deviceObservationTask: Task<Void, Never>?
+    private var dao: DAO<TargetRecord>?
+    private var targetObservers: [UUID: TargetObserver] = [:]
 
     init(
         databasePath: String,
         deviceRepository: DeviceRepository,
-        autoObserveDevices: Bool = true,
         now: @escaping @Sendable () -> Date = Date.init,
         log: @escaping @Sendable (String) -> Void = { _ in }
     ) {
         self.databasePath = databasePath
         self.deviceRepository = deviceRepository
-        self.autoObserveDevices = autoObserveDevices
         self.now = now
         self.log = log
     }
 
     func startIfNeeded() async throws {
-        if uiStateDAO != nil { return }
-        let db = try await SQLiteDatabase(path: databasePath)
-        try await db.execute(Self.createShutterUIStateTableSQL)
-        let schema = TableSchema<ShutterUIRecord>.codable(table: "shutter_ui_state", primaryKey: "uniqueId")
-        let dao = DAO.make(database: db, schema: schema)
+        if database != nil { return }
 
-        let existing = (try? await dao.list()) ?? []
+        let db = try await SQLiteDatabase(path: databasePath)
+        try await db.execute(Self.createShutterTargetsTableSQL)
+        if await Self.hasUpdatedAtColumn(database: db) == false {
+            try? await db.execute(Self.addUpdatedAtColumnSQL)
+        }
+        let schema = TableSchema<TargetRecord>.codable(table: "shutter_targets", primaryKey: "uniqueId")
+        let targetDAO = DAO.make(database: db, schema: schema)
 
         database = db
-        uiStateDAO = dao
-        uiStateById = Dictionary(uniqueKeysWithValues: existing.map { ($0.uniqueId, $0) })
-        if autoObserveDevices {
-            startObservingDevicesIfNeeded()
-        }
+        dao = targetDAO
     }
 
-    func observeShutter(uniqueId: String) async -> AsyncStream<ShutterSnapshot?> {
-        try? await startIfNeeded()
+    func observeShutterTargets(uniqueIds: [String]) -> AsyncStream<[Int]> {
         let observerId = UUID()
-        let (stream, continuation) = AsyncStream<ShutterSnapshot?>.makeStream()
+        let orderedUniqueIds = Self.uniqueIds(from: uniqueIds)
+        let (stream, continuation) = AsyncStream<[Int]>.makeStream()
 
-        addObserver(id: observerId, uniqueId: uniqueId, continuation: continuation)
-        continuation.yield(snapshot(for: uniqueId))
+        addTargetObserver(
+            id: observerId,
+            uniqueIds: orderedUniqueIds,
+            continuation: continuation
+        )
+
+        let snapshotTask = Task { [weak self] in
+            guard let self else {
+                continuation.finish()
+                return
+            }
+
+            do {
+                try await self.startIfNeeded()
+                let snapshot = try await self.targetPositions(for: orderedUniqueIds)
+                continuation.yield(snapshot)
+            } catch {
+                log("Shutter target snapshot load failed error=\(error)")
+                await self.removeTargetObserver(id: observerId)
+                continuation.finish()
+            }
+        }
+
         continuation.onTermination = { [weak self] _ in
-            Task { await self?.removeObserver(id: observerId) }
+            snapshotTask.cancel()
+            Task { await self?.removeTargetObserver(id: observerId) }
         }
 
         return stream
     }
 
-    func stopObservation() {
-        deviceObservationTask?.cancel()
-        deviceObservationTask = nil
+    func observeShuttersPositions(
+        uniqueIds: [String]
+    ) async -> AsyncStream<(actual: ShutterStep, target: ShutterStep)> {
+        let orderedUniqueIds = Self.uniqueIds(from: uniqueIds)
+        let positionsStream = await observeShutterPositions(uniqueIds: orderedUniqueIds)
+            .map { [log] positions in
+                let ids = orderedUniqueIds.joined(separator: ",")
+                let values = positions.map(String.init).joined(separator: ",")
+                log("Shutter actual stream ids=\(ids) values=\(values)")
+                return positions
+            }
+        let targetsStream = observeShutterTargets(uniqueIds: orderedUniqueIds)
+            .map { [log] positions in
+                let ids = orderedUniqueIds.joined(separator: ",")
+                let values = positions.map(String.init).joined(separator: ",")
+                log("Shutter target stream ids=\(ids) values=\(values)")
+                return positions
+            }
+
+        let combinedStream = combineLatest(positionsStream, targetsStream)
+            .map { [log] actualPositions, targetPositions in
+                let actualAverage = Self.averagePosition(for: actualPositions)
+                let targetAverage = Self.averagePosition(for: targetPositions)
+                let ids = orderedUniqueIds.joined(separator: ",")
+                log(
+                    "ShutterTrace repository aggregate ids=\(ids) actualRaw=\(actualPositions.map(String.init).joined(separator: ",")) targetRaw=\(targetPositions.map(String.init).joined(separator: ",")) actualAvg=\(actualAverage) targetAvg=\(targetAverage)"
+                )
+                return (actualAverage, targetAverage)
+            }
+            .map { [log] actualAverage, targetAverage in
+                let actualStep = Self.step(for: actualAverage)
+                let targetStep = Self.step(for: targetAverage)
+                let ids = orderedUniqueIds.joined(separator: ",")
+                log(
+                    "ShutterTrace repository snapped ids=\(ids) actualAvg=\(actualAverage)->\(actualStep.rawValue) targetAvg=\(targetAverage)->\(targetStep.rawValue)"
+                )
+                return (actual: actualStep, target: targetStep)
+            }
+            .map { [log] actual, target in
+                let ids = orderedUniqueIds.joined(separator: ",")
+                log(
+                    "Shutter combined stream ids=\(ids) actual=\(actual.rawValue) target=\(target.rawValue)"
+                )
+                return (actual: actual, target: target)
+            }
+
+        let (stream, continuation) = AsyncStream<(actual: ShutterStep, target: ShutterStep)>.makeStream()
+
+        let forwardingTask = Task {
+            for await value in combinedStream {
+                continuation.yield(value)
+            }
+            continuation.finish()
+        }
+
+        continuation.onTermination = { _ in
+            forwardingTask.cancel()
+        }
+
+        return stream
     }
 
-    func syncDevices(_ devices: [DeviceRecord]) async {
-        try? await startIfNeeded()
+    func setShutterTarget(uniqueId: String, targetPosition: Int) async {
+        guard let targetDAO = try? await requireDAO() else { return }
+        let clampedTarget = Self.clampPosition(targetPosition)
+        let updatedAt = now()
 
-        var nextDescriptorsById: [String: DeviceControlDescriptor] = [:]
-
-        for device in devices {
-            guard let descriptor = Self.shutterDescriptor(for: device) else { continue }
-            let uniqueId = device.uniqueId
-            nextDescriptorsById[uniqueId] = descriptor
-
-            let previousDescriptor = descriptorsById[uniqueId]
-            let newStep = ShutterStep.nearestStep(for: descriptor.value, in: descriptor.range)
-            let previousDisplayed = displayedActualById[uniqueId] ?? newStep
-            let didShutterControlChange = Self.didShutterControlChange(
-                previous: previousDescriptor,
-                current: descriptor
+        if var existing = try? await targetDAO.read(.text(uniqueId)) {
+            guard existing.targetPosition != clampedTarget else { return }
+            log(
+                "ShutterTrace repository target-write uniqueId=\(uniqueId) old=\(existing.targetPosition) new=\(clampedTarget)"
             )
+            existing.targetPosition = clampedTarget
+            existing.updatedAt = updatedAt
+            _ = try? await targetDAO.update(existing)
+        } else {
+            let record = TargetRecord(
+                uniqueId: uniqueId,
+                targetPosition: clampedTarget,
+                updatedAt: updatedAt
+            )
+            log(
+                "ShutterTrace repository target-create uniqueId=\(uniqueId) new=\(clampedTarget)"
+            )
+            _ = try? await targetDAO.create(record)
+        }
 
-            if var uiRecord = uiStateById[uniqueId],
-               let target = uiRecord.targetStep.flatMap(ShutterStep.init(rawValue:)) {
-                let origin = uiRecord.originStep.flatMap(ShutterStep.init(rawValue:)) ?? previousDisplayed
+        await notifyTargetObservers(for: [uniqueId])
+    }
 
-                if newStep == target && !uiRecord.ignoredEcho && previousDisplayed == origin {
-                    uiRecord.ignoredEcho = true
-                    uiRecord.updatedAt = now()
-                    uiStateById[uniqueId] = uiRecord
-                    await upsertUIState(uiRecord)
-                    displayedActualById[uniqueId] = previousDisplayed
-                } else if newStep == target && uiRecord.ignoredEcho && !didShutterControlChange {
-                    // Ignore duplicate echoes coming from unrelated device updates.
-                    displayedActualById[uniqueId] = previousDisplayed
-                } else {
-                    displayedActualById[uniqueId] = newStep
+    func setShuttersTarget(uniqueIds: [String], step: ShutterStep) async {
+        let targetPosition = step.rawValue
+        for uniqueId in uniqueIds {
+            await setShutterTarget(uniqueId: uniqueId, targetPosition: targetPosition)
+        }
+    }
 
-                    if newStep == target {
-                        uiStateById.removeValue(forKey: uniqueId)
-                        await deleteUIState(uniqueId: uniqueId)
-                    }
+    private func observeShutterPositions(
+        uniqueIds: [String]
+    ) async -> some AsyncSequence<[Int], Never> & Sendable {
+        let devicesStream = await deviceRepository.observeDevices()
+        return devicesStream.map { [log] devices in
+            let devicesById = Dictionary(uniqueKeysWithValues: devices.map { ($0.uniqueId, $0) })
+            return uniqueIds.map { uniqueId in
+                guard let device = devicesById[uniqueId],
+                      let descriptor = Self.shutterDescriptor(for: device) else {
+                    log("ShutterTrace repository actual-read uniqueId=\(uniqueId) descriptor=missing fallback=0")
+                    return 0
                 }
-            } else {
-                displayedActualById[uniqueId] = newStep
-            }
-        }
-
-        let removedIds = Set(descriptorsById.keys).subtracting(nextDescriptorsById.keys)
-        descriptorsById = nextDescriptorsById
-
-        for uniqueId in removedIds {
-            displayedActualById.removeValue(forKey: uniqueId)
-            if uiStateById.removeValue(forKey: uniqueId) != nil {
-                await deleteUIState(uniqueId: uniqueId)
-            }
-        }
-
-        await notifyObservers()
-    }
-
-    func setTarget(
-        uniqueId: String,
-        targetStep: ShutterStep,
-        originStep: ShutterStep
-    ) async {
-        try? await startIfNeeded()
-
-        let record = ShutterUIRecord(
-            uniqueId: uniqueId,
-            targetStep: targetStep.rawValue,
-            originStep: originStep.rawValue,
-            ignoredEcho: false,
-            updatedAt: now()
-        )
-
-        uiStateById[uniqueId] = record
-        await upsertUIState(record)
-        await notifyObservers(for: [uniqueId])
-    }
-
-    func clearAll() async {
-        try? await startIfNeeded()
-        uiStateById.removeAll()
-        descriptorsById.removeAll()
-        displayedActualById.removeAll()
-        if let database {
-            try? await database.execute("DELETE FROM shutter_ui_state;")
-        }
-        await notifyObservers()
-    }
-
-    private func startObservingDevicesIfNeeded() {
-        guard deviceObservationTask == nil else { return }
-        let deviceRepository = self.deviceRepository
-
-        deviceObservationTask = Task { [weak self] in
-            let stream = await deviceRepository.observeDevices()
-            for await devices in stream {
-                guard let self else { return }
-                await self.syncDevices(devices)
+                let percent = Self.positionPercent(for: descriptor)
+                log(
+                    "ShutterTrace repository actual-read uniqueId=\(uniqueId) key=\(descriptor.key) value=\(Self.formatNumber(descriptor.value)) range=\(Self.formatNumber(descriptor.range.lowerBound))...\(Self.formatNumber(descriptor.range.upperBound)) percent=\(percent)"
+                )
+                return percent
             }
         }
     }
 
-    private func addObserver(
+    private func addTargetObserver(
         id: UUID,
-        uniqueId: String,
-        continuation: AsyncStream<ShutterSnapshot?>.Continuation
+        uniqueIds: [String],
+        continuation: AsyncStream<[Int]>.Continuation
     ) {
-        observers[id] = (uniqueId: uniqueId, continuation: continuation)
+        targetObservers[id] = TargetObserver(
+            uniqueIds: uniqueIds,
+            watchedIdSet: Set(uniqueIds),
+            continuation: continuation
+        )
     }
 
-    private func removeObserver(id: UUID) {
-        observers[id] = nil
+    private func removeTargetObserver(id: UUID) {
+        targetObservers[id] = nil
     }
 
-    private func notifyObservers(for uniqueIds: Set<String>? = nil) async {
-        for observer in observers.values {
-            if let uniqueIds, !uniqueIds.contains(observer.uniqueId) {
+    private func notifyTargetObservers(for changedUniqueIds: Set<String>? = nil) async {
+        for observer in targetObservers.values {
+            if let changedUniqueIds, observer.watchedIdSet.isDisjoint(with: changedUniqueIds) {
                 continue
             }
-            observer.continuation.yield(snapshot(for: observer.uniqueId))
+
+            guard let snapshot = try? await targetPositions(for: observer.uniqueIds) else {
+                continue
+            }
+            log(
+                "ShutterTrace repository target-notify ids=\(observer.uniqueIds.joined(separator: ",")) values=\(snapshot.map(String.init).joined(separator: ","))"
+            )
+            observer.continuation.yield(snapshot)
         }
     }
 
-    private func snapshot(for uniqueId: String) -> ShutterSnapshot? {
-        guard let descriptor = descriptorsById[uniqueId] else { return nil }
+    private func targetPositions(for uniqueIds: [String]) async throws -> [Int] {
+        let targetDAO = try await requireDAO()
 
-        let actual = displayedActualById[uniqueId]
-            ?? ShutterStep.nearestStep(for: descriptor.value, in: descriptor.range)
+        var positions: [Int] = []
+        positions.reserveCapacity(uniqueIds.count)
 
-        let target = uiStateById[uniqueId]
-            .flatMap { $0.targetStep }
-            .flatMap(ShutterStep.init(rawValue:))
+        for uniqueId in uniqueIds {
+            if var existing = try await targetDAO.read(.text(uniqueId)) {
+                if Self.isFresh(updatedAt: existing.updatedAt, now: now()) {
+                    log(
+                        "ShutterTrace repository target-read uniqueId=\(uniqueId) source=cache value=\(existing.targetPosition) fresh=true"
+                    )
+                    positions.append(Self.clampPosition(existing.targetPosition))
+                    continue
+                }
 
-        return ShutterSnapshot(
-            uniqueId: uniqueId,
-            descriptor: descriptor,
-            actualStep: actual,
-            targetStep: target
-        )
-    }
+                let refreshedPosition = await initialShutterPosition(for: uniqueId)
+                log(
+                    "ShutterTrace repository target-read uniqueId=\(uniqueId) source=device-refresh old=\(existing.targetPosition) new=\(refreshedPosition)"
+                )
+                existing.targetPosition = refreshedPosition
+                existing.updatedAt = now()
+                _ = try? await targetDAO.update(existing)
+                positions.append(refreshedPosition)
+                continue
+            }
 
-    private func upsertUIState(_ record: ShutterUIRecord) async {
-        guard let uiStateDAO = try? await requireUIStateDAO() else { return }
-
-        if (try? await uiStateDAO.read(.text(record.uniqueId))) == nil {
-            _ = try? await uiStateDAO.create(record)
-        } else {
-            _ = try? await uiStateDAO.update(record)
+            let initialPosition = await initialShutterPosition(for: uniqueId)
+            log(
+                "ShutterTrace repository target-read uniqueId=\(uniqueId) source=initial-device value=\(initialPosition)"
+            )
+            let record = TargetRecord(
+                uniqueId: uniqueId,
+                targetPosition: initialPosition,
+                updatedAt: nil
+            )
+            _ = try? await targetDAO.create(record)
+            positions.append(initialPosition)
         }
 
-        log("Upsert shutter ui-state uniqueId=\(record.uniqueId)")
+        return positions
     }
 
-    private func deleteUIState(uniqueId: String) async {
-        guard let uiStateDAO = try? await requireUIStateDAO() else { return }
-        _ = try? await uiStateDAO.delete(.text(uniqueId))
-        log("Delete shutter ui-state uniqueId=\(uniqueId)")
+    private func initialShutterPosition(for uniqueId: String) async -> Int {
+        guard let device = await deviceRepository.device(uniqueId: uniqueId),
+              let descriptor = Self.shutterDescriptor(for: device) else {
+            return 0
+        }
+
+        return Self.positionPercent(for: descriptor)
     }
 
-    private func requireUIStateDAO() async throws -> DAO<ShutterUIRecord> {
+    private func requireDAO() async throws -> DAO<TargetRecord> {
         try await startIfNeeded()
-        guard let uiStateDAO else { throw RepositoryError.notReady }
-        return uiStateDAO
+        guard let dao else { throw RepositoryError.notReady }
+        return dao
+    }
+
+    private static func uniqueIds(from uniqueIds: [String]) -> [String] {
+        uniqueIds
+    }
+
+    private static func clampPosition(_ position: Int) -> Int {
+        min(max(position, 0), 100)
+    }
+
+    private static func averagePosition(for positions: [Int]) -> Int {
+        guard positions.isEmpty == false else { return 0 }
+        let sum = positions.reduce(0, +)
+        let average = Double(sum) / Double(positions.count)
+        return clampPosition(Int(average.rounded()))
+    }
+
+    private static func positionPercent(for descriptor: DeviceControlDescriptor) -> Int {
+        let lowerBound = descriptor.range.lowerBound
+        let upperBound = descriptor.range.upperBound
+        guard upperBound > lowerBound else {
+            return 0
+        }
+
+        let normalized = ((descriptor.value - lowerBound) / (upperBound - lowerBound)) * 100
+        return clampPosition(Int(normalized.rounded()))
+    }
+
+    private static func step(for position: Int) -> ShutterStep {
+        let snapped = (Double(clampPosition(position)) / 25.0).rounded() * 25.0
+        switch Int(snapped) {
+        case 100:
+            return .open
+        case 75:
+            return .threeQuarter
+        case 50:
+            return .half
+        case 25:
+            return .quarter
+        default:
+            return .closed
+        }
+    }
+
+    private static func formatNumber(_ value: Double) -> String {
+        if value.rounded(.towardZero) == value {
+            return String(Int(value))
+        }
+        return String(format: "%.3f", value)
+    }
+
+    private static func isFresh(updatedAt: Date?, now: Date) -> Bool {
+        guard let updatedAt else { return false }
+        return now.timeIntervalSince(updatedAt) <= staleTargetThreshold
     }
 
     private static func shutterDescriptor(for device: DeviceRecord) -> DeviceControlDescriptor? {
         guard device.group == .shutter else { return nil }
-        guard let descriptor = device.primaryControlDescriptor(), descriptor.kind == .slider else { return nil }
+        guard let descriptor = device.primaryControlDescriptor(), descriptor.kind == .slider else {
+            return nil
+        }
         return descriptor
     }
 
-    private static func didShutterControlChange(
-        previous: DeviceControlDescriptor?,
-        current: DeviceControlDescriptor
-    ) -> Bool {
-        guard let previous else { return true }
-        return previous.kind != current.kind ||
-            previous.key != current.key ||
-            previous.range != current.range ||
-            ShutterStep.nearestStep(for: previous.value, in: previous.range) !=
-            ShutterStep.nearestStep(for: current.value, in: current.range)
-    }
-
-    private static let createShutterUIStateTableSQL = """
-    CREATE TABLE IF NOT EXISTS shutter_ui_state (
+    private static let createShutterTargetsTableSQL = """
+    CREATE TABLE IF NOT EXISTS shutter_targets (
         uniqueId TEXT PRIMARY KEY,
-        targetStep INTEGER,
-        originStep INTEGER,
-        ignoredEcho INTEGER NOT NULL,
-        updatedAt REAL NOT NULL
+        targetPosition INTEGER NOT NULL CHECK (targetPosition BETWEEN 0 AND 100),
+        updatedAt REAL
     );
     """
+
+    private static let addUpdatedAtColumnSQL = """
+    ALTER TABLE shutter_targets ADD COLUMN updatedAt REAL;
+    """
+
+    private static let staleTargetThreshold: TimeInterval = 60
+
+    private static func hasUpdatedAtColumn(database: SQLiteDatabase) async -> Bool {
+        guard let rows = try? await database.query("PRAGMA table_info(shutter_targets);") else {
+            return false
+        }
+
+        return rows.contains { row in
+            guard case .text(let name)? = row.value("name") else {
+                return false
+            }
+            return name == "updatedAt"
+        }
+    }
 }

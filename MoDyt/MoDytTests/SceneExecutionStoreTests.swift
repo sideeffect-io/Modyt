@@ -15,19 +15,26 @@ struct SceneExecutionStoreTests {
                     return await gate.wait()
                 },
                 minimumExecutionAnimationDuration: .zero,
-                feedbackDuration: .seconds(1)
+                feedbackDuration: .seconds(30)
             )
         )
 
         store.send(.executeTapped)
-        await settleAsyncState()
+        let didStart = await waitUntil {
+            let values = await recorder.values
+            return store.state.isExecuting && values == ["execute:scene_42"]
+        }
 
+        #expect(didStart)
         #expect(store.state.isExecuting)
         #expect(await recorder.values == ["execute:scene_42"])
 
         await gate.resume(with: .acknowledged(statusCode: 200))
-        await settleAsyncState()
+        let didSucceed = await waitUntil {
+            !store.state.isExecuting && store.state.feedback == .success
+        }
 
+        #expect(didSucceed)
         #expect(!store.state.isExecuting)
         #expect(store.state.feedback == .success)
     }
@@ -39,13 +46,16 @@ struct SceneExecutionStoreTests {
             dependencies: .init(
                 executeScene: { _ in .rejected(statusCode: 503) },
                 minimumExecutionAnimationDuration: .zero,
-                feedbackDuration: .seconds(1)
+                feedbackDuration: .seconds(30)
             )
         )
 
         store.send(.executeTapped)
-        await settleAsyncState()
+        let didFail = await waitUntil {
+            !store.state.isExecuting && store.state.feedback == .failure
+        }
 
+        #expect(didFail)
         #expect(!store.state.isExecuting)
         #expect(store.state.feedback == .failure)
     }
@@ -61,18 +71,26 @@ struct SceneExecutionStoreTests {
                     await recorder.record("execute:\(uniqueId)")
                     return await gate.wait()
                 },
-                minimumExecutionAnimationDuration: .zero
+                minimumExecutionAnimationDuration: .zero,
+                feedbackDuration: .seconds(30)
             )
         )
 
         store.send(.executeTapped)
         store.send(.executeTapped)
-        await settleAsyncState()
+        let didStartOnce = await waitUntil {
+            let values = await recorder.values
+            return values == ["execute:scene_99"]
+        }
 
+        #expect(didStartOnce)
         #expect(await recorder.values == ["execute:scene_99"])
 
         await gate.resume(with: .sentWithoutAcknowledgement)
-        await settleAsyncState()
+        let didFinish = await waitUntil {
+            !store.state.isExecuting && store.state.feedback == .sent
+        }
+        #expect(didFinish)
     }
 }
 

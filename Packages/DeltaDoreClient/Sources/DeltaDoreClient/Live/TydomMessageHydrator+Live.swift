@@ -4,6 +4,7 @@ extension TydomMessageHydratorDependencies {
     static func live(
         _ cache: TydomDeviceCacheStore = TydomDeviceCacheStore(),
         scenarioStore: TydomScenarioMetadataStore = TydomScenarioMetadataStore(),
+        isPostPutPollingActive: @escaping @Sendable (String) async -> Bool = { _ in false },
         log: @escaping @Sendable (String) -> Void = { _ in }
     ) -> TydomMessageHydratorDependencies {
         TydomMessageHydratorDependencies(
@@ -21,7 +22,8 @@ extension TydomMessageHydratorDependencies {
                     await scenarioStore.upsert(metadata)
                 }
             },
-            log: log
+            log: log,
+            isPostPutPollingActive: isPostPutPollingActive
         )
     }
 }
@@ -30,8 +32,16 @@ extension TydomMessageHydrator {
     static func live(
         cache: TydomDeviceCacheStore = TydomDeviceCacheStore(),
         scenarioStore: TydomScenarioMetadataStore = TydomScenarioMetadataStore(),
+        isPostPutPollingActive: @escaping @Sendable (String) async -> Bool = { _ in false },
         log: @escaping @Sendable (String) -> Void = { _ in }
     ) -> TydomMessageHydrator {
-        TydomMessageHydrator(dependencies: .live(cache, scenarioStore: scenarioStore, log: log))
+        TydomMessageHydrator(
+            dependencies: .live(
+                cache,
+                scenarioStore: scenarioStore,
+                isPostPutPollingActive: isPostPutPollingActive,
+                log: log
+            )
+        )
     }
 }

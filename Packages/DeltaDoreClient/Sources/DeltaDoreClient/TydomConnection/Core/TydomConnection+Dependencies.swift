@@ -5,6 +5,7 @@ extension TydomConnection {
         var makeSession: @Sendable (_ allowInsecureTLS: Bool, _ timeout: TimeInterval, _ credential: URLCredential?) -> URLSession
         var randomBytes: @Sendable (_ count: Int) -> [UInt8]
         var now: @Sendable () -> Date
+        var sleep: @Sendable (_ nanoseconds: UInt64) async throws -> Void
         var fetchGatewayPassword: @Sendable (_ credentials: CloudCredentials, _ mac: String, _ session: URLSession) async throws -> String
         var invalidateSession: @Sendable (_ session: URLSession) -> Void
         var onDisconnect: @Sendable () async -> Void
@@ -13,6 +14,7 @@ extension TydomConnection {
             makeSession: @Sendable @escaping (_ allowInsecureTLS: Bool, _ timeout: TimeInterval, _ credential: URLCredential?) -> URLSession,
             randomBytes: @Sendable @escaping (_ count: Int) -> [UInt8],
             now: @Sendable @escaping () -> Date,
+            sleep: @Sendable @escaping (_ nanoseconds: UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
             fetchGatewayPassword: @Sendable @escaping (_ credentials: CloudCredentials, _ mac: String, _ session: URLSession) async throws -> String,
             invalidateSession: @Sendable @escaping (_ session: URLSession) -> Void = { $0.invalidateAndCancel() },
             onDisconnect: @Sendable @escaping () async -> Void = {}
@@ -20,6 +22,7 @@ extension TydomConnection {
             self.makeSession = makeSession
             self.randomBytes = randomBytes
             self.now = now
+            self.sleep = sleep
             self.fetchGatewayPassword = fetchGatewayPassword
             self.invalidateSession = invalidateSession
             self.onDisconnect = onDisconnect

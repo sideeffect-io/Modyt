@@ -61,14 +61,8 @@ struct DashboardDeviceCardView: View {
                 onFavoriteTapped: onFavoriteTapped
             )
 
-            if device.group != .shutter
-                && device.group != .light
-                && device.group != .thermo
-                && device.group != .boiler
-                && device.group != .smoke
-                && device.group != .weather
-                && device.group != .energy {
-                Text(device.group.title)
+            if let passiveLabel = passiveBodyLabel(for: device) {
+                Text(passiveLabel)
                     .font(.system(.caption, design: .rounded))
                     .foregroundStyle(.secondary)
             }
@@ -123,32 +117,67 @@ struct DashboardDeviceCardView: View {
 
     @ViewBuilder
     private func controlContent(for device: DashboardDeviceDescription) -> some View {
-        switch device.group {
-        case .shutter:
-            ShutterView(uniqueId: device.uniqueId, layout: .regular)
-        case .light:
-            LightView(uniqueId: device.uniqueId)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        case .thermo:
-            TemperatureView(uniqueId: device.uniqueId)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        case .boiler:
-            if isHeatPumpDevice(device) {
-                HeatPumpView(uniqueId: device.uniqueId)
-            } else {
-                ThermostatView(uniqueId: device.uniqueId)
+        if supportsActiveControls(for: device) {
+            switch device.group {
+            case .shutter:
+                if device.shutterUniqueIds.isEmpty {
+                    Text("Shutters unavailable")
+                        .font(.system(.caption, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                } else {
+                    ShutterView(
+                        shutterUniqueIds: device.shutterUniqueIds,
+                        layout: .regular
+                    )
+                }
+            case .light:
+                LightView(uniqueId: device.uniqueId)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            case .thermo:
+                TemperatureView(uniqueId: device.uniqueId)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            case .boiler:
+                if isHeatPumpDevice(device) {
+                    HeatPumpView(uniqueId: device.uniqueId)
+                } else {
+                    ThermostatView(uniqueId: device.uniqueId)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                }
+            case .weather:
+                SunlightView(uniqueId: device.uniqueId)
+            case .energy:
+                EnergyConsumptionView(uniqueId: device.uniqueId)
+            case .smoke:
+                SmokeView(uniqueId: device.uniqueId)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            default:
+                EmptyView()
             }
-        case .weather:
-            SunlightView(uniqueId: device.uniqueId)
-        case .energy:
-            EnergyConsumptionView(uniqueId: device.uniqueId)
-        case .smoke:
-            SmokeView(uniqueId: device.uniqueId)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        default:
+        } else {
             EmptyView()
         }
+    }
+
+    private func supportsActiveControls(for device: DashboardDeviceDescription) -> Bool {
+        if device.source == .group {
+            return device.usage == "light" || device.usage == "shutter"
+        }
+
+        switch device.group {
+        case .shutter, .light, .thermo, .boiler, .weather, .energy, .smoke:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func passiveBodyLabel(for device: DashboardDeviceDescription) -> String? {
+        guard !supportsActiveControls(for: device) else { return nil }
+        if device.source == .group {
+            return device.usage.capitalized
+        }
+        return device.group.title
     }
 
     private func smokeSymbolName() -> String {

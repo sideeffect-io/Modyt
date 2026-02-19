@@ -13,16 +13,16 @@ struct ShutterPill: View {
         let colors: [Color]
         if colorScheme == .dark {
             let top = isTarget
-                ? Color(red: 0.36, green: 0.37, blue: 0.4)
-                : Color(red: 0.3, green: 0.31, blue: 0.33)
+                ? Color(red: 0.56, green: 0.57, blue: 0.6)
+                : Color(red: 0.45, green: 0.46, blue: 0.49)
             let bottom = isTarget
-                ? Color(red: 0.28, green: 0.29, blue: 0.32)
-                : Color(red: 0.23, green: 0.24, blue: 0.26)
+                ? Color(red: 0.47, green: 0.48, blue: 0.51)
+                : Color(red: 0.37, green: 0.38, blue: 0.41)
             colors = [top, bottom]
         } else {
             colors = [
-                .black.opacity(isTarget ? 0.9 : 0.82),
-                .black.opacity(isTarget ? 0.7 : 0.64)
+                Color(red: 0.72, green: 0.73, blue: 0.75).opacity(isTarget ? 1.0 : 0.88),
+                Color(red: 0.62, green: 0.63, blue: 0.66).opacity(isTarget ? 1.0 : 0.88)
             ]
         }
         return LinearGradient(colors: colors, startPoint: .top, endPoint: .bottom)
@@ -44,6 +44,8 @@ struct ShutterPill: View {
             }
             .shadow(color: .black.opacity(isTarget ? 0.35 : 0.2), radius: 6, x: 0, y: 4)
             .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isTarget)
+            .animation(.easeInOut(duration: 0.24), value: isActual)
+            .animation(.easeInOut(duration: 0.24), value: isInFlight)
             .frame(minWidth: metrics.barWidth, maxWidth: .infinity, minHeight: metrics.expandedHeight, alignment: .bottom)
             .contentShape(.rect)
     }

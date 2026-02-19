@@ -43,9 +43,12 @@ struct DashboardStoreTests {
             DashboardDeviceDescription(uniqueId: "b", name: "B", usage: "light"),
             DashboardDeviceDescription(uniqueId: "c", name: "C", usage: "light")
         ])
-        await settleAsyncState()
+        let didReceiveFavorites = await waitUntil {
+            store.state.favoriteDevices.map(\.uniqueId) == ["a", "b", "c"]
+        }
         streamBox.finish()
 
+        #expect(didReceiveFavorites)
         #expect(store.state.favoriteDevices.map(\.uniqueId) == ["a", "b", "c"])
     }
 
@@ -66,8 +69,11 @@ struct DashboardStoreTests {
 
         store.send(.onAppear)
         store.send(.onAppear)
-        await settleAsyncState()
+        let observedOnce = await waitUntil {
+            observeCounter.value == 1
+        }
 
+        #expect(observedOnce)
         #expect(observeCounter.value == 1)
     }
 
@@ -92,8 +98,13 @@ struct DashboardStoreTests {
 
         store.send(.reorderFavorite("device-1", "device-2"))
         store.send(.refreshRequested)
-        await settleAsyncState()
+        let didDispatch = await waitUntil {
+            let entries = await recorder.values
+            return entries.contains("reorder:device-1->device-2")
+                && entries.contains("refresh")
+        }
 
+        #expect(didDispatch)
         let entries = await recorder.values
         #expect(entries.contains("reorder:device-1->device-2"))
         #expect(entries.contains("refresh"))
@@ -130,18 +141,27 @@ struct DashboardStoreTests {
         firstStream.yield([
             DashboardDeviceDescription(uniqueId: "first", name: "First", usage: "light")
         ])
-        await settleAsyncState(iterations: 12)
+        let didLoadFirst = await waitUntil {
+            store.state.favoriteDevices.map(\.uniqueId) == ["first"]
+        }
+        #expect(didLoadFirst)
         #expect(store.state.favoriteDevices.map(\.uniqueId) == ["first"])
 
         firstStream.finish()
-        await settleAsyncState(iterations: 16)
+        let firstFinished = await waitUntil {
+            await observeCounter.value >= 1
+        }
+        #expect(firstFinished)
 
         store.send(.onAppear)
         secondStream.yield([
             DashboardDeviceDescription(uniqueId: "second", name: "Second", usage: "light")
         ])
-        await settleAsyncState(iterations: 16)
+        let didLoadSecond = await waitUntil {
+            store.state.favoriteDevices.map(\.uniqueId) == ["second"]
+        }
 
+        #expect(didLoadSecond)
         #expect(await observeCounter.value == 2)
         #expect(store.state.favoriteDevices.map(\.uniqueId) == ["second"])
     }

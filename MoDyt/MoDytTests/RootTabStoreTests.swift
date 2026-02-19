@@ -4,7 +4,7 @@ import Testing
 @MainActor
 struct RootTabStoreTests {
     @Test
-    func onStartTriggersGatewayBootstrapOnly() async {
+    func onStartTriggersGatewayBootstrap() async {
         let bootstrapCounter = Counter()
         let appActiveRecorder = TestRecorder<Bool>()
 
@@ -12,6 +12,7 @@ struct RootTabStoreTests {
             dependencies: makeDependencies(
                 bootstrapGateway: {
                     await bootstrapCounter.increment()
+                    return .completed
                 },
                 setAppActive: { isActive in
                     await appActiveRecorder.record(isActive)
@@ -20,8 +21,11 @@ struct RootTabStoreTests {
         )
 
         store.send(.onStart)
-        await settleAsyncState()
 
+        let didStart = await waitUntil {
+            await bootstrapCounter.value == 1
+        }
+        #expect(didStart)
         #expect(await bootstrapCounter.value == 1)
         #expect(await appActiveRecorder.values.isEmpty)
         #expect(store.state.isForegroundReconnectInFlight == false)
@@ -35,14 +39,18 @@ struct RootTabStoreTests {
             dependencies: makeDependencies(
                 bootstrapGateway: {
                     await bootstrapCounter.increment()
+                    return .completed
                 }
             )
         )
 
         store.send(.onStart)
         store.send(.onStart)
-        await settleAsyncState(iterations: 16)
 
+        let didBootstrapOnce = await waitUntil {
+            await bootstrapCounter.value == 1
+        }
+        #expect(didBootstrapOnce)
         #expect(await bootstrapCounter.value == 1)
     }
 
@@ -51,42 +59,47 @@ struct RootTabStoreTests {
         let foregroundRecoveryCounter = Counter()
         let store = RootTabStore(
             dependencies: makeDependencies(
-                runForegroundRecovery: { report in
+                runForegroundRecovery: {
                     await foregroundRecoveryCounter.increment()
-                    report(.reconnecting)
-                    report(.reconnected)
+                    return .reconnected
                 }
             )
         )
 
         store.send(.setAppActive(false))
         store.send(.setAppActive(true))
-        await settleAsyncState(iterations: 16)
 
+        let didRecover = await waitUntil {
+            await foregroundRecoveryCounter.value == 1
+        }
+        #expect(didRecover)
         #expect(await foregroundRecoveryCounter.value == 1)
     }
 
     @Test
     func setAppActiveFalseToTrueWhenConnectionAliveSkipsRenewConnection() async {
-        let phaseRecorder = TestRecorder<RootTabForegroundRecoveryPhase>()
+        let foregroundRecoveryCounter = Counter()
         let appActiveRecorder = TestRecorder<Bool>()
         let store = RootTabStore(
             dependencies: makeDependencies(
                 setAppActive: { isActive in
                     await appActiveRecorder.record(isActive)
                 },
-                runForegroundRecovery: { report in
-                    await phaseRecorder.record(.alive)
-                    report(.alive)
+                runForegroundRecovery: {
+                    await foregroundRecoveryCounter.increment()
+                    return .alive
                 }
             )
         )
 
         store.send(.setAppActive(false))
         store.send(.setAppActive(true))
-        await settleAsyncState(iterations: 16)
 
-        #expect(await phaseRecorder.values == [.alive])
+        let didSetInactiveThenActive = await waitUntil {
+            await appActiveRecorder.values == [false, true]
+        }
+        #expect(didSetInactiveThenActive)
+        #expect(await foregroundRecoveryCounter.value == 1)
         #expect(await appActiveRecorder.values == [false, true])
         #expect(store.state.isForegroundReconnectInFlight == false)
     }
@@ -99,23 +112,34 @@ struct RootTabStoreTests {
             dependencies: makeDependencies(
                 bootstrapGateway: {
                     await bootstrapCounter.increment()
+                    return .completed
                 },
                 setAppActive: { isActive in
                     await appActiveRecorder.record(isActive)
                 },
-                runForegroundRecovery: { report in
-                    report(.reconnecting)
-                    report(.reconnected)
+                runForegroundRecovery: {
+                    .reconnected
                 }
             )
         )
 
         store.send(.onStart)
-        await settleAsyncState(iterations: 16)
+        let didStart = await waitUntil {
+            await bootstrapCounter.value == 1
+        }
+        #expect(didStart)
+
         store.send(.setAppActive(false))
         store.send(.setAppActive(true))
-        await settleAsyncState(iterations: 24)
 
+        let didRestart = await waitUntil {
+            let bootstrapCalls = await bootstrapCounter.value
+            let appActiveValues = await appActiveRecorder.values
+            return bootstrapCalls == 2
+                && appActiveValues == [false, true]
+        }
+
+        #expect(didRestart)
         #expect(await bootstrapCounter.value == 2)
         #expect(await appActiveRecorder.values == [false, true])
         #expect(store.state.isForegroundReconnectInFlight == false)
@@ -126,10 +150,7 @@ struct RootTabStoreTests {
         let disconnectCounter = Counter()
         let store = RootTabStore(
             dependencies: makeDependencies(
-                runForegroundRecovery: { report in
-                    report(.reconnecting)
-                    report(.failed)
-                },
+                runForegroundRecovery: { .failed },
                 requestDisconnect: {
                     await disconnectCounter.increment()
                 }
@@ -138,8 +159,11 @@ struct RootTabStoreTests {
 
         store.send(.setAppActive(false))
         store.send(.setAppActive(true))
-        await settleAsyncState(iterations: 16)
 
+        let didDisconnect = await waitUntil {
+            await disconnectCounter.value == 1 && store.state.didDisconnect
+        }
+        #expect(didDisconnect)
         #expect(await disconnectCounter.value == 1)
         #expect(store.state.isForegroundReconnectInFlight == false)
         #expect(store.state.didDisconnect)
@@ -148,16 +172,15 @@ struct RootTabStoreTests {
     @Test
     func renewCompletionIgnoredWhenStateWentInactive() async {
         let gate = ForegroundRecoveryGate()
-        let recorder = TestRecorder<Bool>()
+        let appActiveRecorder = TestRecorder<Bool>()
         let disconnectCounter = Counter()
         let store = RootTabStore(
             dependencies: makeDependencies(
                 setAppActive: { isActive in
-                    await recorder.record(isActive)
+                    await appActiveRecorder.record(isActive)
                 },
-                runForegroundRecovery: { report in
-                    report(.reconnecting)
-                    report(await gate.waitForNextPhase())
+                runForegroundRecovery: {
+                    await gate.waitForNextResult()
                 },
                 requestDisconnect: {
                     await disconnectCounter.increment()
@@ -167,28 +190,103 @@ struct RootTabStoreTests {
 
         store.send(.setAppActive(false))
         store.send(.setAppActive(true))
-        await settleAsyncState(iterations: 16)
-        #expect(store.state.isForegroundReconnectInFlight)
-        #expect(await gate.callCount == 1)
-        store.send(.setAppActive(false))
-        await settleAsyncState(iterations: 8)
-        #expect(store.state.isForegroundReconnectInFlight == false)
-        await gate.resume(.failed)
-        await settleAsyncState(iterations: 16)
 
+        let didEnterRecovery = await waitUntil {
+            let callCount = await gate.callCount
+            return callCount == 1 && store.state.isForegroundReconnectInFlight
+        }
+        #expect(didEnterRecovery)
+        #expect(await gate.callCount == 1)
+
+        store.send(.setAppActive(false))
+        let didClearRecoveryFlag = await waitUntil {
+            store.state.isForegroundReconnectInFlight == false
+        }
+        #expect(didClearRecoveryFlag)
+
+        await gate.resume(.failed)
+        let didKeepInactiveState = await waitUntil {
+            await appActiveRecorder.values == [false, false]
+        }
+        #expect(didKeepInactiveState)
         #expect(store.state.isAppActive == false)
         #expect(await disconnectCounter.value == 0)
-        #expect(await recorder.values == [false, false])
+        #expect(await appActiveRecorder.values == [false, false])
         #expect(store.state.isForegroundReconnectInFlight == false)
         #expect(store.state.didDisconnect == false)
     }
 
+    @Test
+    func initialLoadStaysBlockedUntilBootstrapReturnsCompleted() async {
+        let gate = BootstrapGate()
+        let store = RootTabStore(
+            dependencies: makeDependencies(
+                bootstrapGateway: {
+                    await gate.waitForNextResult()
+                }
+            )
+        )
+
+        store.send(.onStart)
+        let didStartBootstrap = await waitUntil {
+            await gate.callCount == 1
+        }
+        #expect(didStartBootstrap)
+        #expect(store.state.isInitialLoadBlocking == true)
+
+        await gate.resume(.completed)
+        let didUnblock = await waitUntil {
+            store.state.isInitialLoadBlocking == false
+        }
+        #expect(didUnblock)
+        #expect(store.state.initialLoad.errorMessage == nil)
+    }
+
+    @Test
+    func firstLaunchBootstrapFailureStaysBlockedAndRetryRestartsBootstrap() async {
+        let gate = BootstrapGate()
+        let store = RootTabStore(
+            dependencies: makeDependencies(
+                bootstrapGateway: {
+                    await gate.waitForNextResult()
+                }
+            )
+        )
+
+        store.send(.onStart)
+        let didRunFirstBootstrap = await waitUntil {
+            await gate.callCount == 1
+        }
+        #expect(didRunFirstBootstrap)
+
+        await gate.resume(.failed("network down"))
+        let didReportFailure = await waitUntil {
+            store.state.initialLoad.errorMessage == "network down"
+        }
+        #expect(didReportFailure)
+        #expect(store.state.isInitialLoadBlocking == true)
+        #expect(store.state.initialLoad.errorMessage == "network down")
+
+        store.send(.retryInitialLoad)
+        let didStartRetryBootstrap = await waitUntil {
+            await gate.callCount == 2
+        }
+        #expect(didStartRetryBootstrap)
+        #expect(store.state.initialLoad.errorMessage == nil)
+        #expect(store.state.isInitialLoadBlocking == true)
+
+        await gate.resume(.completed)
+        let didUnblock = await waitUntil {
+            store.state.isInitialLoadBlocking == false
+        }
+        #expect(didUnblock)
+        #expect(store.state.initialLoad.errorMessage == nil)
+    }
+
     private func makeDependencies(
-        bootstrapGateway: @escaping @Sendable () async -> Void = {},
+        bootstrapGateway: @escaping @Sendable () async -> RootTabBootstrapResult = { .completed },
         setAppActive: @escaping @Sendable (Bool) async -> Void = { _ in },
-        runForegroundRecovery: @escaping @Sendable (
-            @escaping @MainActor (RootTabForegroundRecoveryPhase) -> Void
-        ) async -> Void = { _ in },
+        runForegroundRecovery: @escaping @Sendable () async -> RootTabForegroundRecoveryResult = { .alive },
         requestDisconnect: @escaping @Sendable () async -> Void = {}
     ) -> RootTabStore.Dependencies {
         RootTabStore.Dependencies(
@@ -202,17 +300,34 @@ struct RootTabStoreTests {
 
 private actor ForegroundRecoveryGate {
     private(set) var callCount = 0
-    private var continuation: CheckedContinuation<RootTabForegroundRecoveryPhase, Never>?
+    private var continuation: CheckedContinuation<RootTabForegroundRecoveryResult, Never>?
 
-    func waitForNextPhase() async -> RootTabForegroundRecoveryPhase {
+    func waitForNextResult() async -> RootTabForegroundRecoveryResult {
         callCount += 1
         return await withCheckedContinuation { continuation in
             self.continuation = continuation
         }
     }
 
-    func resume(_ value: RootTabForegroundRecoveryPhase) {
-        continuation?.resume(returning: value)
+    func resume(_ result: RootTabForegroundRecoveryResult) {
+        continuation?.resume(returning: result)
+        continuation = nil
+    }
+}
+
+private actor BootstrapGate {
+    private(set) var callCount = 0
+    private var continuation: CheckedContinuation<RootTabBootstrapResult, Never>?
+
+    func waitForNextResult() async -> RootTabBootstrapResult {
+        callCount += 1
+        return await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func resume(_ result: RootTabBootstrapResult) {
+        continuation?.resume(returning: result)
         continuation = nil
     }
 }

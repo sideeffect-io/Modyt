@@ -5,13 +5,14 @@ struct ShutterView: View {
     @Environment(\.shutterStoreFactory) private var shutterStoreFactory
     @Environment(\.colorScheme) private var colorScheme
     
-    let uniqueId: String
+    let shutterUniqueIds: [String]
     let layout: ShutterControlLayout
     
     var body: some View {
-        WithStoreView(factory: { shutterStoreFactory.make(uniqueId) }) { store in
+        WithStoreView(factory: { shutterStoreFactory.make(shutterUniqueIds) }) { store in
             shutterContent(store: store)
         }
+        .id(shutterUniqueIds.joined(separator: "|"))
     }
     
     @ViewBuilder
@@ -39,16 +40,16 @@ struct ShutterView: View {
     }
     
     private func regularPills(metrics: ShutterMetrics, store: ShutterStore) -> some View {
-        HStack(alignment: .bottom, spacing: metrics.barSpacing) {
+        return HStack(alignment: .bottom, spacing: metrics.barSpacing) {
             ForEach(ShutterStep.allCases) { step in
                 Button {
-                    store.select(step)
+                    store.send(.setTarget(value: step))
                 } label: {
                     ShutterPill(
                         step: step,
-                        isTarget: step == store.effectiveTargetStep,
+                        isTarget: step == store.targetStep,
                         isActual: step == store.actualStep,
-                        isInFlight: store.isInFlight,
+                        isInFlight: store.isMoving,
                         metrics: metrics
                     )
                 }
@@ -69,16 +70,16 @@ struct ShutterView: View {
     }
     
     private func horizontalPills(metrics: ShutterMetrics, store: ShutterStore) -> some View {
-        HStack(alignment: .bottom, spacing: metrics.barSpacing) {
+        return HStack(alignment: .bottom, spacing: metrics.barSpacing) {
             ForEach(ShutterStep.allCases) { step in
                 Button {
-                    store.select(step)
+                    store.send(.setTarget(value: step))
                 } label: {
                     ShutterPill(
                         step: step,
-                        isTarget: step == store.effectiveTargetStep,
+                        isTarget: step == store.targetStep,
                         isActual: step == store.actualStep,
-                        isInFlight: store.isInFlight,
+                        isInFlight: store.isMoving,
                         metrics: metrics
                     )
                 }
@@ -130,7 +131,7 @@ struct ShutterView: View {
             return 14
         }
     }
-    
+
     @ViewBuilder
     private func iconView(for step: ShutterStep) -> some View {
         switch step {

@@ -3,26 +3,43 @@ import Foundation
 actor DashboardRepository {
     private let deviceRepository: DeviceRepository
     private let sceneRepository: SceneRepository
+    private let groupRepository: GroupRepository
 
     init(
         deviceRepository: DeviceRepository,
-        sceneRepository: SceneRepository
+        sceneRepository: SceneRepository,
+        groupRepository: GroupRepository
     ) {
         self.deviceRepository = deviceRepository
         self.sceneRepository = sceneRepository
+        self.groupRepository = groupRepository
     }
 
     func observeFavorites() -> AsyncStream<[DashboardDeviceDescription]> {
         AsyncStream { continuation in
             let snapshotStore = FavoritesSnapshotStore()
+            let emissionStore = FavoritesEmissionStore()
             let completionStore = MergeCompletionStore()
+
+            let initialTask = Task { [deviceRepository, sceneRepository, groupRepository] in
+                let deviceFavorites = await deviceRepository.favoriteDescriptionsSnapshot()
+                let sceneFavorites = await sceneRepository.favoriteDescriptionsSnapshot()
+                let groupFavorites = await groupRepository.favoriteDescriptionsSnapshot()
+                let merged = (deviceFavorites + sceneFavorites + groupFavorites)
+                    .sorted(by: areDashboardFavoritesOrderedAscending)
+                if await emissionStore.shouldEmit(merged) {
+                    continuation.yield(merged)
+                }
+            }
 
             let deviceTask = Task { [deviceRepository] in
                 let deviceSequence = await deviceRepository.observeFavoriteDescriptions()
                 for await devices in deviceSequence {
                     guard !Task.isCancelled else { return }
                     let merged = await snapshotStore.updateDevices(devices)
-                    continuation.yield(merged)
+                    if await emissionStore.shouldEmit(merged) {
+                        continuation.yield(merged)
+                    }
                 }
 
                 if await completionStore.markTaskFinished() {
@@ -35,7 +52,24 @@ actor DashboardRepository {
                 for await scenes in sceneSequence {
                     guard !Task.isCancelled else { return }
                     let merged = await snapshotStore.updateScenes(scenes)
-                    continuation.yield(merged)
+                    if await emissionStore.shouldEmit(merged) {
+                        continuation.yield(merged)
+                    }
+                }
+
+                if await completionStore.markTaskFinished() {
+                    continuation.finish()
+                }
+            }
+
+            let groupTask = Task { [groupRepository] in
+                let groupSequence = await groupRepository.observeFavoriteDescriptions()
+                for await groups in groupSequence {
+                    guard !Task.isCancelled else { return }
+                    let merged = await snapshotStore.updateGroups(groups)
+                    if await emissionStore.shouldEmit(merged) {
+                        continuation.yield(merged)
+                    }
                 }
 
                 if await completionStore.markTaskFinished() {
@@ -44,8 +78,10 @@ actor DashboardRepository {
             }
 
             continuation.onTermination = { _ in
+                initialTask.cancel()
                 deviceTask.cancel()
                 sceneTask.cancel()
+                groupTask.cancel()
             }
         }
     }
@@ -53,7 +89,8 @@ actor DashboardRepository {
     func reorderFavorite(from sourceId: String, to targetId: String) async {
         let deviceFavorites = await deviceRepository.favoriteDescriptionsSnapshot()
         let sceneFavorites = await sceneRepository.favoriteDescriptionsSnapshot()
-        var mergedFavorites = deviceFavorites + sceneFavorites
+        let groupFavorites = await groupRepository.favoriteDescriptionsSnapshot()
+        var mergedFavorites = deviceFavorites + sceneFavorites + groupFavorites
         mergedFavorites.sort(by: areDashboardFavoritesOrderedAscending)
 
         guard let sourceIndex = mergedFavorites.firstIndex(where: { $0.uniqueId == sourceId }),
@@ -67,6 +104,7 @@ actor DashboardRepository {
 
         var deviceOrders: [String: Int] = [:]
         var sceneOrders: [String: Int] = [:]
+        var groupOrders: [String: Int] = [:]
 
         for (order, favorite) in mergedFavorites.enumerated() {
             switch favorite.source {
@@ -74,17 +112,21 @@ actor DashboardRepository {
                 deviceOrders[favorite.uniqueId] = order
             case .scene:
                 sceneOrders[favorite.uniqueId] = order
+            case .group:
+                groupOrders[favorite.uniqueId] = order
             }
         }
 
         await deviceRepository.applyDashboardOrders(deviceOrders)
         await sceneRepository.applyDashboardOrders(sceneOrders)
+        await groupRepository.applyDashboardOrders(groupOrders)
     }
 }
 
 private actor FavoritesSnapshotStore {
     private var devices: [DashboardDeviceDescription] = []
     private var scenes: [DashboardDeviceDescription] = []
+    private var groups: [DashboardDeviceDescription] = []
 
     func updateDevices(_ values: [DashboardDeviceDescription]) -> [DashboardDeviceDescription] {
         devices = values
@@ -96,9 +138,26 @@ private actor FavoritesSnapshotStore {
         return mergedFavorites()
     }
 
+    func updateGroups(_ values: [DashboardDeviceDescription]) -> [DashboardDeviceDescription] {
+        groups = values
+        return mergedFavorites()
+    }
+
     private func mergedFavorites() -> [DashboardDeviceDescription] {
-        let merged = devices + scenes
+        let merged = devices + scenes + groups
         return merged.sorted(by: areDashboardFavoritesOrderedAscending)
+    }
+}
+
+private actor FavoritesEmissionStore {
+    private var lastSnapshot: [DashboardDeviceDescription]?
+
+    func shouldEmit(_ snapshot: [DashboardDeviceDescription]) -> Bool {
+        if lastSnapshot == snapshot {
+            return false
+        }
+        lastSnapshot = snapshot
+        return true
     }
 }
 
@@ -107,7 +166,7 @@ private actor MergeCompletionStore {
 
     func markTaskFinished() -> Bool {
         finishedTaskCount += 1
-        return finishedTaskCount == 2
+        return finishedTaskCount == 3
     }
 }
 
@@ -134,5 +193,7 @@ private func sourcePriority(_ source: DashboardFavoriteSource) -> Int {
         return 0
     case .scene:
         return 1
+    case .group:
+        return 2
     }
 }

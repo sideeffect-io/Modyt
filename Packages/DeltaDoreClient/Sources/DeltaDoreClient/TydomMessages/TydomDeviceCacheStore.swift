@@ -19,7 +19,13 @@ actor TydomDeviceCacheStore {
         var current = devices[entry.uniqueId] ?? TydomDeviceCacheEntry(uniqueId: entry.uniqueId)
         if let name = entry.name { current.name = name }
         if let usage = entry.usage { current.usage = usage }
-        if let metadata = entry.metadata { current.metadata = metadata }
+        if let metadata = entry.metadata {
+            var mergedMetadata = current.metadata ?? [:]
+            for (key, value) in metadata {
+                mergedMetadata[key] = value
+            }
+            current.metadata = mergedMetadata
+        }
         devices[entry.uniqueId] = current
     }
 }

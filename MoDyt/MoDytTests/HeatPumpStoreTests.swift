@@ -49,8 +49,14 @@ struct HeatPumpStoreTests {
         )
 
         store.setSetpoint(22.5)
-        await settleAsyncState()
+        let didDispatch = await waitUntil {
+            let entries = await recorder.values
+            return store.descriptor?.setpoint == 22.5
+                && entries.contains("optimistic:heatpump-2:22.5")
+                && entries.contains("command:heatpump-2:setpoint:22.5")
+        }
 
+        #expect(didDispatch)
         #expect(store.descriptor?.setpoint == 22.5)
         let entries = await recorder.values
         #expect(entries.contains("optimistic:heatpump-2:22.5"))
@@ -85,11 +91,17 @@ struct HeatPumpStoreTests {
         )
 
         store.incrementSetpoint()
-        await settleAsyncState()
+        let didClampAtMax = await waitUntil {
+            store.descriptor?.setpoint == 30.0
+        }
+        #expect(didClampAtMax)
         #expect(store.descriptor?.setpoint == 30.0)
 
         store.decrementSetpoint()
-        await settleAsyncState()
+        let didDecrement = await waitUntil {
+            store.descriptor?.setpoint == 29.5 && recorder.value == 2
+        }
+        #expect(didDecrement)
         #expect(store.descriptor?.setpoint == 29.5)
         #expect(recorder.value == 2)
     }
@@ -108,8 +120,11 @@ struct HeatPumpStoreTests {
         )
 
         streamBox.yield(makeHeatPumpDevice(uniqueId: "heatpump-4", setpoint: 23.0))
-        await settleAsyncState()
+        let didObserve = await waitUntil {
+            store.descriptor?.setpoint == 23.0
+        }
 
+        #expect(didObserve)
         #expect(store.descriptor?.setpoint == 23.0)
     }
 
@@ -129,11 +144,17 @@ struct HeatPumpStoreTests {
         )
 
         store.setSetpoint(22.0)
-        await settleAsyncState()
+        let didApplyOptimistic = await waitUntil {
+            store.descriptor?.setpoint == 22.0
+        }
+        #expect(didApplyOptimistic)
 
         streamBox.yield(makeHeatPumpDevice(uniqueId: "heatpump-5", setpoint: 20.0))
-        await settleAsyncState()
+        let remainedSuppressed = await waitUntil {
+            store.descriptor?.setpoint == 22.0
+        }
 
+        #expect(remainedSuppressed)
         #expect(store.descriptor?.setpoint == 22.0)
     }
 

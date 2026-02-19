@@ -13,8 +13,9 @@ struct AppEnvironment: Sendable {
     let client: DeltaDoreClient
     let repository: DeviceRepository
     let sceneRepository: SceneRepository
+    let groupRepository: GroupRepository
     let dashboardRepository: DashboardRepository
-    let shutterRepository: ShutterRepository
+    let newShutterRepository: ShutterRepository
     let requestRefreshAll: @Sendable () async -> Void
     let sendDeviceCommand: @Sendable (String, String, JSONValue) async -> Void
     let executeScene: @Sendable (String) async -> SceneExecutionResult
@@ -40,15 +41,22 @@ struct AppEnvironment: Sendable {
                 await sceneExecutionStatusStore.track(message)
             }
         )
-        let dashboardRepository = DashboardRepository(
-            deviceRepository: repository,
-            sceneRepository: sceneRepository
-        )
-        let shutterRepository = ShutterRepository(
+        let groupRepository = GroupRepository(
             databasePath: databaseURL.path,
             deviceRepository: repository,
             log: log
         )
+        let dashboardRepository = DashboardRepository(
+            deviceRepository: repository,
+            sceneRepository: sceneRepository,
+            groupRepository: groupRepository
+        )
+        let newShutterRepository = ShutterRepository(
+            databasePath: databaseURL.path,
+            deviceRepository: repository,
+            log: log
+        )
+        let commandTransactionIdGenerator = CommandTransactionIdGenerator(now: now)
 
         let requestRefreshAll: @Sendable () async -> Void = {
             do {
@@ -59,18 +67,75 @@ struct AppEnvironment: Sendable {
         }
 
         let sendDeviceCommand: @Sendable (String, String, JSONValue) async -> Void = { uniqueId, key, value in
+            if GroupRecord.isGroupUniqueId(uniqueId) {
+                let fanOut = await groupRepository.fanOutCommands(
+                    uniqueId: uniqueId,
+                    key: key,
+                    value: value
+                )
+
+                if fanOut.isEmpty {
+                    log("AppEnvironment group command skipped uniqueId=\(uniqueId) key=\(key) no-members")
+                    return
+                }
+
+                for command in fanOut {
+                    let transactionId = await commandTransactionIdGenerator.next()
+                    let commandValue = deviceCommandValue(from: command.value)
+                    let request = TydomCommand.putDevicesData(
+                        deviceId: String(command.deviceId),
+                        endpointId: String(command.endpointId),
+                        name: command.key,
+                        value: commandValue,
+                        transactionId: transactionId
+                    )
+                    let isShutterLikeCommand = key == "position" || key == "level"
+                    if isShutterLikeCommand {
+                        let memberUniqueId = "\(command.endpointId)_\(command.deviceId)"
+                        log(
+                            "ShutterTrace command group-send source=\(uniqueId) member=\(memberUniqueId) tx=\(transactionId) key=\(command.key) value=\(command.value.traceString)"
+                        )
+                    }
+
+                    do {
+                        try await client.send(text: request.request)
+                        if isShutterLikeCommand {
+                            log(
+                                "ShutterTrace command group-send-success source=\(uniqueId) member=\(command.endpointId)_\(command.deviceId) tx=\(transactionId)"
+                            )
+                        }
+                    } catch {
+                        log(
+                            "AppEnvironment group command failed uniqueId=\(uniqueId) member=\(command.endpointId)_\(command.deviceId) key=\(command.key) error=\(error)"
+                        )
+                    }
+                }
+                return
+            }
+
             guard let device = await repository.device(uniqueId: uniqueId) else { return }
 
             let commandValue = deviceCommandValue(from: value)
+            let transactionId = await commandTransactionIdGenerator.next()
             let command = TydomCommand.putDevicesData(
                 deviceId: String(device.deviceId),
                 endpointId: String(device.endpointId),
                 name: key,
-                value: commandValue
+                value: commandValue,
+                transactionId: transactionId
             )
+            let isShutterCommand = device.group == .shutter || key == "position" || key == "level"
+            if isShutterCommand {
+                log(
+                    "ShutterTrace command send uniqueId=\(uniqueId) deviceId=\(device.deviceId) endpointId=\(device.endpointId) tx=\(transactionId) key=\(key) value=\(value.traceString) usage=\(device.usage)"
+                )
+            }
 
             do {
                 try await client.send(text: command.request)
+                if isShutterCommand {
+                    log("ShutterTrace command send-success uniqueId=\(uniqueId) tx=\(transactionId)")
+                }
             } catch {
                 log("AppEnvironment command failed uniqueId=\(uniqueId) key=\(key) error=\(error)")
             }
@@ -111,7 +176,6 @@ struct AppEnvironment: Sendable {
 
         let requestDisconnect: @Sendable () async -> Void = {
             await client.disconnectCurrentConnection()
-            await shutterRepository.clearAll()
             await client.clearStoredData()
         }
 
@@ -119,8 +183,9 @@ struct AppEnvironment: Sendable {
             client: client,
             repository: repository,
             sceneRepository: sceneRepository,
+            groupRepository: groupRepository,
             dashboardRepository: dashboardRepository,
-            shutterRepository: shutterRepository,
+            newShutterRepository: newShutterRepository,
             requestRefreshAll: requestRefreshAll,
             sendDeviceCommand: sendDeviceCommand,
             executeScene: executeScene,
@@ -149,19 +214,16 @@ private actor SceneExecutionStatusStore {
     private let maxBufferedReplies = 32
 
     func track(_ message: TydomMessage) {
-        guard case .raw(let raw) = message else { return }
-        guard let transactionId = raw.transactionId else { return }
-        guard let uriOrigin = raw.uriOrigin else { return }
-        guard uriOrigin.hasPrefix("/scenarios/"), uriOrigin != "/scenarios/file" else { return }
-        guard let frame = raw.frame, case .response(let response) = frame else { return }
+        guard case .echo(let echo) = message else { return }
+        guard echo.uriOrigin.hasPrefix("/scenarios/"), echo.uriOrigin != "/scenarios/file" else { return }
 
-        let status: SceneExecutionGatewayStatus = if (200..<300).contains(response.status) {
-            .success(response.status)
+        let status: SceneExecutionGatewayStatus = if (200..<300).contains(echo.statusCode) {
+            .success(echo.statusCode)
         } else {
-            .failure(response.status)
+            .failure(echo.statusCode)
         }
 
-        resolve(transactionId: transactionId, status: status)
+        resolve(transactionId: echo.transactionId, status: status)
     }
 
     func awaitScenarioExecutionStatus(
@@ -221,6 +283,26 @@ private actor SceneExecutionStatusStore {
     }
 }
 
+private actor CommandTransactionIdGenerator {
+    private let now: @Sendable () -> Date
+    private var lastIssued: UInt64 = 0
+
+    init(now: @escaping @Sendable () -> Date) {
+        self.now = now
+    }
+
+    func next() -> String {
+        let milliseconds = UInt64(now().timeIntervalSince1970 * 1000)
+        let candidate = milliseconds * 1_000
+        if candidate <= lastIssued {
+            lastIssued += 1
+        } else {
+            lastIssued = candidate
+        }
+        return String(lastIssued)
+    }
+}
+
 private func deviceCommandValue(from value: JSONValue) -> TydomCommand.DeviceDataValue {
     switch value {
     case .bool(let flag):
@@ -231,6 +313,28 @@ private func deviceCommandValue(from value: JSONValue) -> TydomCommand.DeviceDat
         return .string(text)
     case .null, .object, .array:
         return .null
+    }
+}
+
+private extension JSONValue {
+    var traceString: String {
+        switch self {
+        case .string(let text):
+            return "\"\(text)\""
+        case .number(let number):
+            if number.rounded(.towardZero) == number {
+                return String(Int(number))
+            }
+            return String(number)
+        case .bool(let flag):
+            return flag ? "true" : "false"
+        case .null:
+            return "null"
+        case .object(let value):
+            return "object(keys:\(value.keys.sorted()))"
+        case .array(let value):
+            return "array(count:\(value.count))"
+        }
     }
 }
 

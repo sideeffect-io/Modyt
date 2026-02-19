@@ -36,8 +36,11 @@ struct TemperatureStoreTests {
         )
 
         streamBox.yield(makeThermoDevice(uniqueId: "thermo-2", value: 16.8))
-        await settleAsyncState()
+        let didObserve = await waitUntil {
+            store.descriptor?.value == 16.8
+        }
 
+        #expect(didObserve)
         #expect(store.descriptor?.value == 16.8)
     }
 
@@ -53,8 +56,11 @@ struct TemperatureStoreTests {
         )
 
         streamBox.yield(nil)
-        await settleAsyncState()
+        let didClear = await waitUntil {
+            store.descriptor == nil
+        }
 
+        #expect(didClear)
         #expect(store.descriptor == nil)
     }
 
@@ -131,8 +137,12 @@ struct ThermostatStoreTests {
                 setpoint: 21.0
             )
         )
-        await settleAsyncState()
+        let didObserve = await waitUntil {
+            store.descriptor?.temperature?.value == 20.8
+                && store.descriptor?.humidity?.value == 45
+        }
 
+        #expect(didObserve)
         #expect(store.descriptor?.temperature?.value == 20.8)
         #expect(store.descriptor?.humidity?.value == 45)
     }
@@ -154,8 +164,11 @@ struct ThermostatStoreTests {
         )
 
         streamBox.yield(nil)
-        await settleAsyncState()
+        let didClear = await waitUntil {
+            store.descriptor == nil
+        }
 
+        #expect(didClear)
         #expect(store.descriptor == nil)
     }
 
@@ -219,8 +232,11 @@ struct EnergyConsumptionStoreTests {
         )
 
         streamBox.yield(makeEnergyDevice(uniqueId: "energy-2", value: 88.7))
-        await settleAsyncState()
+        let didObserve = await waitUntil {
+            store.descriptor?.value == 88.7
+        }
 
+        #expect(didObserve)
         #expect(store.descriptor?.value == 88.7)
     }
 
@@ -236,8 +252,11 @@ struct EnergyConsumptionStoreTests {
         )
 
         streamBox.yield(nil)
-        await settleAsyncState()
+        let didClear = await waitUntil {
+            store.descriptor == nil
+        }
 
+        #expect(didClear)
         #expect(store.descriptor == nil)
     }
 

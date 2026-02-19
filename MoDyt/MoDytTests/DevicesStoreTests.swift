@@ -23,9 +23,14 @@ struct DevicesStoreTests {
                 TestSupport.makeDevice(uniqueId: "shutter-1", name: "Main Shutter", usage: "shutter", data: ["level": .number(0)])
             ]
         )
-        await settleAsyncState()
+        let didGroup = await waitUntil {
+            store.state.groupedDevices.count == 2
+                && store.state.groupedDevices.map(\.group) == [.shutter, .light]
+                && store.state.groupedDevices[1].devices.map(\.name) == ["Alpha Light", "Zulu Light"]
+        }
         streamBox.finish()
 
+        #expect(didGroup)
         #expect(store.state.groupedDevices.count == 2)
         #expect(store.state.groupedDevices.map(\.group) == [.shutter, .light])
         #expect(store.state.groupedDevices[1].devices.map(\.name) == ["Alpha Light", "Zulu Light"])
@@ -52,8 +57,13 @@ struct DevicesStoreTests {
 
         store.send(.toggleFavorite("device-1"))
         store.send(.refreshRequested)
-        await settleAsyncState()
+        let didDispatch = await waitUntil {
+            let entries = await recorder.values
+            return entries.contains("toggle:device-1")
+                && entries.contains("refresh")
+        }
 
+        #expect(didDispatch)
         let entries = await recorder.values
         #expect(entries.contains("toggle:device-1"))
         #expect(entries.contains("refresh"))
@@ -77,8 +87,11 @@ struct DevicesStoreTests {
 
         store.send(.onAppear)
         store.send(.onAppear)
-        await settleAsyncState()
+        let observedOnce = await waitUntil {
+            await observeCounter.value == 1
+        }
 
+        #expect(observedOnce)
         #expect(await observeCounter.value == 1)
     }
 
@@ -113,18 +126,27 @@ struct DevicesStoreTests {
         firstStream.yield([
             TestSupport.makeDevice(uniqueId: "light-1", name: "First", usage: "light", data: ["on": .bool(true)])
         ])
-        await settleAsyncState(iterations: 12)
+        let didLoadFirst = await waitUntil {
+            store.state.groupedDevices.flatMap(\.devices).map(\.name) == ["First"]
+        }
+        #expect(didLoadFirst)
         #expect(store.state.groupedDevices.flatMap(\.devices).map(\.name) == ["First"])
 
         firstStream.finish()
-        await settleAsyncState(iterations: 16)
+        let firstFinished = await waitUntil {
+            await observeCounter.value >= 1
+        }
+        #expect(firstFinished)
 
         store.send(.onAppear)
         secondStream.yield([
             TestSupport.makeDevice(uniqueId: "light-2", name: "Second", usage: "light", data: ["on": .bool(false)])
         ])
-        await settleAsyncState(iterations: 16)
+        let didLoadSecond = await waitUntil {
+            store.state.groupedDevices.flatMap(\.devices).map(\.name) == ["Second"]
+        }
 
+        #expect(didLoadSecond)
         #expect(await observeCounter.value == 2)
         #expect(store.state.groupedDevices.flatMap(\.devices).map(\.name) == ["Second"])
     }

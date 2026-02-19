@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import DeltaDoreClient
 
 enum ShutterStep: Int, CaseIterable, Identifiable, Sendable {
     case open = 100
@@ -20,24 +19,96 @@ enum ShutterStep: Int, CaseIterable, Identifiable, Sendable {
         case .closed: return "Closed"
         }
     }
+}
 
-    func mappedValue(in range: ClosedRange<Double>) -> Double {
-        guard range.upperBound > range.lowerBound else { return range.lowerBound }
-        let normalized = Double(rawValue) / 100
-        return range.lowerBound + (range.upperBound - range.lowerBound) * normalized
+struct Positions: Sendable, Equatable {
+    let actual: ShutterStep
+    let target: ShutterStep
+}
+
+enum ShuttersState: Sendable, Equatable {
+    case idle(Positions)
+    case moving(Positions)
+
+    var positions: Positions {
+        switch self {
+        case .idle(let positions), .moving(let positions):
+            return positions
+        }
     }
+}
 
-    static func nearestStep(for value: Double, in range: ClosedRange<Double>) -> ShutterStep {
-        guard range.upperBound > range.lowerBound else { return .closed }
-        let normalized = ((value - range.lowerBound) / (range.upperBound - range.lowerBound)) * 100
-        let clamped = min(max(normalized, 0), 100)
-        let snapped = (clamped / 25).rounded() * 25
-        switch Int(snapped) {
-        case 100: return .open
-        case 75: return .threeQuarter
-        case 50: return .half
-        case 25: return .quarter
-        default: return .closed
+enum ShuttersEvent: Sendable, Equatable {
+    case receivedValuesFromStream(actual: ShutterStep, target: ShutterStep)
+    case setTarget(value: ShutterStep)
+    case failedToComplete
+}
+
+enum ShuttersEffect: Sendable, Equatable {
+    case startCompletionTimer
+    case cancelCompletionTimer
+    case handleTarget(value: ShutterStep)
+}
+
+enum ShuttersReducer {
+    static func reduce(
+        state: ShuttersState,
+        event: ShuttersEvent
+    ) -> (ShuttersState, [ShuttersEffect]) {
+        switch (state, event) {
+        case let (.idle, .receivedValuesFromStream(actual, target)):
+            let nextPositions = Positions(actual: actual, target: target)
+            if actual == target {
+                return (.idle(nextPositions), [])
+            }
+            return (.moving(nextPositions), [.startCompletionTimer])
+
+        case let (.idle(current), .setTarget(value)):
+            guard value != current.target else {
+                return (state, [])
+            }
+            return (
+                .moving(Positions(actual: current.actual, target: value)),
+                [.handleTarget(value: value), .startCompletionTimer]
+            )
+
+        case (.idle, .failedToComplete):
+            return (state, [])
+
+        case let (.moving(current), .receivedValuesFromStream(actual, target)):
+            if actual == target {
+                return (
+                    .idle(Positions(actual: actual, target: target)),
+                    [.cancelCompletionTimer]
+                )
+            }
+
+            if target == current.target {
+                return (
+                    .moving(Positions(actual: actual, target: current.target)),
+                    []
+                )
+            }
+
+            return (
+                .moving(Positions(actual: actual, target: target)),
+                [.cancelCompletionTimer, .startCompletionTimer]
+            )
+
+        case let (.moving(current), .setTarget(value)):
+            guard value != current.target else {
+                return (state, [])
+            }
+            return (
+                .moving(Positions(actual: current.actual, target: value)),
+                [.handleTarget(value: value), .cancelCompletionTimer, .startCompletionTimer]
+            )
+
+        case let (.moving(current), .failedToComplete):
+            return (
+                .idle(Positions(actual: current.actual, target: current.target)),
+                []
+            )
         }
     }
 }
@@ -46,143 +117,187 @@ enum ShutterStep: Int, CaseIterable, Identifiable, Sendable {
 @MainActor
 final class ShutterStore {
     struct Dependencies {
-        let observeShutter: @Sendable (String) async -> any AsyncSequence<ShutterSnapshot?, Never> & Sendable
-        let setTarget: @Sendable (String, ShutterStep, ShutterStep) async -> Void
-        let sendCommand: @Sendable (String, String, JSONValue) async -> Void
+        let observePositions: @Sendable ([String]) async -> any AsyncSequence<(actual: ShutterStep, target: ShutterStep), Never> & Sendable
+        let sendTargetPosition: @Sendable ([String], ShutterStep) async -> Void
+        let startCompletionTimer: @Sendable (@escaping @MainActor @Sendable () -> Void) -> Task<Void, Never>
+        let log: @Sendable (String) -> Void
 
         init(
-            observeShutter: @escaping @Sendable (String) async -> any AsyncSequence<ShutterSnapshot?, Never> & Sendable,
-            setTarget: @escaping @Sendable (String, ShutterStep, ShutterStep) async -> Void,
-            sendCommand: @escaping @Sendable (String, String, JSONValue) async -> Void
+            observePositions: @escaping @Sendable ([String]) async -> any AsyncSequence<(actual: ShutterStep, target: ShutterStep), Never> & Sendable,
+            sendTargetPosition: @escaping @Sendable ([String], ShutterStep) async -> Void,
+            startCompletionTimer: @escaping @Sendable (@escaping @MainActor @Sendable () -> Void) -> Task<Void, Never>,
+            log: @escaping @Sendable (String) -> Void = { _ in }
         ) {
-            self.observeShutter = observeShutter
-            self.setTarget = setTarget
-            self.sendCommand = sendCommand
+            self.observePositions = observePositions
+            self.sendTargetPosition = sendTargetPosition
+            self.startCompletionTimer = startCompletionTimer
+            self.log = log
         }
     }
 
-    private(set) var descriptor: DeviceControlDescriptor
-    private(set) var actualStep: ShutterStep
-    private(set) var targetStep: ShutterStep?
+    private(set) var state: ShuttersState
 
-    private var hasSnapshot = false
-    private let uniqueId: String
+    private let shutterUniqueIds: [String]
+    private let dependencies: Dependencies
     private let observationTask = TaskHandle()
+    private var completionTimerTask: Task<Void, Never>?
     private let worker: Worker
+    private var streamUpdateSequence: UInt64 = 0
 
-    var effectiveTargetStep: ShutterStep {
-        targetStep ?? actualStep
+    var actualStep: ShutterStep {
+        state.positions.actual
     }
 
-    var isInFlight: Bool {
-        guard let targetStep else { return false }
-        return actualStep != targetStep
+    var targetStep: ShutterStep {
+        state.positions.target
+    }
+
+    var isMoving: Bool {
+        if case .moving = state {
+            return true
+        }
+        return false
     }
 
     init(
-        uniqueId: String,
-        initialDevice: DeviceRecord? = nil,
+        shutterUniqueIds: [String],
         dependencies: Dependencies
     ) {
-        let resolvedDescriptor = initialDevice
-            .flatMap(Self.sliderDescriptor(for:))
-            ?? DeviceControlDescriptor(
-                kind: .slider,
-                key: "level",
-                isOn: false,
-                value: 0,
-                range: 0...100
-            )
-
-        self.uniqueId = uniqueId
-        self.descriptor = resolvedDescriptor
-        self.actualStep = ShutterStep.nearestStep(for: resolvedDescriptor.value, in: resolvedDescriptor.range)
-        self.targetStep = nil
+        self.state = .idle(Positions(actual: .open, target: .open))
+        self.shutterUniqueIds = shutterUniqueIds
+        self.dependencies = dependencies
         self.worker = Worker(
-            uniqueId: uniqueId,
-            observeShutter: dependencies.observeShutter,
-            setTarget: dependencies.setTarget,
-            sendCommand: dependencies.sendCommand
+            observePositions: dependencies.observePositions,
+            sendTargetPosition: dependencies.sendTargetPosition
         )
+        let ids = shutterUniqueIds.joined(separator: ",")
+        dependencies.log("ShutterTrace store init ids=\(ids)")
 
-        observationTask.task = Task { [weak self, worker] in
-            await worker.observe { [weak self] snapshot in
-                await self?.apply(snapshot: snapshot)
+        observationTask.task = Task { [weak self, worker, shutterUniqueIds] in
+            await worker.observePositions(shutterUniqueIds: shutterUniqueIds) { [weak self] actual, target in
+                self?.send(.receivedValuesFromStream(actual: actual, target: target))
             }
         }
     }
 
-    func sync(device: DeviceRecord) {
-        guard let descriptor = Self.sliderDescriptor(for: device) else { return }
-        self.descriptor = descriptor
-        if !hasSnapshot {
-            actualStep = ShutterStep.nearestStep(for: descriptor.value, in: descriptor.range)
+    deinit {
+        let ids = shutterUniqueIds.joined(separator: ",")
+        dependencies.log("ShutterTrace store deinit ids=\(ids)")
+    }
+
+    func send(_ event: ShuttersEvent) {
+        let traceToken = nextTraceToken(for: event)
+        let previousState = state
+        let (nextState, effects) = ShuttersReducer.reduce(state: state, event: event)
+        state = nextState
+        let ids = shutterUniqueIds.joined(separator: ",")
+        let effectSummary = effects.map(Self.describeEffect).joined(separator: ",")
+        dependencies.log(
+            "ShutterStore transition ids=\(ids) trace=\(traceToken) event=\(Self.describeEvent(event)) actual=\(previousState.positions.actual.rawValue)->\(nextState.positions.actual.rawValue) target=\(previousState.positions.target.rawValue)->\(nextState.positions.target.rawValue) moving=\(Self.isMoving(previousState))->\(Self.isMoving(nextState)) effects=[\(effectSummary)]"
+        )
+        handle(effects)
+    }
+
+    private func nextTraceToken(for event: ShuttersEvent) -> String {
+        switch event {
+        case .receivedValuesFromStream:
+            streamUpdateSequence += 1
+            return "stream-\(streamUpdateSequence)"
+        case .setTarget:
+            return "target-\(streamUpdateSequence)"
+        case .failedToComplete:
+            return "timer-\(streamUpdateSequence)"
         }
     }
 
-    func select(_ step: ShutterStep) {
-        guard step != actualStep else { return }
-
-        targetStep = step
-
-        let originStep = actualStep
-        let descriptorKey = descriptor.key
-        let targetValue = step.mappedValue(in: descriptor.range)
-
-        Task { [worker] in
-            await worker.select(step, originStep: originStep, descriptorKey: descriptorKey, targetValue: targetValue)
+    private func handle(_ effects: [ShuttersEffect]) {
+        for effect in effects {
+            handle(effect)
         }
     }
 
-    private static func sliderDescriptor(for device: DeviceRecord) -> DeviceControlDescriptor? {
-        guard device.group == .shutter else { return nil }
-        guard let descriptor = device.primaryControlDescriptor(), descriptor.kind == .slider else { return nil }
-        return descriptor
-    }
+    private func handle(_ effect: ShuttersEffect) {
+        switch effect {
+        case .startCompletionTimer:
+            completionTimerTask?.cancel()
+            completionTimerTask = dependencies.startCompletionTimer { [weak self] in
+                guard let self else { return }
+                self.completionTimerTask = nil
+                self.send(.failedToComplete)
+            }
 
-    private func apply(snapshot: ShutterSnapshot) {
-        hasSnapshot = true
-        descriptor = snapshot.descriptor
-        actualStep = snapshot.actualStep
-        targetStep = snapshot.targetStep
+        case .cancelCompletionTimer:
+            completionTimerTask?.cancel()
+            completionTimerTask = nil
+
+        case .handleTarget(let value):
+            let shutterUniqueIds = self.shutterUniqueIds
+            Task { [worker] in
+                await worker.sendTargetPosition(
+                    shutterUniqueIds: shutterUniqueIds,
+                    target: value
+                )
+            }
+        }
     }
 
     private actor Worker {
-        private let uniqueId: String
-        private let observeShutter: @Sendable (String) async -> any AsyncSequence<ShutterSnapshot?, Never> & Sendable
-        private let setTarget: @Sendable (String, ShutterStep, ShutterStep) async -> Void
-        private let sendCommand: @Sendable (String, String, JSONValue) async -> Void
+        private let observePositionsSource: @Sendable ([String]) async -> any AsyncSequence<(actual: ShutterStep, target: ShutterStep), Never> & Sendable
+        private let sendTargetPositionAction: @Sendable ([String], ShutterStep) async -> Void
 
         init(
-            uniqueId: String,
-            observeShutter: @escaping @Sendable (String) async -> any AsyncSequence<ShutterSnapshot?, Never> & Sendable,
-            setTarget: @escaping @Sendable (String, ShutterStep, ShutterStep) async -> Void,
-            sendCommand: @escaping @Sendable (String, String, JSONValue) async -> Void
+            observePositions: @escaping @Sendable ([String]) async -> any AsyncSequence<(actual: ShutterStep, target: ShutterStep), Never> & Sendable,
+            sendTargetPosition: @escaping @Sendable ([String], ShutterStep) async -> Void
         ) {
-            self.uniqueId = uniqueId
-            self.observeShutter = observeShutter
-            self.setTarget = setTarget
-            self.sendCommand = sendCommand
+            self.observePositionsSource = observePositions
+            self.sendTargetPositionAction = sendTargetPosition
         }
 
-        func observe(onSnapshot: @escaping @Sendable (ShutterSnapshot) async -> Void) async {
-            let stream = await observeShutter(uniqueId)
-            for await snapshot in stream {
+        func observePositions(
+            shutterUniqueIds: [String],
+            onUpdate: @escaping @MainActor @Sendable (ShutterStep, ShutterStep) -> Void
+        ) async {
+            let stream = await observePositionsSource(shutterUniqueIds)
+            for await values in stream {
                 guard !Task.isCancelled else { return }
-                guard let snapshot else { continue }
-                guard snapshot.uniqueId == uniqueId else { continue }
-                await onSnapshot(snapshot)
+                await onUpdate(values.actual, values.target)
             }
         }
 
-        func select(
-            _ step: ShutterStep,
-            originStep: ShutterStep,
-            descriptorKey: String,
-            targetValue: Double
+        func sendTargetPosition(
+            shutterUniqueIds: [String],
+            target: ShutterStep
         ) async {
-            await setTarget(uniqueId, step, originStep)
-            await sendCommand(uniqueId, descriptorKey, .number(targetValue))
+            await sendTargetPositionAction(shutterUniqueIds, target)
+        }
+    }
+
+    private static func isMoving(_ state: ShuttersState) -> Bool {
+        if case .moving = state {
+            return true
+        }
+        return false
+    }
+
+    private static func describeEvent(_ event: ShuttersEvent) -> String {
+        switch event {
+        case .receivedValuesFromStream(let actual, let target):
+            return "receivedValuesFromStream(actual:\(actual.rawValue),target:\(target.rawValue))"
+        case .setTarget(let value):
+            return "setTarget(value:\(value.rawValue))"
+        case .failedToComplete:
+            return "failedToComplete"
+        }
+    }
+
+    private static func describeEffect(_ effect: ShuttersEffect) -> String {
+        switch effect {
+        case .startCompletionTimer:
+            return "startCompletionTimer"
+        case .cancelCompletionTimer:
+            return "cancelCompletionTimer"
+        case .handleTarget(let value):
+            return "handleTarget(value:\(value.rawValue))"
         }
     }
 }

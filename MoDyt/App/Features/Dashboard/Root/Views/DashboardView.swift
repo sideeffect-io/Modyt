@@ -1,5 +1,4 @@
 import SwiftUI
-import DeltaDoreClient
 import UniformTypeIdentifiers
 
 struct DashboardView: View {
@@ -51,7 +50,7 @@ struct DashboardView: View {
                 ContentUnavailableView(
                     "No Favorites Yet",
                     systemImage: "star",
-                    description: Text("Mark devices as favorites in the Devices tab.")
+                    description: Text("Mark devices, scenes, or groups as favorites to pin them here.")
                 )
                 .padding(.vertical, 24)
             } else {

@@ -38,11 +38,17 @@ enum TestSupport {
         let databasePath = temporaryDatabasePath()
         let repository = DeviceRepository(databasePath: databasePath, log: { _ in })
         let sceneRepository = SceneRepository(databasePath: databasePath, log: { _ in })
+        let groupRepository = GroupRepository(
+            databasePath: databasePath,
+            deviceRepository: repository,
+            log: { _ in }
+        )
         let dashboardRepository = DashboardRepository(
             deviceRepository: repository,
-            sceneRepository: sceneRepository
+            sceneRepository: sceneRepository,
+            groupRepository: groupRepository
         )
-        let shutterRepository = ShutterRepository(
+        let newShutterRepository = ShutterRepository(
             databasePath: databasePath,
             deviceRepository: repository,
             log: { _ in }
@@ -51,8 +57,9 @@ enum TestSupport {
             client: client,
             repository: repository,
             sceneRepository: sceneRepository,
+            groupRepository: groupRepository,
             dashboardRepository: dashboardRepository,
-            shutterRepository: shutterRepository,
+            newShutterRepository: newShutterRepository,
             requestRefreshAll: {},
             sendDeviceCommand: { _, _, _ in },
             executeScene: { _ in .invalidSceneIdentifier },

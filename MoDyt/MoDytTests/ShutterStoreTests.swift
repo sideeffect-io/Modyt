@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import DeltaDoreClient
 @testable import MoDyt
@@ -5,283 +6,318 @@ import DeltaDoreClient
 @MainActor
 struct ShutterStoreTests {
     @Test
-    func snapshotUIEquivalenceIgnoresDescriptorValueNoise() {
-        let baseline = ShutterSnapshot(
-            uniqueId: "shutter-1",
-            descriptor: DeviceControlDescriptor(kind: .slider, key: "level", isOn: true, value: 100, range: 0...100),
-            actualStep: .open,
-            targetStep: nil
-        )
-        let noisy = ShutterSnapshot(
-            uniqueId: "shutter-1",
-            descriptor: DeviceControlDescriptor(kind: .slider, key: "level", isOn: true, value: 98, range: 0...100),
-            actualStep: .open,
-            targetStep: nil
+    func reducer_idleReceivedEqualTransitionsToIdleWithoutEffects() {
+        let state = ShuttersState.idle(Positions(actual: .open, target: .quarter))
+
+        let (next, effects) = ShuttersReducer.reduce(
+            state: state,
+            event: .receivedValuesFromStream(actual: .half, target: .half)
         )
 
-        #expect(ShutterSnapshot.areEquivalentForUI(baseline, noisy))
+        #expect(next == .idle(Positions(actual: .half, target: .half)))
+        #expect(effects.isEmpty)
     }
 
     @Test
-    func snapshotUIEquivalenceDetectsTargetChange() {
-        let baseline = ShutterSnapshot(
-            uniqueId: "shutter-1",
-            descriptor: DeviceControlDescriptor(kind: .slider, key: "level", isOn: true, value: 100, range: 0...100),
-            actualStep: .open,
-            targetStep: nil
-        )
-        let withTarget = ShutterSnapshot(
-            uniqueId: "shutter-1",
-            descriptor: DeviceControlDescriptor(kind: .slider, key: "level", isOn: true, value: 100, range: 0...100),
-            actualStep: .open,
-            targetStep: .half
+    func reducer_idleReceivedDifferentTransitionsToMovingAndStartsTimer() {
+        let state = ShuttersState.idle(Positions(actual: .open, target: .open))
+
+        let (next, effects) = ShuttersReducer.reduce(
+            state: state,
+            event: .receivedValuesFromStream(actual: .quarter, target: .half)
         )
 
-        #expect(!ShutterSnapshot.areEquivalentForUI(baseline, withTarget))
+        #expect(next == .moving(Positions(actual: .quarter, target: .half)))
+        #expect(effects == [.startCompletionTimer])
     }
 
     @Test
-    func selectEmitsMappedNumericCommandAndSetsTarget() async {
-        let setTargetRecorder = TestRecorder<(String, ShutterStep, ShutterStep)>()
-        let commandRecorder = TestRecorder<(String, String, JSONValue)>()
+    func reducer_idleSetTargetTransitionsToMovingWithOrderedEffects() {
+        let state = ShuttersState.idle(Positions(actual: .open, target: .open))
 
+        let (next, effects) = ShuttersReducer.reduce(
+            state: state,
+            event: .setTarget(value: .half)
+        )
+
+        #expect(next == .moving(Positions(actual: .open, target: .half)))
+        #expect(effects == [.handleTarget(value: .half), .startCompletionTimer])
+    }
+
+    @Test
+    func reducer_movingReceivedEqualTransitionsToIdleAndCancelsTimer() {
+        let state = ShuttersState.moving(Positions(actual: .quarter, target: .half))
+
+        let (next, effects) = ShuttersReducer.reduce(
+            state: state,
+            event: .receivedValuesFromStream(actual: .half, target: .half)
+        )
+
+        #expect(next == .idle(Positions(actual: .half, target: .half)))
+        #expect(effects == [.cancelCompletionTimer])
+    }
+
+    @Test
+    func reducer_movingFailedToCompleteTransitionsToIdleWithoutEffects() {
+        let state = ShuttersState.moving(Positions(actual: .quarter, target: .half))
+
+        let (next, effects) = ShuttersReducer.reduce(
+            state: state,
+            event: .failedToComplete
+        )
+
+        #expect(next == .idle(Positions(actual: .quarter, target: .half)))
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func reducer_movingReceivedDifferentWithSameTargetUpdatesActualWithoutEffects() {
+        let state = ShuttersState.moving(Positions(actual: .open, target: .half))
+
+        let (next, effects) = ShuttersReducer.reduce(
+            state: state,
+            event: .receivedValuesFromStream(actual: .quarter, target: .half)
+        )
+
+        #expect(next == .moving(Positions(actual: .quarter, target: .half)))
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func reducer_movingReceivedDifferentWithNewTargetRestartsTimer() {
+        let state = ShuttersState.moving(Positions(actual: .open, target: .half))
+
+        let (next, effects) = ShuttersReducer.reduce(
+            state: state,
+            event: .receivedValuesFromStream(actual: .quarter, target: .threeQuarter)
+        )
+
+        #expect(next == .moving(Positions(actual: .quarter, target: .threeQuarter)))
+        #expect(effects == [.cancelCompletionTimer, .startCompletionTimer])
+    }
+
+    @Test
+    func reducer_movingSetTargetTransitionsWithOrderedEffects() {
+        let state = ShuttersState.moving(Positions(actual: .quarter, target: .half))
+
+        let (next, effects) = ShuttersReducer.reduce(
+            state: state,
+            event: .setTarget(value: .closed)
+        )
+
+        #expect(next == .moving(Positions(actual: .quarter, target: .closed)))
+        #expect(effects == [.handleTarget(value: .closed), .cancelCompletionTimer, .startCompletionTimer])
+    }
+
+    @Test
+    func observePositionsStreamDrivesReceivedValuesEvent() async {
+        let streamBox = BufferedStreamBox<(actual: ShutterStep, target: ShutterStep)>()
         let store = ShutterStore(
-            uniqueId: "shutter-1",
-            initialDevice: makeShutterDevice(uniqueId: "shutter-1", value: 0),
+            shutterUniqueIds: ["shutter-1"],
             dependencies: .init(
-                observeShutter: { _ in
-                    AsyncStream { continuation in
-                        continuation.finish()
-                    }
-                },
-                setTarget: { uniqueId, targetStep, originStep in
-                    await setTargetRecorder.record((uniqueId, targetStep, originStep))
-                },
-                sendCommand: { uniqueId, key, value in
-                    await commandRecorder.record((uniqueId, key, value))
-                }
+                observePositions: { _ in streamBox.stream },
+                sendTargetPosition: { _, _ in },
+                startCompletionTimer: { _ in Task { } }
             )
         )
 
-        store.select(.half)
-        await settleAsyncState()
+        streamBox.yield((actual: .quarter, target: .half))
+        let didMove = await waitUntil {
+            store.state == .moving(Positions(actual: .quarter, target: .half))
+        }
 
-        #expect(store.effectiveTargetStep == .half)
-        #expect(store.isInFlight)
-        let targetUpdates = await setTargetRecorder.values
-        #expect(targetUpdates.count == 1)
-        #expect(targetUpdates[0].0 == "shutter-1")
-        #expect(targetUpdates[0].1 == .half)
-        #expect(targetUpdates[0].2 == .closed)
-
-        let commands = await commandRecorder.values
-        #expect(commands.count == 1)
-        #expect(commands[0].0 == "shutter-1")
-        #expect(commands[0].1 == "level")
-        #expect(commands[0].2.numberValue == 50)
-    }
-
-    @Test
-    func selectingCurrentStepDoesNotEmitCommand() async {
-        let setTargetRecorder = TestRecorder<(String, ShutterStep, ShutterStep)>()
-        let commandRecorder = TestRecorder<(String, String, JSONValue)>()
-        let store = ShutterStore(
-            uniqueId: "shutter-1",
-            initialDevice: makeShutterDevice(uniqueId: "shutter-1", value: 75),
-            dependencies: .init(
-                observeShutter: { _ in
-                    AsyncStream { continuation in
-                        continuation.finish()
-                    }
-                },
-                setTarget: { uniqueId, targetStep, originStep in
-                    await setTargetRecorder.record((uniqueId, targetStep, originStep))
-                },
-                sendCommand: { uniqueId, key, value in
-                    await commandRecorder.record((uniqueId, key, value))
-                }
-            )
-        )
-
-        store.select(.threeQuarter)
-        await settleAsyncState()
-
-        #expect(store.actualStep == .threeQuarter)
-        #expect(!store.isInFlight)
-        #expect((await setTargetRecorder.values).isEmpty)
-        #expect((await commandRecorder.values).isEmpty)
-    }
-
-    @Test
-    func observesSnapshotAndUpdatesStateForMatchingUniqueId() async {
-        let streamBox = BufferedStreamBox<ShutterSnapshot?>()
-        let descriptor = DeviceControlDescriptor(
-            kind: .slider,
-            key: "level",
-            isOn: true,
-            value: 25,
-            range: 0...100
-        )
-
-        let store = ShutterStore(
-            uniqueId: "shutter-1",
-            initialDevice: makeShutterDevice(uniqueId: "shutter-1", value: 0),
-            dependencies: .init(
-                observeShutter: { _ in streamBox.stream },
-                setTarget: { _, _, _ in },
-                sendCommand: { _, _, _ in }
-            )
-        )
-
-        streamBox.yield(
-            ShutterSnapshot(
-                uniqueId: "shutter-1",
-                descriptor: descriptor,
-                actualStep: .quarter,
-                targetStep: .half
-            )
-        )
-        await settleAsyncState()
-
-        #expect(store.descriptor == descriptor)
+        #expect(didMove)
         #expect(store.actualStep == .quarter)
-        #expect(store.effectiveTargetStep == .half)
-        #expect(store.isInFlight)
+        #expect(store.targetStep == .half)
+        #expect(store.isMoving)
     }
 
     @Test
-    func ignoresSnapshotsWithDifferentUniqueId() async {
-        let streamBox = BufferedStreamBox<ShutterSnapshot?>()
-        let baseline = makeShutterDevice(uniqueId: "shutter-1", value: 50)
+    func setTargetCallsSendTargetPositionWithExactIdsAndStep() async throws {
+        let recorder = TestRecorder<([String], ShutterStep)>()
+
         let store = ShutterStore(
-            uniqueId: "shutter-1",
-            initialDevice: baseline,
+            shutterUniqueIds: ["id-1", "id-2"],
             dependencies: .init(
-                observeShutter: { _ in streamBox.stream },
-                setTarget: { _, _, _ in },
-                sendCommand: { _, _, _ in }
+                observePositions: { _ in
+                    AsyncStream { continuation in
+                        continuation.finish()
+                    }
+                },
+                sendTargetPosition: { ids, step in
+                    await recorder.record((ids, step))
+                },
+                startCompletionTimer: { _ in Task { } }
             )
         )
 
-        let initialActual = store.actualStep
-        let otherDescriptor = DeviceControlDescriptor(
+        store.send(.setTarget(value: .threeQuarter))
+
+        let didRecord = await waitUntil {
+            await recorder.values.count == 1
+        }
+
+        #expect(didRecord)
+        let entries = await recorder.values
+        #expect(entries.count == 1)
+        let first = try #require(entries.first)
+        #expect(first.0 == ["id-1", "id-2"])
+        #expect(first.1 == .threeQuarter)
+    }
+
+    @Test
+    func movingToIdleFromStreamCancelsCompletionTimer() async {
+        let streamBox = BufferedStreamBox<(actual: ShutterStep, target: ShutterStep)>()
+        let timer = CompletionTimerHarness()
+
+        let store = ShutterStore(
+            shutterUniqueIds: ["id-1"],
+            dependencies: .init(
+                observePositions: { _ in streamBox.stream },
+                sendTargetPosition: { _, _ in },
+                startCompletionTimer: timer.start
+            )
+        )
+
+        store.send(.setTarget(value: .closed))
+        let didStartMoving = await waitUntil {
+            store.state == .moving(Positions(actual: .open, target: .closed))
+                && timer.startCount == 1
+        }
+        #expect(didStartMoving)
+        #expect(store.state == .moving(Positions(actual: .open, target: .closed)))
+        #expect(timer.startCount == 1)
+
+        streamBox.yield((actual: .closed, target: .closed))
+        let becameIdle = await waitUntil {
+            store.state == .idle(Positions(actual: .closed, target: .closed))
+        }
+        let didCancelTimer = await waitUntil {
+            timer.cancelCount == 1
+        }
+
+        #expect(becameIdle)
+        #expect(didCancelTimer)
+        #expect(timer.cancelCount == 1)
+    }
+
+    @Test
+    func completionTimerCallbackSendsFailedToCompleteEvent() async {
+        let timer = CompletionTimerHarness()
+
+        let store = ShutterStore(
+            shutterUniqueIds: ["id-1"],
+            dependencies: .init(
+                observePositions: { _ in
+                    AsyncStream { continuation in
+                        continuation.finish()
+                    }
+                },
+                sendTargetPosition: { _, _ in },
+                startCompletionTimer: timer.start
+            )
+        )
+
+        store.send(.setTarget(value: .half))
+        let didStartMoving = await waitUntil {
+            store.state == .moving(Positions(actual: .open, target: .half))
+        }
+        #expect(didStartMoving)
+        #expect(store.state == .moving(Positions(actual: .open, target: .half)))
+
+        timer.triggerLatest()
+
+        let becameIdleAfterFailure = await waitUntil {
+            store.state == .idle(Positions(actual: .open, target: .half))
+        }
+
+        #expect(becameIdleAfterFailure)
+    }
+
+    @Test
+    func mappedCommandUsesDescriptorKeyAndRange() throws {
+        let positionDescriptor = DeviceControlDescriptor(
+            kind: .slider,
+            key: "position",
+            isOn: true,
+            value: 1,
+            range: 0...1
+        )
+        let positionCommand = ShutterStoreFactory.mappedCommand(
+            target: .quarter,
+            descriptor: positionDescriptor
+        )
+        #expect(positionCommand.key == "position")
+        let positionValue = try #require(positionCommand.value.numberValue)
+        #expect(abs(positionValue - 0.25) < 0.0001)
+
+        let levelDescriptor = DeviceControlDescriptor(
             kind: .slider,
             key: "level",
             isOn: true,
             value: 100,
             range: 0...100
         )
-
-        streamBox.yield(
-            ShutterSnapshot(
-                uniqueId: "other",
-                descriptor: otherDescriptor,
-                actualStep: .open,
-                targetStep: .open
-            )
+        let levelCommand = ShutterStoreFactory.mappedCommand(
+            target: .quarter,
+            descriptor: levelDescriptor
         )
-        await settleAsyncState()
+        #expect(levelCommand.key == "level")
+        let levelValue = try #require(levelCommand.value.numberValue)
+        #expect(abs(levelValue - 25) < 0.0001)
+    }
+}
 
-        #expect(store.actualStep == initialActual)
-        #expect(store.descriptor.key == "level")
+private final class CompletionTimerHarness: @unchecked Sendable {
+    private let lock = NSLock()
+    private var rawStartCount = 0
+    private var rawCancelCount = 0
+    private var callbacks: [@MainActor @Sendable () -> Void] = []
+
+    var startCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return rawStartCount
     }
 
-    @Test
-    func syncUpdatesActualBeforeSnapshotButKeepsSnapshotStateAfterward() async {
-        let streamBox = BufferedStreamBox<ShutterSnapshot?>()
-        let store = ShutterStore(
-            uniqueId: "shutter-1",
-            initialDevice: makeShutterDevice(uniqueId: "shutter-1", value: 0),
-            dependencies: .init(
-                observeShutter: { _ in streamBox.stream },
-                setTarget: { _, _, _ in },
-                sendCommand: { _, _, _ in }
-            )
-        )
-
-        store.sync(device: makeShutterDevice(uniqueId: "shutter-1", value: 75))
-        #expect(store.actualStep == .threeQuarter)
-
-        streamBox.yield(
-            ShutterSnapshot(
-                uniqueId: "shutter-1",
-                descriptor: DeviceControlDescriptor(kind: .slider, key: "level", isOn: true, value: 25, range: 0...100),
-                actualStep: .quarter,
-                targetStep: .half
-            )
-        )
-        await settleAsyncState()
-
-        store.sync(device: makeShutterDevice(uniqueId: "shutter-1", value: 100))
-        #expect(store.actualStep == .quarter)
-        #expect(store.effectiveTargetStep == .half)
+    var cancelCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return rawCancelCount
     }
 
-    @Test
-    func initWithoutInitialDeviceUsesFallbackDescriptor() {
-        let store = ShutterStore(
-            uniqueId: "shutter-1",
-            initialDevice: nil,
-            dependencies: .init(
-                observeShutter: { _ in
-                    AsyncStream { continuation in
-                        continuation.finish()
+    func start(_ callback: @escaping @MainActor @Sendable () -> Void) -> Task<Void, Never> {
+        lock.lock()
+        rawStartCount += 1
+        callbacks.append(callback)
+        lock.unlock()
+
+        return Task { [weak self] in
+            while true {
+                do {
+                    try await Task.sleep(for: .seconds(3600))
+                } catch {
+                    if Task.isCancelled {
+                        self?.incrementCancelCount()
                     }
-                },
-                setTarget: { _, _, _ in },
-                sendCommand: { _, _, _ in }
-            )
-        )
-
-        #expect(store.descriptor.kind == .slider)
-        #expect(store.descriptor.key == "level")
-        #expect(store.descriptor.range == 0...100)
-        #expect(store.actualStep == .closed)
-        #expect(store.effectiveTargetStep == .closed)
+                    return
+                }
+            }
+        }
     }
 
-    @Test
-    func duplicateSnapshotIsFilteredBeforeReachingStore() async {
-        let streamBox = BufferedStreamBox<ShutterSnapshot?>()
-        let store = ShutterStore(
-            uniqueId: "shutter-1",
-            initialDevice: makeShutterDevice(uniqueId: "shutter-1", value: 100),
-            dependencies: .init(
-                observeShutter: { _ in streamBox.stream.removeDuplicates(by: ShutterSnapshot.areEquivalentForUI) },
-                setTarget: { _, _, _ in },
-                sendCommand: { _, _, _ in }
-            )
-        )
-
-        let baseline = ShutterSnapshot(
-            uniqueId: "shutter-1",
-            descriptor: DeviceControlDescriptor(kind: .slider, key: "level", isOn: true, value: 100, range: 0...100),
-            actualStep: .open,
-            targetStep: nil
-        )
-
-        streamBox.yield(baseline)
-        await settleAsyncState()
-
-        store.select(.half)
-        #expect(store.effectiveTargetStep == .half)
-        #expect(store.isInFlight)
-
-        // Simulates an unrelated repository emission that repeats the same pre-command snapshot.
-        streamBox.yield(baseline)
-        await settleAsyncState()
-
-        #expect(store.effectiveTargetStep == .half)
-        #expect(store.isInFlight)
+    func triggerLatest() {
+        lock.lock()
+        let callback = callbacks.last
+        lock.unlock()
+        Task { @MainActor in
+            callback?()
+        }
     }
 
-    private func makeShutterDevice(uniqueId: String, value: Double) -> DeviceRecord {
-        TestSupport.makeDevice(
-            uniqueId: uniqueId,
-            name: "Main Shutter",
-            usage: "shutter",
-            data: ["level": .number(value)],
-            metadata: ["level": .object(["min": .number(0), "max": .number(100)])]
-        )
+    private func incrementCancelCount() {
+        lock.lock()
+        rawCancelCount += 1
+        lock.unlock()
     }
 }

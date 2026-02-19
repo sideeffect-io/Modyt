@@ -89,8 +89,16 @@ struct AuthenticationStoreTests {
         }
 
         store.send(.onAppear)
-        await settleAsyncState(iterations: 16)
+        let didConnect = await waitUntil {
+            let inspectCalls = await inspectCounter.value
+            let connectCalls = await connectCounter.value
+            return inspectCalls == 1
+                && connectCalls == 1
+                && didEmitAuthenticated
+                && store.state.phase == .connecting
+        }
 
+        #expect(didConnect)
         #expect(await inspectCounter.value == 1)
         #expect(await connectCounter.value == 1)
         #expect(didEmitAuthenticated)
@@ -113,8 +121,14 @@ struct AuthenticationStoreTests {
         )
 
         store.send(.onAppear)
-        await settleAsyncState(iterations: 16)
+        let didTransitionToError = await waitUntil {
+            if case .error = store.state.phase {
+                return true
+            }
+            return false
+        }
 
+        #expect(didTransitionToError)
         guard case .error(let message) = store.state.phase else {
             #expect(Bool(false), "Expected error phase")
             return
@@ -148,19 +162,35 @@ struct AuthenticationStoreTests {
         }
 
         store.send(.onAppear)
-        await settleAsyncState()
+        let didEnterLogin = await waitUntil {
+            if case .login = store.state.phase {
+                return true
+            }
+            return false
+        }
+        #expect(didEnterLogin)
 
         store.send(.loginEmailChanged("user@example.com"))
         store.send(.loginPasswordChanged("secret"))
         store.send(.loadSitesTapped)
-        await settleAsyncState(iterations: 16)
+        let didLoadSites = await waitUntil {
+            let entries = await listSitesRecorder.values
+            return entries == ["user@example.com|secret"]
+        }
 
+        #expect(didLoadSites)
         #expect(await listSitesRecorder.values == ["user@example.com|secret"])
 
         store.send(.siteSelected(0))
         store.send(.connectTapped)
-        await settleAsyncState(iterations: 16)
+        let didConnect = await waitUntil {
+            let entries = await connectRecorder.values
+            return entries == ["user@example.com|secret|0"]
+                && didEmitAuthenticated
+                && store.state.phase == .connecting
+        }
 
+        #expect(didConnect)
         #expect(await connectRecorder.values == ["user@example.com|secret|0"])
         #expect(didEmitAuthenticated)
         #expect(store.state.phase == .connecting)
@@ -182,13 +212,25 @@ struct AuthenticationStoreTests {
         )
 
         store.send(.onAppear)
-        await settleAsyncState()
+        let didEnterLogin = await waitUntil {
+            if case .login = store.state.phase {
+                return true
+            }
+            return false
+        }
+        #expect(didEnterLogin)
 
         store.send(.loginEmailChanged("user@example.com"))
         store.send(.loginPasswordChanged("secret"))
         store.send(.siteSelected(0))
         store.send(.connectTapped)
-        await settleAsyncState(iterations: 16)
+        let didFailConnection = await waitUntil {
+            if case .login(let login) = store.state.phase {
+                return !login.isConnecting && login.errorMessage != nil
+            }
+            return false
+        }
+        #expect(didFailConnection)
 
         guard case .login(let login) = store.state.phase else {
             #expect(Bool(false), "Expected login phase")
@@ -215,12 +257,24 @@ struct AuthenticationStoreTests {
         )
 
         store.send(.onAppear)
-        await settleAsyncState()
+        let didEnterLogin = await waitUntil {
+            if case .login = store.state.phase {
+                return true
+            }
+            return false
+        }
+        #expect(didEnterLogin)
 
         store.send(.loginEmailChanged("user@example.com"))
         store.send(.loginPasswordChanged("secret"))
         store.send(.loadSitesTapped)
-        await settleAsyncState(iterations: 16)
+        let didFailListSites = await waitUntil {
+            if case .login(let login) = store.state.phase {
+                return !login.isLoadingSites && login.errorMessage != nil
+            }
+            return false
+        }
+        #expect(didFailListSites)
 
         guard case .login(let login) = store.state.phase else {
             #expect(Bool(false), "Expected login phase")

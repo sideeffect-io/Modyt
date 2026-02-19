@@ -31,6 +31,12 @@ private func messageToJSONValue(_ message: TydomMessage) -> JSONValue {
             "transactionId": jsonOptionalString(transactionId),
             "payload": .array(scenarios.map(scenarioToJSONValue))
         ])
+    case .groupMetadata(let groups, let transactionId):
+        return .object([
+            "type": .string("groupMetadata"),
+            "transactionId": jsonOptionalString(transactionId),
+            "payload": .array(groups.map(groupMetadataToJSONValue))
+        ])
     case .groups(let groups, let transactionId):
         return .object([
             "type": .string("groups"),
@@ -49,6 +55,8 @@ private func messageToJSONValue(_ message: TydomMessage) -> JSONValue {
             "transactionId": jsonOptionalString(transactionId),
             "payload": .array(areas.map(areaToJSONValue))
         ])
+    case .echo(let echo):
+        return echoMessageToJSONValue(echo)
     case .raw(let raw):
         return rawMessageToJSONValue(raw)
     }
@@ -83,8 +91,36 @@ private func scenarioToJSONValue(_ scenario: TydomScenario) -> JSONValue {
     ])
 }
 
-private func groupToJSONValue(_ group: TydomGroup) -> JSONValue {
+private func groupMetadataToJSONValue(_ group: TydomGroupMetadata) -> JSONValue {
     return .object([
+        "id": .number(Double(group.id)),
+        "name": .string(group.name),
+        "usage": .string(group.usage),
+        "picto": jsonOptionalString(group.picto),
+        "isGroupUser": .bool(group.isGroupUser),
+        "isGroupAll": .bool(group.isGroupAll),
+        "payload": .object(group.payload)
+    ])
+}
+
+private func groupToJSONValue(_ group: TydomGroup) -> JSONValue {
+    let devices = group.devices.map { device in
+        JSONValue.object([
+            "id": .number(Double(device.id)),
+            "endpoints": .array(device.endpoints.map { endpoint in
+                .object(["id": .number(Double(endpoint.id))])
+            })
+        ])
+    }
+    let areas = group.areas.map { area in
+        JSONValue.object([
+            "id": .number(Double(area.id))
+        ])
+    }
+    return .object([
+        "id": .number(Double(group.id)),
+        "devices": .array(devices),
+        "areas": .array(areas),
         "payload": .object(group.payload)
     ])
 }
@@ -99,6 +135,17 @@ private func areaToJSONValue(_ area: TydomArea) -> JSONValue {
     return .object([
         "id": area.id.map { .number(Double($0)) } ?? .null,
         "payload": .object(area.payload)
+    ])
+}
+
+private func echoMessageToJSONValue(_ echo: TydomEchoMessage) -> JSONValue {
+    return .object([
+        "type": .string("echo"),
+        "uriOrigin": .string(echo.uriOrigin),
+        "transactionId": .string(echo.transactionId),
+        "statusCode": .number(Double(echo.statusCode)),
+        "reason": jsonOptionalString(echo.reason),
+        "headers": jsonObject(from: echo.headers)
     ])
 }
 

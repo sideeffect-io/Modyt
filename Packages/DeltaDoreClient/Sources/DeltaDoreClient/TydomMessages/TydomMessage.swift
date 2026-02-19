@@ -4,10 +4,34 @@ public enum TydomMessage: Sendable, Equatable {
     case gatewayInfo(TydomGatewayInfo, transactionId: String?)
     case devices([TydomDevice], transactionId: String?)
     case scenarios([TydomScenario], transactionId: String?)
+    case groupMetadata([TydomGroupMetadata], transactionId: String?)
     case groups([TydomGroup], transactionId: String?)
     case moments([TydomMoment], transactionId: String?)
     case areas([TydomArea], transactionId: String?)
+    case echo(TydomEchoMessage)
     case raw(TydomRawMessage)
+}
+
+public struct TydomEchoMessage: Sendable, Equatable {
+    public let uriOrigin: String
+    public let transactionId: String
+    public let statusCode: Int
+    public let reason: String?
+    public let headers: [String: String]
+
+    public init(
+        uriOrigin: String,
+        transactionId: String,
+        statusCode: Int,
+        reason: String?,
+        headers: [String: String]
+    ) {
+        self.uriOrigin = uriOrigin
+        self.transactionId = transactionId
+        self.statusCode = statusCode
+        self.reason = reason
+        self.headers = headers
+    }
 }
 
 public struct TydomRawMessage: Sendable, Equatable {
@@ -65,10 +89,75 @@ public struct TydomScenario: Sendable, Equatable {
     }
 }
 
-public struct TydomGroup: Sendable, Equatable {
+public struct TydomGroupMetadata: Sendable, Equatable {
+    public let id: Int
+    public let name: String
+    public let usage: String
+    public let picto: String?
+    public let isGroupUser: Bool
+    public let isGroupAll: Bool
     public let payload: [String: JSONValue]
 
-    public init(payload: [String: JSONValue]) {
+    public init(
+        id: Int,
+        name: String,
+        usage: String,
+        picto: String?,
+        isGroupUser: Bool,
+        isGroupAll: Bool,
+        payload: [String: JSONValue]
+    ) {
+        self.id = id
+        self.name = name
+        self.usage = usage
+        self.picto = picto
+        self.isGroupUser = isGroupUser
+        self.isGroupAll = isGroupAll
+        self.payload = payload
+    }
+}
+
+public struct TydomGroup: Sendable, Equatable {
+    public struct DeviceMember: Sendable, Equatable {
+        public struct EndpointMember: Sendable, Equatable {
+            public let id: Int
+
+            public init(id: Int) {
+                self.id = id
+            }
+        }
+
+        public let id: Int
+        public let endpoints: [EndpointMember]
+
+        public init(id: Int, endpoints: [EndpointMember]) {
+            self.id = id
+            self.endpoints = endpoints
+        }
+    }
+
+    public struct AreaMember: Sendable, Equatable {
+        public let id: Int
+
+        public init(id: Int) {
+            self.id = id
+        }
+    }
+
+    public let id: Int
+    public let devices: [DeviceMember]
+    public let areas: [AreaMember]
+    public let payload: [String: JSONValue]
+
+    public init(
+        id: Int,
+        devices: [DeviceMember],
+        areas: [AreaMember],
+        payload: [String: JSONValue]
+    ) {
+        self.id = id
+        self.devices = devices
+        self.areas = areas
         self.payload = payload
     }
 }

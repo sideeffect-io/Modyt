@@ -13,6 +13,8 @@ func parseArguments(_ args: [String]) -> StartupAction {
     var localIP: String?
     var localMAC: String?
     var clearStorage: Bool = false
+    var rawWebSocketOutput: Bool = false
+    var disablePingPolling: Bool = false
 
     var index = 0
     while index < args.count {
@@ -56,6 +58,10 @@ func parseArguments(_ args: [String]) -> StartupAction {
             localMAC = args[index]
         case "--clear-storage":
             clearStorage = true
+        case "--raw-websocket":
+            rawWebSocketOutput = true
+        case "--no-ping-polling":
+            disablePingPolling = true
         default:
             return .failure("Unknown argument: \(arg)")
         }
@@ -80,14 +86,18 @@ func parseArguments(_ args: [String]) -> StartupAction {
             localMAC: localMAC,
             listSites: listSites,
             dumpSitesResponse: dumpSitesResponse,
-            clearStorage: clearStorage
+            clearStorage: clearStorage,
+            rawWebSocketOutput: rawWebSocketOutput,
+            disablePingPolling: disablePingPolling
         )
         return .runAuto(options)
     case "stored":
         let options = StoredOptions(
             forceLocal: forceLocal,
             forceRemote: forceRemote,
-            clearStorage: clearStorage
+            clearStorage: clearStorage,
+            rawWebSocketOutput: rawWebSocketOutput,
+            disablePingPolling: disablePingPolling
         )
         return .runStored(options)
     case "new":
@@ -100,7 +110,9 @@ func parseArguments(_ args: [String]) -> StartupAction {
             localMAC: localMAC,
             listSites: listSites,
             dumpSitesResponse: dumpSitesResponse,
-            clearStorage: clearStorage
+            clearStorage: clearStorage,
+            rawWebSocketOutput: rawWebSocketOutput,
+            disablePingPolling: disablePingPolling
         )
         return .runNew(options)
     default:
@@ -129,6 +141,8 @@ func helpText() -> String {
     lines.append("  --local-ip <ip>              Local gateway IP (required with --force-local for new flow)")
     lines.append("  --local-mac <mac>            Local gateway MAC (required with --force-local for new flow)")
     lines.append("  --clear-storage              Clear stored data before running")
+    lines.append("  --raw-websocket              Print raw websocket frames (plain text, unfiltered)")
+    lines.append("  --no-ping-polling            Disable keep-alive /ping polling and initial ping")
     lines.append("  --help                       Show this help")
     lines.append("")
     lines.append("Once connected, type `help` to list interactive commands.")

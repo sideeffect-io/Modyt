@@ -19,12 +19,16 @@ struct AutoOptions: Sendable {
     let listSites: Bool
     let dumpSitesResponse: Bool
     let clearStorage: Bool
+    let rawWebSocketOutput: Bool
+    let disablePingPolling: Bool
 }
 
 struct StoredOptions: Sendable {
     let forceLocal: Bool
     let forceRemote: Bool
     let clearStorage: Bool
+    let rawWebSocketOutput: Bool
+    let disablePingPolling: Bool
 }
 
 struct NewOptions: Sendable {
@@ -37,6 +41,8 @@ struct NewOptions: Sendable {
     let listSites: Bool
     let dumpSitesResponse: Bool
     let clearStorage: Bool
+    let rawWebSocketOutput: Bool
+    let disablePingPolling: Bool
 }
 
 enum CLICommand: Sendable {

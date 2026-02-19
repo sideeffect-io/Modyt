@@ -34,7 +34,7 @@ final class LockedCounter: @unchecked Sendable {
     }
 }
 
-final class BufferedStreamBox<Element> {
+final class BufferedStreamBox<Element: Sendable>: @unchecked Sendable {
     private var pending: [Element] = []
     private var continuation: AsyncStream<Element>.Continuation?
 
@@ -61,8 +61,24 @@ final class BufferedStreamBox<Element> {
     }
 }
 
-func settleAsyncState(iterations: Int = 8) async {
-    for _ in 0..<iterations {
-        await Task.yield()
+func waitUntil(
+    timeout: Duration = .seconds(2),
+    pollingInterval: Duration = .milliseconds(10),
+    condition: @escaping @MainActor () async -> Bool
+) async -> Bool {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: timeout)
+
+    while clock.now < deadline {
+        if await condition() {
+            return true
+        }
+        do {
+            try await Task.sleep(for: pollingInterval)
+        } catch {
+            return false
+        }
     }
+
+    return await condition()
 }

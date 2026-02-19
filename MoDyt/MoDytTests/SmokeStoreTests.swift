@@ -44,8 +44,11 @@ struct SmokeStoreTests {
         )
 
         streamBox.yield(makeSmokeDevice(uniqueId: "smoke-2", smokeDetected: true, batteryDefect: false))
-        await settleAsyncState()
+        let didUpdate = await waitUntil {
+            store.descriptor?.smokeDetected == true && store.descriptor?.health == .notOk
+        }
 
+        #expect(didUpdate)
         #expect(store.descriptor?.smokeDetected == true)
         #expect(store.descriptor?.health == .notOk)
     }
@@ -66,8 +69,11 @@ struct SmokeStoreTests {
         )
 
         streamBox.yield(nil)
-        await settleAsyncState()
+        let didClear = await waitUntil {
+            store.descriptor == nil
+        }
 
+        #expect(didClear)
         #expect(store.descriptor == nil)
     }
 

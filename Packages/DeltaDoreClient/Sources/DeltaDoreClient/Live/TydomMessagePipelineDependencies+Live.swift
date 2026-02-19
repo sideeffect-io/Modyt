@@ -25,7 +25,12 @@ extension TydomMessagePipelineDependencies {
         connection: TydomConnection,
         log: @escaping @Sendable (String) -> Void = { _ in }
     ) -> TydomMessagePipelineDependencies {
-        let hydrator: TydomMessageHydrator = .live(log: log)
+        let hydrator: TydomMessageHydrator = .live(
+            isPostPutPollingActive: { [weak connection] uniqueId in
+                await connection?.isPostPutPollingActive(uniqueId: uniqueId) ?? false
+            },
+            log: log
+        )
 
         let pollScheduler = TydomMessagePollScheduler { [weak connection] command in
             guard let connection else { return }

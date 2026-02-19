@@ -18,7 +18,10 @@ struct SettingsStoreTests {
         store.send(.disconnectTapped)
         #expect(store.state.isDisconnecting)
 
-        await settleAsyncState()
+        let didDisconnect = await waitUntil {
+            !store.state.isDisconnecting && store.state.didDisconnect
+        }
+        #expect(didDisconnect)
         #expect(!store.state.isDisconnecting)
         #expect(store.state.didDisconnect)
         #expect(store.state.errorMessage == nil)
@@ -36,8 +39,11 @@ struct SettingsStoreTests {
         )
 
         store.send(.disconnectTapped)
-        await settleAsyncState()
+        let didFail = await waitUntil {
+            !store.state.isDisconnecting && !store.state.didDisconnect && store.state.errorMessage != nil
+        }
 
+        #expect(didFail)
         #expect(!store.state.isDisconnecting)
         #expect(!store.state.didDisconnect)
         #expect(store.state.errorMessage != nil)
@@ -57,8 +63,14 @@ struct SettingsStoreTests {
 
         store.send(.disconnectTapped)
         store.send(.disconnectTapped)
-        await settleAsyncState()
+        let didFinishOnce = await waitUntil {
+            let entries = await recorder.values
+            return !store.state.isDisconnecting
+                && store.state.didDisconnect
+                && entries == ["disconnect"]
+        }
 
+        #expect(didFinishOnce)
         #expect(!store.state.isDisconnecting)
         #expect(store.state.didDisconnect)
         #expect(await recorder.values == ["disconnect"])

@@ -85,8 +85,11 @@ struct SunlightStoreTests {
         )
 
         streamBox.yield(makeSunlightDevice(uniqueId: "sun-11", value: 740))
-        await settleAsyncState()
+        let didObserve = await waitUntil {
+            store.descriptor?.value == 740
+        }
 
+        #expect(didObserve)
         #expect(store.descriptor?.value == 740)
     }
 
@@ -102,8 +105,11 @@ struct SunlightStoreTests {
         )
 
         streamBox.yield(nil)
-        await settleAsyncState()
+        let didClear = await waitUntil {
+            store.descriptor == nil
+        }
 
+        #expect(didClear)
         #expect(store.descriptor == nil)
     }
 

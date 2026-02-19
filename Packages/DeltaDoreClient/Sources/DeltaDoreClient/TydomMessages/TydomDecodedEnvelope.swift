@@ -23,9 +23,11 @@ enum TydomDecodedPayload: Sendable, Equatable {
     case gatewayInfo(TydomGatewayInfo)
     case deviceUpdates([TydomDeviceUpdate])
     case scenarios([TydomScenarioPayload])
+    case groupMetadata([TydomGroupMetadata])
     case groups([TydomGroup])
     case moments([TydomMoment])
     case areas([TydomArea])
+    case echo(TydomEchoMessage)
     case none
 }
 

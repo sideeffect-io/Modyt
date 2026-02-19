@@ -3,6 +3,7 @@ import Foundation
 enum DashboardFavoriteSource: String, Sendable, Equatable, Codable {
     case device
     case scene
+    case group
 }
 
 struct DashboardDeviceDescription: Identifiable, Sendable, Equatable {
@@ -14,6 +15,7 @@ struct DashboardDeviceDescription: Identifiable, Sendable, Equatable {
     let source: DashboardFavoriteSource
     let sceneType: String?
     let scenePicto: String?
+    let memberUniqueIds: [String]
 
     init(
         uniqueId: String,
@@ -23,7 +25,8 @@ struct DashboardDeviceDescription: Identifiable, Sendable, Equatable {
         dashboardOrder: Int? = nil,
         source: DashboardFavoriteSource = .device,
         sceneType: String? = nil,
-        scenePicto: String? = nil
+        scenePicto: String? = nil,
+        memberUniqueIds: [String] = []
     ) {
         self.uniqueId = uniqueId
         self.name = name
@@ -33,6 +36,7 @@ struct DashboardDeviceDescription: Identifiable, Sendable, Equatable {
         self.source = source
         self.sceneType = sceneType
         self.scenePicto = scenePicto
+        self.memberUniqueIds = memberUniqueIds
     }
 
     var id: String { uniqueId }
@@ -43,5 +47,18 @@ struct DashboardDeviceDescription: Identifiable, Sendable, Equatable {
 
     var group: DeviceGroup {
         resolvedGroup ?? DeviceGroup.from(usage: usage)
+    }
+
+    var shutterUniqueIds: [String] {
+        guard group == .shutter else { return [] }
+
+        switch source {
+        case .device:
+            return [uniqueId]
+        case .group:
+            return memberUniqueIds
+        case .scene:
+            return []
+        }
     }
 }

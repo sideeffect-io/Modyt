@@ -54,3 +54,26 @@ import Testing
     #expect(device?.usage == "shutter")
     #expect(device?.metadata?["position"] == .object(["min": .number(0), "max": .number(100)]))
 }
+
+@Test func tydomDeviceCacheStore_metadataMergesAcrossUpserts() async {
+    // Given
+    let cache = TydomDeviceCacheStore()
+    await cache.upsert(TydomDeviceCacheEntry(uniqueId: "2_1", name: "Living Room", usage: "shutter"))
+    await cache.upsert(TydomDeviceCacheEntry(uniqueId: "2_1", metadata: [
+        "position": .object(["min": .number(0), "max": .number(100)])
+    ]))
+
+    // When
+    await cache.upsert(TydomDeviceCacheEntry(uniqueId: "2_1", metadata: [
+        "__cmetadata": .array([
+            .object(["name": .string("histo"), "permission": .string("r")])
+        ])
+    ]))
+
+    // Then
+    let device = await cache.deviceInfo(for: "2_1")
+    #expect(device?.metadata?["position"] == .object(["min": .number(0), "max": .number(100)]))
+    #expect(device?.metadata?["__cmetadata"] == .array([
+        .object(["name": .string("histo"), "permission": .string("r")])
+    ]))
+}

@@ -34,9 +34,13 @@ struct LightStoreTests {
         )
 
         store.setPower(true)
-        await settleAsyncState()
+        let didDispatch = await waitUntil {
+            let entries = await recorder.values
+            return entries.contains("command:light-1:on:true")
+        }
 
         #expect(store.descriptor.isOn)
+        #expect(didDispatch)
         let entries = await recorder.values
         #expect(entries.contains("optimistic:light-1:on:true"))
         #expect(entries.contains("command:light-1:on:true"))
@@ -71,10 +75,14 @@ struct LightStoreTests {
         )
 
         store.setPower(false)
-        await settleAsyncState()
+        let didDispatch = await waitUntil {
+            let entries = await recorder.values
+            return entries.contains("command:light-2:level:10")
+        }
 
         #expect(!store.descriptor.isOn)
         #expect(store.descriptor.level == 10)
+        #expect(didDispatch)
         let entries = await recorder.values
         #expect(entries.contains("optimistic:light-2:level:10"))
         #expect(entries.contains("command:light-2:level:10"))
@@ -105,8 +113,6 @@ struct LightStoreTests {
         )
 
         store.setPower(false)
-        await settleAsyncState()
-
         #expect((await recorder.values).isEmpty)
     }
 
@@ -144,10 +150,15 @@ struct LightStoreTests {
         )
 
         store.setLevelNormalized(0.4)
-        await settleAsyncState()
+        let didDispatch = await waitUntil {
+            let entries = await recorder.values
+            return entries.contains("command:light-5:level:40")
+                && entries.contains("command:light-5:on:true")
+        }
 
         #expect(store.descriptor.level >= 39 && store.descriptor.level <= 41)
         #expect(store.descriptor.isOn)
+        #expect(didDispatch)
 
         let entries = await recorder.values
         #expect(entries.filter { $0.hasPrefix("optimisticBatch:light-5") }.count == 1)
@@ -186,9 +197,12 @@ struct LightStoreTests {
         )
 
         store.setLevelNormalized(0.8)
-        await settleAsyncState()
+        let didDispatch = await waitUntil {
+            (await recorder.values).count == 2
+        }
 
         #expect(store.descriptor.isOn)
+        #expect(didDispatch)
         let entries = await recorder.values
         #expect(entries == ["optimistic:on:true", "command:on:true"])
     }
@@ -215,8 +229,11 @@ struct LightStoreTests {
                 data: ["on": .bool(true), "level": .number(85)]
             )
         )
-        await settleAsyncState()
+        let didObserveRealtime = await waitUntil {
+            store.descriptor.isOn && store.descriptor.level == 85
+        }
 
+        #expect(didObserveRealtime)
         #expect(store.descriptor.isOn)
         #expect(store.descriptor.level == 85)
         #expect(store.descriptor.powerKey == "on")
@@ -243,7 +260,10 @@ struct LightStoreTests {
         )
 
         store.setLevelNormalized(1.0)
-        await settleAsyncState()
+        let didApplyOptimistic = await waitUntil {
+            store.descriptor.isOn && store.descriptor.level == 100
+        }
+        #expect(didApplyOptimistic)
         #expect(store.descriptor.isOn)
         #expect(store.descriptor.level == 100)
 
@@ -254,8 +274,11 @@ struct LightStoreTests {
                 metadata: ["level": .object(["min": .number(0), "max": .number(100)])]
             )
         )
-        await settleAsyncState()
+        let remainedSuppressed = await waitUntil {
+            store.descriptor.isOn && store.descriptor.level == 100
+        }
 
+        #expect(remainedSuppressed)
         #expect(store.descriptor.isOn)
         #expect(store.descriptor.level == 100)
     }
@@ -280,7 +303,10 @@ struct LightStoreTests {
         )
 
         store.setLevelNormalized(1.0)
-        await settleAsyncState()
+        let didApplyOptimistic = await waitUntil {
+            store.descriptor.isOn
+        }
+        #expect(didApplyOptimistic)
         #expect(store.descriptor.isOn)
 
         now = now.addingTimeInterval(1.1)
@@ -291,8 +317,63 @@ struct LightStoreTests {
                 metadata: ["level": .object(["min": .number(0), "max": .number(100)])]
             )
         )
-        await settleAsyncState()
+        let didReconcile = await waitUntil {
+            !store.descriptor.isOn && store.descriptor.level == 0
+        }
 
+        #expect(didReconcile)
+        #expect(!store.descriptor.isOn)
+        #expect(store.descriptor.level == 0)
+    }
+
+    @Test
+    func timeoutReconcilesSuppressedRealtimeDescriptorWithoutNewEvent() async {
+        let streamBox = BufferedStreamBox<DeviceRecord?>()
+        var now = Date(timeIntervalSince1970: 7_000)
+
+        let store = LightStore(
+            uniqueId: "light-9",
+            initialDevice: makeLightDevice(
+                uniqueId: "light-9",
+                data: ["on": .bool(false), "level": .number(0)],
+                metadata: ["level": .object(["min": .number(0), "max": .number(100)])]
+            ),
+            dependencies: .init(
+                observeLight: { _ in streamBox.stream },
+                applyOptimisticChanges: { _, _ in },
+                sendCommand: { _, _, _ in },
+                now: { now },
+                pendingEchoSuppressionWindow: 0.03
+            )
+        )
+
+        store.setLevelNormalized(1.0)
+        let didApplyOptimistic = await waitUntil {
+            store.descriptor.isOn && store.descriptor.level == 100
+        }
+        #expect(didApplyOptimistic)
+        #expect(store.descriptor.isOn)
+        #expect(store.descriptor.level == 100)
+
+        streamBox.yield(
+            makeLightDevice(
+                uniqueId: "light-9",
+                data: ["on": .bool(false), "level": .number(0)],
+                metadata: ["level": .object(["min": .number(0), "max": .number(100)])]
+            )
+        )
+        let remainedSuppressed = await waitUntil {
+            store.descriptor.isOn
+        }
+        #expect(remainedSuppressed)
+        #expect(store.descriptor.isOn)
+
+        now = now.addingTimeInterval(1)
+        let didReconcile = await waitUntil {
+            !store.descriptor.isOn && store.descriptor.level == 0
+        }
+
+        #expect(didReconcile)
         #expect(!store.descriptor.isOn)
         #expect(store.descriptor.level == 0)
     }

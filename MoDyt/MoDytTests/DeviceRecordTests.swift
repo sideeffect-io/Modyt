@@ -5,7 +5,7 @@ import DeltaDoreClient
 
 struct DeviceRecordTests {
     @Test(arguments: DrivingLightDescriptorCase.allCases)
-    func drivingLightControlDescriptorMapsExpectedValues(_ testCase: DrivingLightDescriptorCase) throws {
+    fileprivate func drivingLightControlDescriptorMapsExpectedValues(_ testCase: DrivingLightDescriptorCase) throws {
         let device = TestSupport.makeDevice(
             uniqueId: testCase.uniqueId,
             name: testCase.name,
