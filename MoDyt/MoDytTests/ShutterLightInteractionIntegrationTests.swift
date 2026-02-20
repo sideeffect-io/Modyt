@@ -53,7 +53,7 @@ struct NewShutterRepositoryTests {
     }
 
     @Test
-    func observeShuttersPositions_combinesActualAndTargetAveragesIntoSteps() async {
+    func observeShuttersPositions_combinesActualAndTargetAveragesIntoRawValues() async {
         let databasePath = TestSupport.temporaryDatabasePath()
         let deviceRepository = DeviceRepository(databasePath: databasePath, log: { _ in })
         let repository = ShutterRepository(
@@ -68,7 +68,7 @@ struct NewShutterRepositoryTests {
         ])
 
         let stream = await repository.observeShuttersPositions(uniqueIds: ["3001_3", "3002_3"])
-        let recorder = TestRecorder<(ShutterStep, ShutterStep)>()
+        let recorder = TestRecorder<(Int, Int)>()
 
         let observationTask = Task {
             for await snapshot in stream {
@@ -78,15 +78,101 @@ struct NewShutterRepositoryTests {
         defer { observationTask.cancel() }
 
         let receivedInitial = await waitUntil {
-            await recorder.values.contains(where: { $0 == (.half, .half) })
+            await recorder.values.contains(where: { $0 == (50, 50) })
         }
         #expect(receivedInitial)
 
         await repository.setShutterTarget(uniqueId: "3001_3", targetPosition: 90)
         let receivedUpdatedTarget = await waitUntil {
-            await recorder.values.contains(where: { $0 == (.half, .open) })
+            await recorder.values.contains(where: { $0 == (50, 95) })
         }
         #expect(receivedUpdatedTarget)
+    }
+
+    @Test
+    func observeShuttersPositions_removesConsecutiveDuplicates() async {
+        let databasePath = TestSupport.temporaryDatabasePath()
+        let deviceRepository = DeviceRepository(databasePath: databasePath, log: { _ in })
+        let repository = ShutterRepository(
+            databasePath: databasePath,
+            deviceRepository: deviceRepository,
+            log: { _ in }
+        )
+
+        await deviceRepository.upsertDevices([
+            makeTydomShutter(uniqueId: "3101_3", id: 3, endpointId: 3101, level: 50)
+        ])
+
+        let stream = await repository.observeShuttersPositions(uniqueIds: ["3101_3"])
+        let recorder = TestRecorder<(Int, Int)>()
+
+        let observationTask = Task {
+            for await snapshot in stream {
+                await recorder.record((snapshot.actual, snapshot.target))
+            }
+        }
+        defer { observationTask.cancel() }
+
+        let receivedInitial = await waitUntil {
+            let values = await recorder.values
+            guard values.count == 1 else { return false }
+            return values[0].0 == 50 && values[0].1 == 50
+        }
+        #expect(receivedInitial)
+
+        // Re-upserting the same actual value should not emit a duplicate shutter snapshot.
+        await deviceRepository.upsertDevices([
+            makeTydomShutter(uniqueId: "3101_3", id: 3, endpointId: 3101, level: 50)
+        ])
+
+        let emittedDuplicate = await waitUntil(timeout: .milliseconds(300)) {
+            await recorder.values.count > 1
+        }
+        #expect(!emittedDuplicate)
+    }
+
+    @Test
+    func observeShuttersPositions_reemitsWhenTargetIsReaffirmedWithSameValue() async {
+        let databasePath = TestSupport.temporaryDatabasePath()
+        let deviceRepository = DeviceRepository(databasePath: databasePath, log: { _ in })
+        let repository = ShutterRepository(
+            databasePath: databasePath,
+            deviceRepository: deviceRepository,
+            log: { _ in }
+        )
+
+        let uniqueId = "3201_3"
+        await deviceRepository.upsertDevices([
+            makeTydomShutter(uniqueId: uniqueId, id: 3, endpointId: 3201, level: 0)
+        ])
+        await repository.setShutterTarget(uniqueId: uniqueId, targetPosition: 100)
+
+        let stream = await repository.observeShuttersPositions(uniqueIds: [uniqueId])
+        let recorder = TestRecorder<(Int, Int)>()
+
+        let observationTask = Task {
+            for await snapshot in stream {
+                await recorder.record((snapshot.actual, snapshot.target))
+            }
+        }
+        defer { observationTask.cancel() }
+
+        let receivedInitial = await waitUntil {
+            await recorder.values.contains(where: { $0 == (0, 100) })
+        }
+        #expect(receivedInitial)
+
+        let baselineCount = await recorder.values.count
+        await repository.setShutterTarget(uniqueId: uniqueId, targetPosition: 100)
+
+        let receivedReaffirmedEmission = await waitUntil {
+            await recorder.values.count >= baselineCount + 1
+        }
+        #expect(receivedReaffirmedEmission)
+
+        let values = await recorder.values
+        let hasExpectedLastValue = values.last.map { $0.0 == 0 && $0.1 == 100 } ?? false
+        #expect(hasExpectedLastValue)
     }
 
     @Test
@@ -100,7 +186,7 @@ struct NewShutterRepositoryTests {
         )
 
         let uniqueIds = ["4001_4", "4002_4", "4003_4"]
-        await repository.setShuttersTarget(uniqueIds: uniqueIds, step: .threeQuarter)
+        await repository.setShuttersTarget(uniqueIds: uniqueIds, targetPosition: 75)
 
         let stream = await repository.observeShutterTargets(uniqueIds: uniqueIds)
         var iterator = stream.makeAsyncIterator()
@@ -141,8 +227,8 @@ struct NewShutterRepositoryTests {
         var iterator = stream.makeAsyncIterator()
         let first = await iterator.next()
 
-        #expect(first?.actual == .open)
-        #expect(first?.target == .open)
+        #expect(first?.actual == 100)
+        #expect(first?.target == 100)
     }
 
     @Test
@@ -168,8 +254,8 @@ struct NewShutterRepositoryTests {
         var iterator = stream.makeAsyncIterator()
         let first = await iterator.next()
 
-        #expect(first?.actual == .closed)
-        #expect(first?.target == .closed)
+        #expect(first?.actual == 0)
+        #expect(first?.target == 0)
     }
 
     private func makeTydomShutter(

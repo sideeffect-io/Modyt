@@ -22,8 +22,8 @@ struct ShutterStoreFactory {
                             return
                         }
                         let ids = shutterUniqueIds.joined(separator: ",")
-                        environment.log("Shutter target requested ids=\(ids) target=\(target.rawValue)")
-                        await environment.newShutterRepository.setShuttersTarget(uniqueIds: shutterUniqueIds, step: target)
+                        environment.log("Shutter target requested ids=\(ids) target=\(target)")
+                        await environment.newShutterRepository.setShuttersTarget(uniqueIds: shutterUniqueIds, targetPosition: target)
                         for uniqueId in shutterUniqueIds {
                             let command = await Self.command(
                                 for: uniqueId,
@@ -31,7 +31,7 @@ struct ShutterStoreFactory {
                                 repository: environment.repository
                             )
                             environment.log(
-                                "ShutterTrace factory command uniqueId=\(uniqueId) target=\(target.rawValue) key=\(command.key) value=\(command.value.traceString)"
+                                "ShutterTrace factory command uniqueId=\(uniqueId) target=\(target) key=\(command.key) value=\(command.value.traceString)"
                             )
                             await environment.sendDeviceCommand(
                                 uniqueId,
@@ -39,6 +39,18 @@ struct ShutterStoreFactory {
                                 command.value
                             )
                         }
+                    },
+                    syncTargetCache: { shutterUniqueIds, target in
+                        guard shutterUniqueIds.isEmpty == false else {
+                            environment.log("Shutter target sync skipped: no shutter ids provided")
+                            return
+                        }
+                        let ids = shutterUniqueIds.joined(separator: ",")
+                        environment.log("Shutter target sync ids=\(ids) target=\(target)")
+                        await environment.newShutterRepository.setShuttersTarget(
+                            uniqueIds: shutterUniqueIds,
+                            targetPosition: target
+                        )
                     },
                     startCompletionTimer: { onFinished in
                         Task {
@@ -60,34 +72,35 @@ struct ShutterStoreFactory {
         }
     }
 
-    private static let completionTimeoutNanoseconds: UInt64 = 15_000_000_000
+    private static let completionTimeoutNanoseconds: UInt64 = 60_000_000_000
 
     private static func command(
         for uniqueId: String,
-        target: ShutterStep,
+        target: Int,
         repository: DeviceRepository
     ) async -> (key: String, value: JSONValue) {
         let descriptor = await repository
             .device(uniqueId: uniqueId)?
             .primaryControlDescriptor()
-        return mappedCommand(target: target, descriptor: descriptor)
+        return mappedCommand(targetPosition: target, descriptor: descriptor)
     }
 
     static func mappedCommand(
-        target: ShutterStep,
+        targetPosition: Int,
         descriptor: DeviceControlDescriptor?
     ) -> (key: String, value: JSONValue) {
+        let clampedTarget = max(0, min(targetPosition, 100))
         guard let descriptor else {
-            return ("level", .number(Double(target.rawValue)))
+            return ("level", .number(Double(clampedTarget)))
         }
         switch descriptor.kind {
         case .slider:
-            let normalizedTarget = Double(target.rawValue) / 100
+            let normalizedTarget = Double(clampedTarget) / 100
             let mappedValue = descriptor.range.lowerBound
                 + (descriptor.range.upperBound - descriptor.range.lowerBound) * normalizedTarget
             return (descriptor.key, .number(mappedValue))
         case .toggle:
-            return (descriptor.key, .bool(target.rawValue > 0))
+            return (descriptor.key, .bool(clampedTarget > 0))
         }
     }
 }

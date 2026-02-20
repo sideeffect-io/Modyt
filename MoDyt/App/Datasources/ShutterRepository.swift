@@ -6,6 +6,11 @@ actor ShutterRepository {
         case notReady
     }
 
+    private struct TargetSnapshot: Sendable, Equatable {
+        let positions: [Int]
+        let revision: UInt64
+    }
+
     private struct TargetRecord: Codable, Sendable, Equatable {
         let uniqueId: String
         var targetPosition: Int
@@ -15,7 +20,7 @@ actor ShutterRepository {
     private struct TargetObserver {
         let uniqueIds: [String]
         let watchedIdSet: Set<String>
-        let continuation: AsyncStream<[Int]>.Continuation
+        let continuation: AsyncStream<TargetSnapshot>.Continuation
     }
 
     private let databasePath: String
@@ -26,6 +31,7 @@ actor ShutterRepository {
     private var database: SQLiteDatabase?
     private var dao: DAO<TargetRecord>?
     private var targetObservers: [UUID: TargetObserver] = [:]
+    private var targetRevision: UInt64 = 0
 
     init(
         databasePath: String,
@@ -55,9 +61,27 @@ actor ShutterRepository {
     }
 
     func observeShutterTargets(uniqueIds: [String]) -> AsyncStream<[Int]> {
+        let snapshotStream = observeShutterTargetSnapshots(uniqueIds: uniqueIds)
+        let (stream, continuation) = AsyncStream<[Int]>.makeStream()
+
+        let forwardingTask = Task {
+            for await snapshot in snapshotStream {
+                continuation.yield(snapshot.positions)
+            }
+            continuation.finish()
+        }
+
+        continuation.onTermination = { _ in
+            forwardingTask.cancel()
+        }
+
+        return stream
+    }
+
+    private func observeShutterTargetSnapshots(uniqueIds: [String]) -> AsyncStream<TargetSnapshot> {
         let observerId = UUID()
         let orderedUniqueIds = Self.uniqueIds(from: uniqueIds)
-        let (stream, continuation) = AsyncStream<[Int]>.makeStream()
+        let (stream, continuation) = AsyncStream<TargetSnapshot>.makeStream()
 
         addTargetObserver(
             id: observerId,
@@ -74,7 +98,8 @@ actor ShutterRepository {
             do {
                 try await self.startIfNeeded()
                 let snapshot = try await self.targetPositions(for: orderedUniqueIds)
-                continuation.yield(snapshot)
+                let targetSnapshot = await self.makeTargetSnapshot(from: snapshot)
+                continuation.yield(targetSnapshot)
             } catch {
                 log("Shutter target snapshot load failed error=\(error)")
                 await self.removeTargetObserver(id: observerId)
@@ -92,7 +117,7 @@ actor ShutterRepository {
 
     func observeShuttersPositions(
         uniqueIds: [String]
-    ) async -> AsyncStream<(actual: ShutterStep, target: ShutterStep)> {
+    ) async -> AsyncStream<(actual: Int, target: Int)> {
         let orderedUniqueIds = Self.uniqueIds(from: uniqueIds)
         let positionsStream = await observeShutterPositions(uniqueIds: orderedUniqueIds)
             .map { [log] positions in
@@ -101,42 +126,42 @@ actor ShutterRepository {
                 log("Shutter actual stream ids=\(ids) values=\(values)")
                 return positions
             }
-        let targetsStream = observeShutterTargets(uniqueIds: orderedUniqueIds)
-            .map { [log] positions in
+        let targetsStream = observeShutterTargetSnapshots(uniqueIds: orderedUniqueIds)
+            .map { [log] snapshot in
                 let ids = orderedUniqueIds.joined(separator: ",")
-                let values = positions.map(String.init).joined(separator: ",")
-                log("Shutter target stream ids=\(ids) values=\(values)")
-                return positions
+                let values = snapshot.positions.map(String.init).joined(separator: ",")
+                log("Shutter target stream ids=\(ids) revision=\(snapshot.revision) values=\(values)")
+                return snapshot
             }
 
-        let combinedStream = combineLatest(positionsStream, targetsStream)
-            .map { [log] actualPositions, targetPositions in
+        let aggregatedStream = combineLatest(positionsStream, targetsStream)
+            .map { [log] actualPositions, targetSnapshot in
+                let targetPositions = targetSnapshot.positions
                 let actualAverage = Self.averagePosition(for: actualPositions)
                 let targetAverage = Self.averagePosition(for: targetPositions)
                 let ids = orderedUniqueIds.joined(separator: ",")
                 log(
-                    "ShutterTrace repository aggregate ids=\(ids) actualRaw=\(actualPositions.map(String.init).joined(separator: ",")) targetRaw=\(targetPositions.map(String.init).joined(separator: ",")) actualAvg=\(actualAverage) targetAvg=\(targetAverage)"
+                    "ShutterTrace repository aggregate ids=\(ids) actualRaw=\(actualPositions.map(String.init).joined(separator: ",")) targetRevision=\(targetSnapshot.revision) targetRaw=\(targetPositions.map(String.init).joined(separator: ",")) actualAvg=\(actualAverage) targetAvg=\(targetAverage)"
                 )
-                return (actualAverage, targetAverage)
-            }
-            .map { [log] actualAverage, targetAverage in
-                let actualStep = Self.step(for: actualAverage)
-                let targetStep = Self.step(for: targetAverage)
-                let ids = orderedUniqueIds.joined(separator: ",")
-                log(
-                    "ShutterTrace repository snapped ids=\(ids) actualAvg=\(actualAverage)->\(actualStep.rawValue) targetAvg=\(targetAverage)->\(targetStep.rawValue)"
-                )
-                return (actual: actualStep, target: targetStep)
-            }
-            .map { [log] actual, target in
-                let ids = orderedUniqueIds.joined(separator: ",")
-                log(
-                    "Shutter combined stream ids=\(ids) actual=\(actual.rawValue) target=\(target.rawValue)"
-                )
-                return (actual: actual, target: target)
+                return (actual: actualAverage, target: targetAverage, targetRevision: targetSnapshot.revision)
             }
 
-        let (stream, continuation) = AsyncStream<(actual: ShutterStep, target: ShutterStep)>.makeStream()
+        let dedupedAggregatedStream = aggregatedStream.removeDuplicates(by: { lhs, rhs in
+            lhs.actual == rhs.actual
+                && lhs.target == rhs.target
+                && lhs.targetRevision == rhs.targetRevision
+        })
+
+        let combinedStream = dedupedAggregatedStream
+            .map { [log] values in
+                let ids = orderedUniqueIds.joined(separator: ",")
+                log(
+                    "Shutter combined stream ids=\(ids) actual=\(values.actual) target=\(values.target)"
+                )
+                return (actual: values.actual, target: values.target)
+            }
+
+        let (stream, continuation) = AsyncStream<(actual: Int, target: Int)>.makeStream()
 
         let forwardingTask = Task {
             for await value in combinedStream {
@@ -158,11 +183,16 @@ actor ShutterRepository {
         let updatedAt = now()
 
         if var existing = try? await targetDAO.read(.text(uniqueId)) {
-            guard existing.targetPosition != clampedTarget else { return }
-            log(
-                "ShutterTrace repository target-write uniqueId=\(uniqueId) old=\(existing.targetPosition) new=\(clampedTarget)"
-            )
-            existing.targetPosition = clampedTarget
+            if existing.targetPosition != clampedTarget {
+                log(
+                    "ShutterTrace repository target-write uniqueId=\(uniqueId) old=\(existing.targetPosition) new=\(clampedTarget)"
+                )
+                existing.targetPosition = clampedTarget
+            } else {
+                log(
+                    "ShutterTrace repository target-reaffirm uniqueId=\(uniqueId) value=\(clampedTarget)"
+                )
+            }
             existing.updatedAt = updatedAt
             _ = try? await targetDAO.update(existing)
         } else {
@@ -180,8 +210,7 @@ actor ShutterRepository {
         await notifyTargetObservers(for: [uniqueId])
     }
 
-    func setShuttersTarget(uniqueIds: [String], step: ShutterStep) async {
-        let targetPosition = step.rawValue
+    func setShuttersTarget(uniqueIds: [String], targetPosition: Int) async {
         for uniqueId in uniqueIds {
             await setShutterTarget(uniqueId: uniqueId, targetPosition: targetPosition)
         }
@@ -211,7 +240,7 @@ actor ShutterRepository {
     private func addTargetObserver(
         id: UUID,
         uniqueIds: [String],
-        continuation: AsyncStream<[Int]>.Continuation
+        continuation: AsyncStream<TargetSnapshot>.Continuation
     ) {
         targetObservers[id] = TargetObserver(
             uniqueIds: uniqueIds,
@@ -225,6 +254,9 @@ actor ShutterRepository {
     }
 
     private func notifyTargetObservers(for changedUniqueIds: Set<String>? = nil) async {
+        targetRevision &+= 1
+        let revision = targetRevision
+
         for observer in targetObservers.values {
             if let changedUniqueIds, observer.watchedIdSet.isDisjoint(with: changedUniqueIds) {
                 continue
@@ -234,10 +266,22 @@ actor ShutterRepository {
                 continue
             }
             log(
-                "ShutterTrace repository target-notify ids=\(observer.uniqueIds.joined(separator: ",")) values=\(snapshot.map(String.init).joined(separator: ","))"
+                "ShutterTrace repository target-notify ids=\(observer.uniqueIds.joined(separator: ",")) revision=\(revision) values=\(snapshot.map(String.init).joined(separator: ","))"
             )
-            observer.continuation.yield(snapshot)
+            observer.continuation.yield(
+                TargetSnapshot(
+                    positions: snapshot,
+                    revision: revision
+                )
+            )
         }
+    }
+
+    private func makeTargetSnapshot(from positions: [Int]) -> TargetSnapshot {
+        TargetSnapshot(
+            positions: positions,
+            revision: targetRevision
+        )
     }
 
     private func targetPositions(for uniqueIds: [String]) async throws -> [Int] {
@@ -322,22 +366,6 @@ actor ShutterRepository {
 
         let normalized = ((descriptor.value - lowerBound) / (upperBound - lowerBound)) * 100
         return clampPosition(Int(normalized.rounded()))
-    }
-
-    private static func step(for position: Int) -> ShutterStep {
-        let snapped = (Double(clampPosition(position)) / 25.0).rounded() * 25.0
-        switch Int(snapped) {
-        case 100:
-            return .open
-        case 75:
-            return .threeQuarter
-        case 50:
-            return .half
-        case 25:
-            return .quarter
-        default:
-            return .closed
-        }
     }
 
     private static func formatNumber(_ value: Double) -> String {

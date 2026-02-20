@@ -40,15 +40,17 @@ struct ShutterView: View {
     }
     
     private func regularPills(metrics: ShutterMetrics, store: ShutterStore) -> some View {
+        let actualStep = Self.step(for: store.actualPosition)
+        let targetStep = Self.step(for: store.targetPosition)
         return HStack(alignment: .bottom, spacing: metrics.barSpacing) {
             ForEach(ShutterStep.allCases) { step in
                 Button {
-                    store.send(.setTarget(value: step))
+                    store.send(.setTarget(value: step.rawValue))
                 } label: {
                     ShutterPill(
                         step: step,
-                        isTarget: step == store.targetStep,
-                        isActual: step == store.actualStep,
+                        isTarget: store.isTargetReliable && step == targetStep,
+                        isActual: step == actualStep,
                         isInFlight: store.isMoving,
                         metrics: metrics
                     )
@@ -70,15 +72,17 @@ struct ShutterView: View {
     }
     
     private func horizontalPills(metrics: ShutterMetrics, store: ShutterStore) -> some View {
+        let actualStep = Self.step(for: store.actualPosition)
+        let targetStep = Self.step(for: store.targetPosition)
         return HStack(alignment: .bottom, spacing: metrics.barSpacing) {
             ForEach(ShutterStep.allCases) { step in
                 Button {
-                    store.send(.setTarget(value: step))
+                    store.send(.setTarget(value: step.rawValue))
                 } label: {
                     ShutterPill(
                         step: step,
-                        isTarget: step == store.targetStep,
-                        isActual: step == store.actualStep,
+                        isTarget: store.isTargetReliable && step == targetStep,
+                        isActual: step == actualStep,
                         isInFlight: store.isMoving,
                         metrics: metrics
                     )
@@ -143,6 +147,23 @@ struct ShutterView: View {
             Image(systemName: "moon")
         case .quarter, .threeQuarter:
             Color.clear
+        }
+    }
+
+    private static func step(for position: Int) -> ShutterStep {
+        let clamped = min(max(position, 0), 100)
+        let snapped = Int((Double(clamped) / 25.0).rounded() * 25.0)
+        switch snapped {
+        case 100:
+            return .open
+        case 75:
+            return .threeQuarter
+        case 50:
+            return .half
+        case 25:
+            return .quarter
+        default:
+            return .closed
         }
     }
 }

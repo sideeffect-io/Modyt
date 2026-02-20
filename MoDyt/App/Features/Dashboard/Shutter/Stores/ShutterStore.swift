@@ -21,9 +21,15 @@ enum ShutterStep: Int, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum TargetTrust: Sendable, Equatable {
+    case trusted
+    case acknowledged(staleStreamTarget: Int)
+}
+
 struct Positions: Sendable, Equatable {
-    let actual: ShutterStep
-    let target: ShutterStep
+    let actual: Int
+    let target: Int
+    let targetTrust: TargetTrust
 }
 
 enum ShuttersState: Sendable, Equatable {
@@ -39,15 +45,16 @@ enum ShuttersState: Sendable, Equatable {
 }
 
 enum ShuttersEvent: Sendable, Equatable {
-    case receivedValuesFromStream(actual: ShutterStep, target: ShutterStep)
-    case setTarget(value: ShutterStep)
+    case receivedValuesFromStream(actual: Int, target: Int)
+    case setTarget(value: Int)
     case failedToComplete
 }
 
 enum ShuttersEffect: Sendable, Equatable {
     case startCompletionTimer
     case cancelCompletionTimer
-    case handleTarget(value: ShutterStep)
+    case handleTarget(value: Int)
+    case syncTargetCache(value: Int)
 }
 
 enum ShuttersReducer {
@@ -56,19 +63,45 @@ enum ShuttersReducer {
         event: ShuttersEvent
     ) -> (ShuttersState, [ShuttersEffect]) {
         switch (state, event) {
-        case let (.idle, .receivedValuesFromStream(actual, target)):
-            let nextPositions = Positions(actual: actual, target: target)
+        case let (.idle(current), .receivedValuesFromStream(actual, target)):
             if actual == target {
+                let nextPositions = Positions(
+                    actual: actual,
+                    target: target,
+                    targetTrust: .trusted
+                )
                 return (.idle(nextPositions), [])
             }
+
+            let isStreamTargetChanged = target != current.target
+            let nextTarget = if isStreamTargetChanged {
+                target
+            } else {
+                actual
+            }
+            let trust: TargetTrust = if isStreamTargetChanged {
+                .trusted
+            } else {
+                .acknowledged(staleStreamTarget: target)
+            }
+            let nextPositions = Positions(
+                actual: isStreamTargetChanged ? actual : current.actual,
+                target: nextTarget,
+                targetTrust: trust
+            )
             return (.moving(nextPositions), [.startCompletionTimer])
 
         case let (.idle(current), .setTarget(value)):
             guard value != current.target else {
                 return (state, [])
             }
+            let nextPositions = Positions(
+                actual: current.actual,
+                target: value,
+                targetTrust: .trusted
+            )
             return (
-                .moving(Positions(actual: current.actual, target: value)),
+                .moving(nextPositions),
                 [.handleTarget(value: value), .startCompletionTimer]
             )
 
@@ -76,22 +109,81 @@ enum ShuttersReducer {
             return (state, [])
 
         case let (.moving(current), .receivedValuesFromStream(actual, target)):
+            if case .acknowledged(let staleTarget) = current.targetTrust {
+                if target == staleTarget {
+                    if actual == current.target {
+                        let nextPositions = Positions(
+                            actual: actual,
+                            target: current.target,
+                            targetTrust: .trusted
+                        )
+                        return (
+                            .idle(nextPositions),
+                            [
+                                .cancelCompletionTimer,
+                                .syncTargetCache(value: current.target),
+                            ]
+                        )
+                    }
+
+                    let nextPositions = Positions(
+                        actual: actual,
+                        target: current.target,
+                        targetTrust: current.targetTrust
+                    )
+                    let effects: [ShuttersEffect] = if actual == current.actual {
+                        []
+                    } else {
+                        [.cancelCompletionTimer, .startCompletionTimer]
+                    }
+                    return (
+                        .moving(nextPositions),
+                        effects
+                    )
+                }
+            }
+
             if actual == target {
+                let nextPositions = Positions(
+                    actual: actual,
+                    target: target,
+                    targetTrust: .trusted
+                )
                 return (
-                    .idle(Positions(actual: actual, target: target)),
+                    .idle(nextPositions),
                     [.cancelCompletionTimer]
                 )
             }
 
             if target == current.target {
-                return (
-                    .moving(Positions(actual: actual, target: current.target)),
+                let trust: TargetTrust = if case .acknowledged = current.targetTrust {
+                    .trusted
+                } else {
+                    current.targetTrust
+                }
+                let nextPositions = Positions(
+                    actual: actual,
+                    target: current.target,
+                    targetTrust: trust
+                )
+                let effects: [ShuttersEffect] = if actual == current.actual {
                     []
+                } else {
+                    [.cancelCompletionTimer, .startCompletionTimer]
+                }
+                return (
+                    .moving(nextPositions),
+                    effects
                 )
             }
 
+            let nextPositions = Positions(
+                actual: actual,
+                target: target,
+                targetTrust: .trusted
+            )
             return (
-                .moving(Positions(actual: actual, target: target)),
+                .moving(nextPositions),
                 [.cancelCompletionTimer, .startCompletionTimer]
             )
 
@@ -99,14 +191,29 @@ enum ShuttersReducer {
             guard value != current.target else {
                 return (state, [])
             }
+            let nextPositions = Positions(
+                actual: current.actual,
+                target: value,
+                targetTrust: .trusted
+            )
             return (
-                .moving(Positions(actual: current.actual, target: value)),
+                .moving(nextPositions),
                 [.handleTarget(value: value), .cancelCompletionTimer, .startCompletionTimer]
             )
 
         case let (.moving(current), .failedToComplete):
+            let target = if case .acknowledged = current.targetTrust {
+                current.actual
+            } else {
+                current.target
+            }
+            let nextPositions = Positions(
+                actual: current.actual,
+                target: target,
+                targetTrust: .trusted
+            )
             return (
-                .idle(Positions(actual: current.actual, target: current.target)),
+                .idle(nextPositions),
                 []
             )
         }
@@ -117,19 +224,22 @@ enum ShuttersReducer {
 @MainActor
 final class ShutterStore {
     struct Dependencies {
-        let observePositions: @Sendable ([String]) async -> any AsyncSequence<(actual: ShutterStep, target: ShutterStep), Never> & Sendable
-        let sendTargetPosition: @Sendable ([String], ShutterStep) async -> Void
+        let observePositions: @Sendable ([String]) async -> any AsyncSequence<(actual: Int, target: Int), Never> & Sendable
+        let sendTargetPosition: @Sendable ([String], Int) async -> Void
+        let syncTargetCache: @Sendable ([String], Int) async -> Void
         let startCompletionTimer: @Sendable (@escaping @MainActor @Sendable () -> Void) -> Task<Void, Never>
         let log: @Sendable (String) -> Void
 
         init(
-            observePositions: @escaping @Sendable ([String]) async -> any AsyncSequence<(actual: ShutterStep, target: ShutterStep), Never> & Sendable,
-            sendTargetPosition: @escaping @Sendable ([String], ShutterStep) async -> Void,
+            observePositions: @escaping @Sendable ([String]) async -> any AsyncSequence<(actual: Int, target: Int), Never> & Sendable,
+            sendTargetPosition: @escaping @Sendable ([String], Int) async -> Void,
+            syncTargetCache: @escaping @Sendable ([String], Int) async -> Void = { _, _ in },
             startCompletionTimer: @escaping @Sendable (@escaping @MainActor @Sendable () -> Void) -> Task<Void, Never>,
             log: @escaping @Sendable (String) -> Void = { _ in }
         ) {
             self.observePositions = observePositions
             self.sendTargetPosition = sendTargetPosition
+            self.syncTargetCache = syncTargetCache
             self.startCompletionTimer = startCompletionTimer
             self.log = log
         }
@@ -144,12 +254,19 @@ final class ShutterStore {
     private let worker: Worker
     private var streamUpdateSequence: UInt64 = 0
 
-    var actualStep: ShutterStep {
+    var actualPosition: Int {
         state.positions.actual
     }
 
-    var targetStep: ShutterStep {
+    var targetPosition: Int {
         state.positions.target
+    }
+
+    var isTargetReliable: Bool {
+        switch state.positions.targetTrust {
+        case .trusted, .acknowledged:
+            return true
+        }
     }
 
     var isMoving: Bool {
@@ -163,12 +280,13 @@ final class ShutterStore {
         shutterUniqueIds: [String],
         dependencies: Dependencies
     ) {
-        self.state = .idle(Positions(actual: .open, target: .open))
+        self.state = .idle(Positions(actual: 100, target: 100, targetTrust: .trusted))
         self.shutterUniqueIds = shutterUniqueIds
         self.dependencies = dependencies
         self.worker = Worker(
             observePositions: dependencies.observePositions,
-            sendTargetPosition: dependencies.sendTargetPosition
+            sendTargetPosition: dependencies.sendTargetPosition,
+            syncTargetCache: dependencies.syncTargetCache
         )
         let ids = shutterUniqueIds.joined(separator: ",")
         dependencies.log("ShutterTrace store init ids=\(ids)")
@@ -193,7 +311,7 @@ final class ShutterStore {
         let ids = shutterUniqueIds.joined(separator: ",")
         let effectSummary = effects.map(Self.describeEffect).joined(separator: ",")
         dependencies.log(
-            "ShutterStore transition ids=\(ids) trace=\(traceToken) event=\(Self.describeEvent(event)) actual=\(previousState.positions.actual.rawValue)->\(nextState.positions.actual.rawValue) target=\(previousState.positions.target.rawValue)->\(nextState.positions.target.rawValue) moving=\(Self.isMoving(previousState))->\(Self.isMoving(nextState)) effects=[\(effectSummary)]"
+            "ShutterStore transition ids=\(ids) trace=\(traceToken) event=\(Self.describeEvent(event)) actual=\(previousState.positions.actual)->\(nextState.positions.actual) target=\(previousState.positions.target)->\(nextState.positions.target) trust=\(previousState.positions.targetTrust)->\(nextState.positions.targetTrust) moving=\(Self.isMoving(previousState))->\(Self.isMoving(nextState)) effects=[\(effectSummary)]"
         )
         handle(effects)
     }
@@ -238,24 +356,43 @@ final class ShutterStore {
                     target: value
                 )
             }
+
+        case .syncTargetCache(let value):
+            guard shutterUniqueIds.count == 1 else {
+                let ids = shutterUniqueIds.joined(separator: ",")
+                dependencies.log(
+                    "Shutter target sync skipped ids=\(ids) reason=multi-id-store inferredTarget=\(value)"
+                )
+                return
+            }
+            let shutterUniqueIds = self.shutterUniqueIds
+            Task { [worker] in
+                await worker.syncTargetCache(
+                    shutterUniqueIds: shutterUniqueIds,
+                    target: value
+                )
+            }
         }
     }
 
     private actor Worker {
-        private let observePositionsSource: @Sendable ([String]) async -> any AsyncSequence<(actual: ShutterStep, target: ShutterStep), Never> & Sendable
-        private let sendTargetPositionAction: @Sendable ([String], ShutterStep) async -> Void
+        private let observePositionsSource: @Sendable ([String]) async -> any AsyncSequence<(actual: Int, target: Int), Never> & Sendable
+        private let sendTargetPositionAction: @Sendable ([String], Int) async -> Void
+        private let syncTargetCacheAction: @Sendable ([String], Int) async -> Void
 
         init(
-            observePositions: @escaping @Sendable ([String]) async -> any AsyncSequence<(actual: ShutterStep, target: ShutterStep), Never> & Sendable,
-            sendTargetPosition: @escaping @Sendable ([String], ShutterStep) async -> Void
+            observePositions: @escaping @Sendable ([String]) async -> any AsyncSequence<(actual: Int, target: Int), Never> & Sendable,
+            sendTargetPosition: @escaping @Sendable ([String], Int) async -> Void,
+            syncTargetCache: @escaping @Sendable ([String], Int) async -> Void
         ) {
             self.observePositionsSource = observePositions
             self.sendTargetPositionAction = sendTargetPosition
+            self.syncTargetCacheAction = syncTargetCache
         }
 
         func observePositions(
             shutterUniqueIds: [String],
-            onUpdate: @escaping @MainActor @Sendable (ShutterStep, ShutterStep) -> Void
+            onUpdate: @escaping @MainActor @Sendable (Int, Int) -> Void
         ) async {
             let stream = await observePositionsSource(shutterUniqueIds)
             for await values in stream {
@@ -266,9 +403,16 @@ final class ShutterStore {
 
         func sendTargetPosition(
             shutterUniqueIds: [String],
-            target: ShutterStep
+            target: Int
         ) async {
             await sendTargetPositionAction(shutterUniqueIds, target)
+        }
+
+        func syncTargetCache(
+            shutterUniqueIds: [String],
+            target: Int
+        ) async {
+            await syncTargetCacheAction(shutterUniqueIds, target)
         }
     }
 
@@ -282,9 +426,9 @@ final class ShutterStore {
     private static func describeEvent(_ event: ShuttersEvent) -> String {
         switch event {
         case .receivedValuesFromStream(let actual, let target):
-            return "receivedValuesFromStream(actual:\(actual.rawValue),target:\(target.rawValue))"
+            return "receivedValuesFromStream(actual:\(actual),target:\(target))"
         case .setTarget(let value):
-            return "setTarget(value:\(value.rawValue))"
+            return "setTarget(value:\(value))"
         case .failedToComplete:
             return "failedToComplete"
         }
@@ -297,7 +441,9 @@ final class ShutterStore {
         case .cancelCompletionTimer:
             return "cancelCompletionTimer"
         case .handleTarget(let value):
-            return "handleTarget(value:\(value.rawValue))"
+            return "handleTarget(value:\(value))"
+        case .syncTargetCache(let value):
+            return "syncTargetCache(value:\(value))"
         }
     }
 }
