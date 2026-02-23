@@ -10,9 +10,25 @@ func runCLI(
 ) async {
     await connection.setKeepAliveEnabled(!disablePingPolling)
     await connection.setAppActive(true)
+    let input = CLIInputReader(stream: stdinLines())
+    let gatewayCatalog = CLIGatewayCatalog()
+    let transactionIdGenerator = CLITransactionIDGenerator()
+    let frameLogger = CLIWebSocketFrameLogger.createDefault()
+    if let frameLogger {
+        await stdout.writeLine("WebSocket frame log file: \(frameLogger.filePath)")
+    } else {
+        await stderr.writeLine("Unable to create WebSocket frame log file.")
+    }
 
     if !disablePingPolling {
-        let initialPingOk = await send(command: .ping(), connection: connection, stderr: stderr)
+        let initialPingOk = await send(
+            command: .ping(),
+            connection: connection,
+            stdout: stdout,
+            stderr: stderr,
+            transactionIdGenerator: transactionIdGenerator,
+            frameLogger: frameLogger
+        )
         guard initialPingOk else {
             await stderr.writeLine("Connection closed before initial ping.")
             await connection.disconnect()
@@ -24,23 +40,63 @@ func runCLI(
         if rawWebSocketOutput {
             let stream = await connection.rawMessages()
             for await payload in stream {
+                if let frameLogger {
+                    await frameLogger.log(rawPayload: payload)
+                }
                 await stdout.write(rawFrameText(from: payload))
             }
             return
         }
 
-        let stream = await connection.decodedMessages(logger: { message in
-            Task { await stderr.writeLine("[polling] \(message)") }
-        })
+        let stream = await connection.decodedMessages(
+            logger: { message in
+                Task { await stderr.writeLine("[polling] \(message)") }
+            },
+            rawFrameHandler: { raw in
+                guard let frameLogger else {
+                    return
+                }
+                Task {
+                    await frameLogger.log(rawMessage: raw)
+                }
+            }
+        )
         for await message in stream {
-            let output = render(message: message)
-            await stdout.writeLine(output)
+            await gatewayCatalog.ingest(message)
+            let knownDevices = await gatewayCatalog.snapshot().devices
+            let lines = renderStandardOutputLines(message: message, knownDevices: knownDevices)
+            if lines.isEmpty {
+                continue
+            }
+            for line in lines {
+                await stdout.writeLine(line)
+            }
         }
     }
 
-    await stdout.writeLine("Connected. Type `help` to list commands.")
+    await stdout.writeLine("Connected. Pre-loading devices/groups/scenes...")
+    await preloadWizardCatalog(
+        connection: connection,
+        stdout: stdout,
+        stderr: stderr,
+        catalog: gatewayCatalog,
+        transactionIdGenerator: transactionIdGenerator,
+        frameLogger: frameLogger
+    )
 
-    inputLoop: for await line in stdinLines() {
+    await stdout.writeLine("Starting wizard mode (`cancel` to return to the command prompt).")
+    await runWizard(
+        connection: connection,
+        stdout: stdout,
+        stderr: stderr,
+        input: input,
+        catalog: gatewayCatalog,
+        transactionIdGenerator: transactionIdGenerator,
+        frameLogger: frameLogger
+    )
+    await stdout.writeLine("Type `help` for commands or `wizard` to re-enter guided mode.")
+
+    inputLoop: while let line = await input.nextLine() {
         guard let result = parseInputCommand(line) else { continue }
         switch result {
         case .failure(let error):
@@ -49,23 +105,50 @@ func runCLI(
             switch command {
             case .help:
                 await stdout.writeLine(commandHelpText())
+            case .wizard:
+                await runWizard(
+                    connection: connection,
+                    stdout: stdout,
+                    stderr: stderr,
+                    input: input,
+                    catalog: gatewayCatalog,
+                    transactionIdGenerator: transactionIdGenerator,
+                    frameLogger: frameLogger
+                )
             case .quit:
                 break inputLoop
             case .setActive(let isActive):
                 await connection.setAppActive(isActive)
                 await stdout.writeLine("App active set to \(isActive).")
             case .send(let command):
-                await send(command: command, connection: connection, stderr: stderr)
+                await send(
+                    command: command,
+                    connection: connection,
+                    stdout: stdout,
+                    stderr: stderr,
+                    transactionIdGenerator: transactionIdGenerator,
+                    frameLogger: frameLogger
+                )
             case .sendMany(let commands):
                 for command in commands {
-                    await send(command: command, connection: connection, stderr: stderr)
+                    await send(
+                        command: command,
+                        connection: connection,
+                        stdout: stdout,
+                        stderr: stderr,
+                        transactionIdGenerator: transactionIdGenerator,
+                        frameLogger: frameLogger
+                    )
                 }
             case .sendRaw(let raw):
-                do {
-                    try await connection.send(text: raw)
-                } catch {
-                    await stderr.writeLine("Send failed: \(error)")
-                }
+                await send(
+                    rawRequest: raw,
+                    connection: connection,
+                    stdout: stdout,
+                    stderr: stderr,
+                    transactionIdGenerator: transactionIdGenerator,
+                    frameLogger: frameLogger
+                )
             }
         }
     }
@@ -329,18 +412,166 @@ private func handleSiteListingIfNeeded(
 }
 
 @discardableResult
-private func send(
+func send(
     command: TydomCommand,
     connection: TydomConnection,
-    stderr: ConsoleWriter
+    stdout: ConsoleWriter,
+    stderr: ConsoleWriter,
+    transactionIdGenerator: CLITransactionIDGenerator,
+    frameLogger: CLIWebSocketFrameLogger? = nil
+) async -> Bool {
+    let prepared = await prepareRequestForSend(
+        command.request,
+        transactionIdGenerator: transactionIdGenerator
+    )
+    return await sendPreparedRequest(
+        prepared,
+        connection: connection,
+        stdout: stdout,
+        stderr: stderr,
+        frameLogger: frameLogger
+    )
+}
+
+@discardableResult
+func send(
+    rawRequest: String,
+    connection: TydomConnection,
+    stdout: ConsoleWriter,
+    stderr: ConsoleWriter,
+    transactionIdGenerator: CLITransactionIDGenerator,
+    frameLogger: CLIWebSocketFrameLogger? = nil
+) async -> Bool {
+    let prepared = await prepareRequestForSend(
+        rawRequest,
+        transactionIdGenerator: transactionIdGenerator
+    )
+    return await sendPreparedRequest(
+        prepared,
+        connection: connection,
+        stdout: stdout,
+        stderr: stderr,
+        frameLogger: frameLogger
+    )
+}
+
+struct CLIPreparedRequest: Sendable {
+    let request: String
+    let transactionId: String
+    let requestLine: String
+}
+
+func prepareRequestForSend(
+    _ request: String,
+    transactionIdGenerator: CLITransactionIDGenerator
+) async -> CLIPreparedRequest {
+    let transactionId = await transactionIdGenerator.next()
+    let requestWithTransactionID = replacingTransactionID(
+        in: request,
+        transactionId: transactionId
+    )
+    let requestLine = requestStartLine(in: requestWithTransactionID)
+    return CLIPreparedRequest(
+        request: requestWithTransactionID,
+        transactionId: transactionId,
+        requestLine: requestLine
+    )
+}
+
+@discardableResult
+func sendPreparedRequest(
+    _ request: CLIPreparedRequest,
+    connection: TydomConnection,
+    stdout: ConsoleWriter,
+    stderr: ConsoleWriter,
+    frameLogger: CLIWebSocketFrameLogger? = nil
 ) async -> Bool {
     do {
-        try await connection.send(text: command.request)
+        try await connection.send(text: request.request)
+        if let frameLogger {
+            await frameLogger.logSentCommand(request)
+        }
+        if let path = requestPath(fromStartLine: request.requestLine),
+           shouldSuppressStandardOutputPath(path) == false {
+            await stdout.writeLine("--->>> command sent: tx=\(request.transactionId) | \(request.requestLine)")
+        }
         return true
     } catch {
-        await stderr.writeLine("Send failed: \(error)")
+        await stderr.writeLine("Send failed [tx=\(request.transactionId)]: \(error)")
         return false
     }
+}
+
+private func requestPath(fromStartLine startLine: String) -> String? {
+    let parts = startLine.split(separator: " ", omittingEmptySubsequences: true)
+    guard parts.count >= 2 else {
+        return nil
+    }
+    return String(parts[1])
+}
+
+private func requestStartLine(in request: String) -> String {
+    if let line = request.components(separatedBy: "\r\n").first, line.isEmpty == false {
+        return line
+    }
+    if let line = request.components(separatedBy: "\n").first, line.isEmpty == false {
+        return line
+    }
+    return "<invalid request>"
+}
+
+private func replacingTransactionID(
+    in request: String,
+    transactionId: String
+) -> String {
+    if let range = request.range(of: "\r\n\r\n") {
+        let header = String(request[..<range.lowerBound])
+        let body = String(request[range.upperBound...])
+        let updatedHeader = updatingHeaderLines(
+            header,
+            lineSeparator: "\r\n",
+            transactionId: transactionId
+        )
+        return updatedHeader + "\r\n\r\n" + body
+    }
+
+    if let range = request.range(of: "\n\n") {
+        let header = String(request[..<range.lowerBound])
+        let body = String(request[range.upperBound...])
+        let updatedHeader = updatingHeaderLines(
+            header,
+            lineSeparator: "\n",
+            transactionId: transactionId
+        )
+        return updatedHeader + "\n\n" + body
+    }
+
+    return request
+}
+
+private func updatingHeaderLines(
+    _ header: String,
+    lineSeparator: String,
+    transactionId: String
+) -> String {
+    var lines = header.components(separatedBy: lineSeparator)
+    guard lines.isEmpty == false else {
+        return header
+    }
+
+    var didReplace = false
+    for index in lines.indices.dropFirst() {
+        if lines[index].lowercased().hasPrefix("transac-id:") {
+            lines[index] = "Transac-Id: \(transactionId)"
+            didReplace = true
+        }
+    }
+
+    if didReplace == false {
+        lines.append("Transac-Id: \(transactionId)")
+    }
+
+    return lines.joined(separator: lineSeparator)
 }
 
 private func stdinLines() -> AsyncStream<String> {

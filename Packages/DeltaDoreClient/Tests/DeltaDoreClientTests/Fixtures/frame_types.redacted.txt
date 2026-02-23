@@ -1,0 +1,1173 @@
+FRAME TYPE: Gateway information
+RECEIVED AFTER: GET /info with transaction id 1000000000000
+
+==================== WEBSOCKET FRAME ====================
+index=10 | timestamp=2026-02-22T16:58:00.515Z | uriOrigin=/info | transactionId=1000000000000 | parseError=n/a | payloadBytes=2490
+HTTP/1.1 200 OK
+Server: Tydom-100000000001
+Uri-Origin: /info
+Content-Type: application/json
+Transfer-Encoding: chunked
+Transac-Id: 1000000000000
+
+1
+{
+1D
+"productName": "TYWELL HOME",
+16
+"mac": "100000000001",
+11
+"config": "prod",
+12
+"bddEmpty": false,
+F
+"bddStatus": 0,
+10
+"apiMode": true,
+1C
+"mainVersionSW": "03.22.42",
+1C
+"mainVersionHW": "00.00.01",
+14
+"mainId": "6702008",
+1C
+"mainReference": "27170010",
+1B
+"keyVersionSW": "01.08.05",
+1B
+"keyVersionHW": "00.00.01",
+1E
+"keyVersionStack": "04.02.06",
+1B
+"keyReference": "27170020",
+1E
+"zigbeeVersionSW": "01.01.01",
+1E
+"zigbeeReference": "27170030",
+1A
+"javaVersion": "01.08.00",
+1D
+"oryxVersion": "2.1.8-10.08",
+38
+"bootReference": "P27170011", "bootVersion": "01.00.12",
+F
+"TYDOM.dat": 0,
+11
+"config.json": 0,
+E
+"mom.json": 0,
+11
+"gateway.dat": 0,
+F
+"bdd.json": 18,
+12
+"collect.json": 5,
+12
+"groups.json": 17,
+12
+"mom_api.json": 1,
+14
+"scenario.json": 26,
+10
+"site.json": 90,
+12
+"bdd_mig.json": 0,
+13
+"info_mig.json": 0,
+13
+"info_col.json": 5,
+12
+"absence.json": 0,
+12
+"anticip.json": 3,
+13
+"trigger.json": 28,
+13
+"bioclim.json": 27,
+16
+"data_config.json": 0,
+14
+"grp_proto.json": 4,
+26
+"urlMediation": "mediation.tydom.com",
+15
+"pltRegistered":true,
+19
+"updateAvailable": false,
+17
+"passwordEmpty": false,
+F
+"maintenance":{
+28
+"id": "10000000000000000000000000000002"
+2
+},
+B
+"geoloc": {
+16
+"longitude": -1643008,
+14
+"latitude": 49527659
+2
+},
+A
+"clock": {
+25
+"clock": "2026-02-22T17:57:58+01:00",
+10
+"source": "ntp",
+F
+"timezone": 60,
+14
+"summerOffset": "ON"
+2
+},
+C
+"moments": {
+C
+"suspend": {
+7
+"to": 0
+3
+}},
+F
+"local_claim":{
+12
+"status": "CLOSE",
+24
+"lastAccess": "2014-01-01T00:00:00Z"
+2
+},
+C
+"weather": {
+34
+"outTempSrc":{"devId":1000000003,"epId":1000000003},
+33
+"weatherSrc":{"devId":1000000003,"epId":1000000003}
+2
+},
+E
+"protocols": [
+71
+{"protocol":"X3D", "available":true, "installed":true, "ready":true, "status":"running", "installStatus":"idle"},
+74
+{"protocol":"ZIGBEE", "available":true, "installed":true, "ready":true, "status":"running", "installStatus":"idle"},
+27
+{"protocol":"X3DV", "available":false},
+75
+{"protocol":"PltService", "available":true, "installed":true, "ready":true, "status":"idle", "installStatus":"idle"},
+71
+{"protocol":"HTTP", "available":true, "installed":true, "ready":true, "status":"running", "installStatus":"idle"}
+1
+]
+1
+}
+0
+
+
+=========================================================
+
+FRAME TYPE: DEVICES
+RECEIVED AFTER: GET /devices/data with transaction id 1000000000004
+
+==================== WEBSOCKET FRAME ====================
+index=11 | timestamp=2026-02-22T17:06:01.308Z | uriOrigin=/devices/data | transactionId=1000000000004 | parseError=n/a | payloadBytes=12620
+HTTP/1.1 200 OK
+Server: Tydom-100000000001
+Uri-Origin: /devices/data
+Content-Type: application/json
+Transfer-Encoding: chunked
+Transac-Id: 1000000000004
+
+41
+[{"id":1000000005,"endpoints":[{"id":1000000005,"error":0,"data":
+3D
+[{"name":"thermicDefect","validity":"upToDate","value":false}
+36
+,{"name":"position","validity":"upToDate","value":100}
+38
+,{"name":"onFavPos","validity":"upToDate","value":false}
+3E
+,{"name":"obstacleDefect","validity":"upToDate","value":false}
+39
+,{"name":"intrusion","validity":"upToDate","value":false}
+3A
+,{"name":"battDefect","validity":"upToDate","value":false}
+35
+,{"name":"jobsMP","validity":"upToDate","value":3096}
+41
+,{"name":"softVersion0","validity":"upToDate","value":"01.04.00"}
+41
+,{"name":"softPlan0","validity":"upToDate","value":"24.28.00.20"}
+41
+,{"name":"softVersion1","validity":"upToDate","value":"02.05.02"}
+41
+,{"name":"softPlan1","validity":"upToDate","value":"24.94.00.11"}
+41
+,{"name":"softVersion2","validity":"upToDate","value":"01.00.00"}
+41
+,{"name":"softPlan2","validity":"upToDate","value":"24.28.00.31"}
+41
+,{"name":"softVersion3","validity":"upToDate","value":"01.01.00"}
+41
+,{"name":"softPlan3","validity":"upToDate","value":"22.10.00.30"}
+45
+]}]},{"id":1000000006,"endpoints":[{"id":1000000006,"error":0,"data":
+3D
+[{"name":"thermicDefect","validity":"upToDate","value":false}
+36
+,{"name":"position","validity":"upToDate","value":100}
+38
+,{"name":"onFavPos","validity":"upToDate","value":false}
+3E
+,{"name":"obstacleDefect","validity":"upToDate","value":false}
+39
+,{"name":"intrusion","validity":"upToDate","value":false}
+3A
+,{"name":"battDefect","validity":"upToDate","value":false}
+35
+,{"name":"jobsMP","validity":"upToDate","value":3096}
+41
+,{"name":"softVersion0","validity":"upToDate","value":"01.04.00"}
+41
+,{"name":"softPlan0","validity":"upToDate","value":"24.28.00.20"}
+41
+,{"name":"softVersion1","validity":"upToDate","value":"02.05.02"}
+41
+,{"name":"softPlan1","validity":"upToDate","value":"24.94.00.11"}
+41
+,{"name":"softVersion2","validity":"upToDate","value":"01.00.00"}
+41
+,{"name":"softPlan2","validity":"upToDate","value":"24.28.00.31"}
+41
+,{"name":"softVersion3","validity":"upToDate","value":"01.01.00"}
+41
+,{"name":"softPlan3","validity":"upToDate","value":"22.10.00.30"}
+45
+]}]},{"id":1000000007,"endpoints":[{"id":1000000007,"error":0,"data":
+3D
+[{"name":"thermicDefect","validity":"upToDate","value":false}
+36
+,{"name":"position","validity":"upToDate","value":100}
+38
+,{"name":"onFavPos","validity":"upToDate","value":false}
+3E
+,{"name":"obstacleDefect","validity":"upToDate","value":false}
+39
+,{"name":"intrusion","validity":"upToDate","value":false}
+3A
+,{"name":"battDefect","validity":"upToDate","value":false}
+35
+,{"name":"jobsMP","validity":"upToDate","value":3096}
+41
+,{"name":"softVersion0","validity":"upToDate","value":"01.04.00"}
+41
+,{"name":"softPlan0","validity":"upToDate","value":"24.28.00.20"}
+41
+,{"name":"softVersion1","validity":"upToDate","value":"02.05.02"}
+41
+,{"name":"softPlan1","validity":"upToDate","value":"24.94.00.11"}
+41
+,{"name":"softVersion2","validity":"upToDate","value":"01.00.00"}
+41
+,{"name":"softPlan2","validity":"upToDate","value":"24.28.00.31"}
+41
+,{"name":"softVersion3","validity":"upToDate","value":"01.01.00"}
+41
+,{"name":"softPlan3","validity":"upToDate","value":"22.10.00.30"}
+45
+]}]},{"id":1000000008,"endpoints":[{"id":1000000008,"error":0,"data":
+3D
+[{"name":"thermicDefect","validity":"upToDate","value":false}
+36
+,{"name":"position","validity":"upToDate","value":100}
+38
+,{"name":"onFavPos","validity":"upToDate","value":false}
+3E
+,{"name":"obstacleDefect","validity":"upToDate","value":false}
+39
+,{"name":"intrusion","validity":"upToDate","value":false}
+3A
+,{"name":"battDefect","validity":"upToDate","value":false}
+35
+,{"name":"jobsMP","validity":"upToDate","value":3096}
+41
+,{"name":"softVersion0","validity":"upToDate","value":"01.04.00"}
+41
+,{"name":"softPlan0","validity":"upToDate","value":"24.28.00.20"}
+41
+,{"name":"softVersion1","validity":"upToDate","value":"02.05.02"}
+41
+,{"name":"softPlan1","validity":"upToDate","value":"24.94.00.11"}
+41
+,{"name":"softVersion2","validity":"upToDate","value":"01.00.00"}
+41
+,{"name":"softPlan2","validity":"upToDate","value":"24.28.00.31"}
+41
+,{"name":"softVersion3","validity":"upToDate","value":"01.01.00"}
+41
+,{"name":"softPlan3","validity":"upToDate","value":"22.10.00.30"}
+45
+]}]},{"id":1000000009,"endpoints":[{"id":1000000009,"error":0,"data":
+3D
+[{"name":"thermicDefect","validity":"upToDate","value":false}
+36
+,{"name":"position","validity":"upToDate","value":100}
+38
+,{"name":"onFavPos","validity":"upToDate","value":false}
+3E
+,{"name":"obstacleDefect","validity":"upToDate","value":false}
+39
+,{"name":"intrusion","validity":"upToDate","value":false}
+3A
+,{"name":"battDefect","validity":"upToDate","value":false}
+35
+,{"name":"jobsMP","validity":"upToDate","value":3096}
+41
+,{"name":"softVersion0","validity":"upToDate","value":"01.04.00"}
+41
+,{"name":"softPlan0","validity":"upToDate","value":"24.28.00.20"}
+41
+,{"name":"softVersion1","validity":"upToDate","value":"02.05.02"}
+41
+,{"name":"softPlan1","validity":"upToDate","value":"24.94.00.11"}
+41
+,{"name":"softVersion2","validity":"upToDate","value":"01.00.00"}
+41
+,{"name":"softPlan2","validity":"upToDate","value":"24.28.00.31"}
+41
+,{"name":"softVersion3","validity":"upToDate","value":"01.01.00"}
+41
+,{"name":"softPlan3","validity":"upToDate","value":"22.10.00.30"}
+45
+]}]},{"id":1000000010,"endpoints":[{"id":1000000010,"error":0,"data":
+3D
+[{"name":"thermicDefect","validity":"upToDate","value":false}
+36
+,{"name":"position","validity":"upToDate","value":100}
+38
+,{"name":"onFavPos","validity":"upToDate","value":false}
+3E
+,{"name":"obstacleDefect","validity":"upToDate","value":false}
+39
+,{"name":"intrusion","validity":"upToDate","value":false}
+3A
+,{"name":"battDefect","validity":"upToDate","value":false}
+35
+,{"name":"jobsMP","validity":"upToDate","value":3096}
+41
+,{"name":"softVersion0","validity":"upToDate","value":"01.04.00"}
+41
+,{"name":"softPlan0","validity":"upToDate","value":"24.28.00.20"}
+41
+,{"name":"softVersion1","validity":"upToDate","value":"02.05.02"}
+41
+,{"name":"softPlan1","validity":"upToDate","value":"24.94.00.11"}
+41
+,{"name":"softVersion2","validity":"upToDate","value":"01.00.00"}
+41
+,{"name":"softPlan2","validity":"upToDate","value":"24.28.00.31"}
+41
+,{"name":"softVersion3","validity":"upToDate","value":"01.01.00"}
+41
+,{"name":"softPlan3","validity":"upToDate","value":"22.10.00.30"}
+45
+]}]},{"id":1000000011,"endpoints":[{"id":1000000011,"error":0,"data":
+3D
+[{"name":"thermicDefect","validity":"upToDate","value":false}
+34
+,{"name":"position","validity":"upToDate","value":0}
+38
+,{"name":"onFavPos","validity":"upToDate","value":false}
+3E
+,{"name":"obstacleDefect","validity":"upToDate","value":false}
+39
+,{"name":"intrusion","validity":"upToDate","value":false}
+3A
+,{"name":"battDefect","validity":"upToDate","value":false}
+35
+,{"name":"jobsMP","validity":"upToDate","value":3096}
+41
+,{"name":"softVersion0","validity":"upToDate","value":"01.04.00"}
+41
+,{"name":"softPlan0","validity":"upToDate","value":"24.28.00.20"}
+41
+,{"name":"softVersion1","validity":"upToDate","value":"02.05.02"}
+41
+,{"name":"softPlan1","validity":"upToDate","value":"24.94.00.11"}
+41
+,{"name":"softVersion2","validity":"upToDate","value":"01.00.00"}
+41
+,{"name":"softPlan2","validity":"upToDate","value":"24.28.00.31"}
+41
+,{"name":"softVersion3","validity":"upToDate","value":"01.01.00"}
+41
+,{"name":"softPlan3","validity":"upToDate","value":"22.10.00.30"}
+7B
+]}]},{"id":1000000012,"endpoints":[{"id":1000000012,"error":0,"data":[{"name":"zclVersion","validity":"upToDate","value":3}
+43
+,{"name":"manufacturer","validity":"upToDate","value":"Rademacher"}
+48
+,{"name":"modelIdentifier","validity":"upToDate","value":"RDM-35274001"}
+31
+,{"name":"level","validity":"upToDate","value":0}
+3B
+,{"name":"colorXY","validity":"upToDate","value":100000013}
+3F
+,{"name":"miredTemperatureW","validity":"upToDate","value":153}
+42
+,{"name":"minMiredTemperatureW","validity":"upToDate","value":153}
+42
+,{"name":"maxMiredTemperatureW","validity":"upToDate","value":555}
+38
+,{"name":"colorMode","validity":"upToDate","value":"XY"}
+7B
+]}]},{"id":1000000014,"endpoints":[{"id":1000000014,"error":0,"data":[{"name":"zclVersion","validity":"upToDate","value":3}
+43
+,{"name":"manufacturer","validity":"upToDate","value":"Rademacher"}
+48
+,{"name":"modelIdentifier","validity":"upToDate","value":"RDM-35274001"}
+31
+,{"name":"level","validity":"upToDate","value":0}
+3B
+,{"name":"colorXY","validity":"upToDate","value":100000015}
+3F
+,{"name":"miredTemperatureW","validity":"upToDate","value":153}
+42
+,{"name":"minMiredTemperatureW","validity":"upToDate","value":153}
+42
+,{"name":"maxMiredTemperatureW","validity":"upToDate","value":555}
+38
+,{"name":"colorMode","validity":"upToDate","value":"XY"}
+77
+]}]},{"id":1000000016,"endpoints":[{"id":1000000016,"error":0,"data":[{"name":"config","validity":"upToDate","value":2}
+3A
+,{"name":"battDefect","validity":"upToDate","value":false}
+40
+,{"name":"supervisionMode","validity":"upToDate","value":"LONG"}
+3F
+,{"name":"techSmokeDefect","validity":"upToDate","value":false}
+7F
+]}]},{"id":1000000003,"endpoints":[{"id":1000000003,"error":0,"data":[{"name":"battDefect","validity":"upToDate","value":false}
+38
+,{"name":"configTemp","validity":"upToDate","value":520}
+3F
+,{"name":"outTemperature","validity":"upToDate","value":11.440}
+7F
+]}]},{"id":1000000017,"endpoints":[{"id":1000000017,"error":0,"data":[{"name":"battDefect","validity":"upToDate","value":false}
+38
+,{"name":"configSensor","validity":"upToDate","value":8}
+36
+,{"name":"lightPower","validity":"upToDate","value":2}
+36
+,{"name":"configTemp","validity":"upToDate","value":0}
+86
+]}]},{"id":1000000018,"endpoints":[{"id":1000000018,"error":0,"data":[{"name":"authorization","validity":"upToDate","value":"HEATING"}
+39
+,{"name":"setpoint","validity":"upToDate","value":20.000}
+3B
+,{"name":"thermicLevel","validity":"upToDate","value":null}
+3B
+,{"name":"hvacMode","validity":"upToDate","value":"NORMAL"}
+35
+,{"name":"timeDelay","validity":"upToDate","value":0}
+3C
+,{"name":"temperature","validity":"upToDate","value":20.790}
+37
+,{"name":"tempoOn","validity":"upToDate","value":false}
+3B
+,{"name":"antifrostOn","validity":"upToDate","value":false}
+3E
+,{"name":"loadSheddingOn","validity":"upToDate","value":false}
+3F
+,{"name":"openingDetected","validity":"upToDate","value":false}
+40
+,{"name":"presenceDetected","validity":"upToDate","value":false}
+37
+,{"name":"absence","validity":"upToDate","value":false}
+40
+,{"name":"productionDefect","validity":"upToDate","value":false}
+40
+,{"name":"batteryCmdDefect","validity":"upToDate","value":false}
+40
+,{"name":"tempSensorDefect","validity":"upToDate","value":false}
+42
+,{"name":"tempSensorShortCut","validity":"upToDate","value":false}
+42
+,{"name":"tempSensorOpenCirc","validity":"upToDate","value":false}
+37
+,{"name":"boostOn","validity":"upToDate","value":false}
+39
+,{"name":"anticipCoeff","validity":"upToDate","value":30}
+7E
+]}]},{"id":1000000019,"endpoints":[{"id":1000000019,"error":0,"data":[{"name":"synchroPps","validity":"upToDate","value":true}
+30
+,{"name":"jobs","validity":"upToDate","value":3}
+32
+,{"name":"jobsRM","validity":"upToDate","value":8}
+35
+,{"name":"battLevel","validity":"upToDate","value":2}
+36
+,{"name":"jobsMP","validity":"upToDate","value":24594}
+43
+,{"name":"ambientTemperature","validity":"upToDate","value":20.790}
+38
+,{"name":"hygroIn","validity":"upToDate","value":62.000}
+40
+,{"name":"softVersion","validity":"upToDate","value":"01.04.03"}
+40
+,{"name":"softPlan","validity":"upToDate","value":"25.60.00.10"}
+50
+,{"name":"uid","validity":"upToDate","value":"10000000000000000000000000000020"}
+39
+,{"name":"nbRFActuators","validity":"upToDate","value":1}
+38
+,{"name":"selectedProg","validity":"upToDate","value":0}
+39
+,{"name":"shutterCmd","validity":"upToDate","value":null}
+89
+]}]},{"id":1000000021,"endpoints":[{"id":1000000021,"error":0,"data":[{"name":"energyIndexHeatWatt","validity":"upToDate","value":782000}
+43
+,{"name":"energyIndexECSWatt","validity":"upToDate","value":366000}
+3F
+,{"name":"energyIndexCoolWatt","validity":"upToDate","value":0}
+46
+,{"name":"outTemperature","validity":"upToDate","value":11.100}]}]}]
+
+0
+
+
+=========================================================
+
+FRAME TYPE: GROUPS
+RECEIVED AFTER: GET /groups/file with transaction id 1000000000022
+
+==================== WEBSOCKET FRAME ====================
+index=13 | timestamp=2026-02-22T17:06:45.140Z | uriOrigin=/groups/file | transactionId=1000000000022 | parseError=n/a | payloadBytes=1369
+HTTP/1.1 200 OK
+Server: Tydom-100000000001
+Uri-Origin: /groups/file
+Content-Type: application/json
+Content-Length: 1197
+Transac-Id: 1000000000022
+File-Version: 17
+
+{"groups":[{"id":12932271,"devices":[{"id":1000000014,"endpoints":[{"id":1000000014}]},{"id":1000000012,"endpoints":[{"id":1000000012}]}],"areas":[]},{"areas":[],"devices":[{"endpoints":[{"id":1000000008}],"id":1000000008},{"endpoints":[{"id":1000000006}],"id":1000000006},{"endpoints":[{"id":1000000005}],"id":1000000005},{"id":1000000009,"endpoints":[{"id":1000000009}]},{"endpoints":[{"id":1000000011}],"id":1000000011},{"endpoints":[{"id":1000000007}],"id":1000000007},{"id":1000000010,"endpoints":[{"id":1000000010}]}],"id":100000023},{"areas":[],"id":1000000024,"devices":[]},{"id":100000025,"areas":[],"devices":[]},{"devices":[{"id":1000000006,"endpoints":[{"id":1000000006}]},{"endpoints":[{"id":1000000007}],"id":1000000007},{"endpoints":[{"id":1000000008}],"id":1000000008},{"id":1000000009,"endpoints":[{"id":1000000009}]},{"id":1000000005,"endpoints":[{"id":1000000005}]}],"id":1000000026,"areas":[]},{"devices":[{"endpoints":[{"id":1000000012}],"id":1000000012},{"endpoints":[{"id":1000000014}],"id":1000000014}],"areas":[],"id":1000000027},{"areas":[],"id":1000000028,"devices":[{"id":1000000009,"endpoints":[{"id":1000000009}]},{"endpoints":[{"id":1000000008}],"id":1000000008}]}]}
+=========================================================
+
+FRAME TYPE: SCENES
+RECEIVED AFTER: GET /scenarios/file with transaction id 1000000000029
+
+==================== WEBSOCKET FRAME ====================
+index=15 | timestamp=2026-02-22T17:07:23.547Z | uriOrigin=/scenarios/file | transactionId=1000000000029 | parseError=n/a | payloadBytes=1838
+HTTP/1.1 200 OK
+Server: Tydom-100000000001
+Uri-Origin: /scenarios/file
+Content-Type: application/json
+Content-Length: 1663
+Transac-Id: 1000000000029
+File-Version: 26
+
+{"scn":[{"epAct":[{"epId":1000000012,"state":[{"name":"level","value":"100.0"},{"value":"100000013","name":"colorXY"}],"devId":1000000012},{"devId":1000000014,"epId":1000000014,"state":[{"name":"level","value":"100.0"},{"name":"colorXY","value":"100000015"}]},{"epId":1000000005,"devId":1000000005,"state":[{"value":"0.0","name":"position"}]},{"devId":1000000006,"epId":1000000006,"state":[{"name":"position","value":"0.0"}]},{"epId":1000000007,"devId":1000000007,"state":[{"name":"position","value":"0.0"}]},{"state":[{"name":"position","value":"0.0"}],"devId":1000000008,"epId":1000000008},{"state":[{"name":"position","value":"0.0"}],"epId":1000000009,"devId":1000000009}],"id":1000000030},{"id":1000000031,"grpAct":[{"id":1000000026,"state":[{"name":"position","value":"100.0"}]}]},{"id":1000000032,"grpAct":[{"id":1000000026,"state":[{"value":"0.0","name":"position"}]},{"id":12932271,"state":[{"name":"level","value":"0.0"}]}]},{"id":100000033,"epAct":[{"state":[{"value":"0.0","name":"level"},{"name":"colorXY","value":"100000013"}],"devId":1000000012,"epId":1000000012},{"state":[{"name":"level","value":"0.0"},{"value":"100000015","name":"colorXY"}],"epId":1000000014,"devId":1000000014}]},{"id":1000000034,"grpAct":[{"id":1000000026,"state":[{"value":"UP","name":"positionCmd"}]}]},{"grpAct":[{"id":1000000026,"state":[{"value":"DOWN","name":"positionCmd"}]}],"id":1000000035},{"grpAct":[{"state":[{"name":"positionCmd","value":"STOP"}],"id":1000000026}],"id":100000036},{"grpAct":[{"state":[{"value":"100.0","name":"level"}],"id":1000000027}],"id":1000000037},{"id":1000000038,"grpAct":[{"state":[{"name":"position","value":"0.0"}],"id":1000000028}]}]}
+=========================================================
+
+FRAME TYPE: CONFIG
+RECEIVED AFTER: GET /configs/file with transaction id 1000000000039
+
+==================== WEBSOCKET FRAME ====================
+index=17 | timestamp=2026-02-22T17:07:50.238Z | uriOrigin=/configs/file | transactionId=1000000000039 | parseError=n/a | payloadBytes=5248
+HTTP/1.1 200 OK
+Server: Tydom-100000000001
+Uri-Origin: /configs/file
+Content-Type: application/json
+Content-Length: 5075
+Transac-Id: 1000000000039
+File-Version: 90
+
+{"scenarios":[{"rule_id":"","type":"NORMAL","picto":"picto_scenario_tv","id":1000000030,"name":"Ambiance Film"},{"id":1000000031,"rule_id":"","type":"NORMAL","name":"Ouverture Zone Jour","picto":"picto_scenario_day"},{"picto":"picto_scenario_night","rule_id":"","type":"NORMAL","id":1000000032,"name":"Fermeture Zone Jour"},{"id":100000033,"rule_id":"","picto":"picto_scenario_clap","type":"NORMAL","name":"Éteindre Salon"},{"name":"TWC_UP","id":1000000034,"picto":"picto_scenario_clap","rule_id":"","type":"RE2020"},{"type":"RE2020","picto":"picto_scenario_clap","id":1000000035,"name":"TWC_DOWN","rule_id":""},{"picto":"picto_scenario_clap","rule_id":"","type":"RE2020","id":100000036,"name":"TWC_STOP"},{"rule_id":"","name":"Allumer Salon","type":"NORMAL","picto":"picto_scenario_clap","id":1000000037},{"rule_id":"","type":"NORMAL","id":1000000038,"name":"Fermer Salle Et Cuis","picto":"picto_scenario_clap"}],"date":1000000040,"version":"1.0.1","moments":[],"id_catalog":"F2BD90F93B888DA02C54980F11AE4796DFCC98F447CD3FE326F5A3A964C939BF","endpoints":[{"anticipation_start":false,"id_endpoint":1000000005,"name":"Salon Gauche","first_usage":"shutter","last_usage":"shutter","widget_behavior":{"tutorial_id":"25_tymoov"},"picto":"picto_shutter","id_device":1000000005},{"first_usage":"shutter","id_device":1000000006,"anticipation_start":false,"last_usage":"shutter","picto":"","id_endpoint":1000000006,"name":"Salon Milieu","widget_behavior":{"tutorial_id":"25_tymoov"}},{"first_usage":"shutter","id_endpoint":1000000007,"widget_behavior":{"tutorial_id":"25_tymoov"},"id_device":1000000007,"last_usage":"shutter","name":"Salon Droite","anticipation_start":false,"picto":""},{"first_usage":"shutter","id_device":1000000008,"name":"Salle","picto":"","last_usage":"shutter","widget_behavior":{"tutorial_id":"25_tymoov"},"anticipation_start":false,"id_endpoint":1000000008},{"anticipation_start":false,"last_usage":"shutter","id_device":1000000009,"picto":"","first_usage":"shutter","id_endpoint":1000000009,"name":"Cuisine","widget_behavior":{"tutorial_id":"25_tymoov"}},{"widget_behavior":{"tutorial_id":"25_tymoov"},"picto":"","id_device":1000000010,"last_usage":"shutter","anticipation_start":false,"first_usage":"shutter","name":"Chambre Ethan","id_endpoint":1000000010},{"anticipation_start":false,"last_usage":"shutter","id_endpoint":1000000011,"first_usage":"shutter","id_device":1000000011,"name":"Chambre Parents","picto":"","widget_behavior":{"tutorial_id":"25_tymoov"}},{"id_device":1000000012,"first_usage":"light","id_endpoint":1000000012,"widget_behavior":{"tutorial_id":"bulb_DD"},"anticipation_start":false,"last_usage":"light","picto":"","name":"TV Gauche"},{"picto":"","name":"TV Droite","last_usage":"light","first_usage":"light","id_endpoint":1000000014,"widget_behavior":{"tutorial_id":"bulb_DD"},"anticipation_start":false,"id_device":1000000014},{"id_device":1000000016,"first_usage":"sensor","picto":"","id_endpoint":1000000016,"name":"Incendie Maison","widget_behavior":{"tutorial_id":"sensor_dfr"},"anticipation_start":false,"last_usage":"sensorDFR"},{"first_usage":"sensor","picto":"","anticipation_start":false,"id_endpoint":1000000003,"widget_behavior":{"tutorial_id":"35_se2000"},"id_device":1000000003,"name":"Température Ext.","last_usage":"sensorThermo"},{"last_usage":"sensorSun","picto":"","id_endpoint":1000000017,"first_usage":"sensor","anticipation_start":false,"widget_behavior":{"tutorial_id":"tysense_sun"},"id_device":1000000017,"name":"Ensoleillement"},{"id_device":1000000018,"id_endpoint":1000000018,"anticipation_start":false,"name":"Pompe a chaleur","first_usage":"hvac","picto":"picto_boiler1","last_usage":"boiler"},{"picto":"","widget_behavior":{"tutorial_id":"tywell_control","action":"shutterCmd"},"last_usage":"re2020ControlPassive","name":"Température Int.","first_usage":"hvac","id_device":1000000019,"id_endpoint":1000000019,"anticipation_start":false},{"anticipation_start":false,"id_device":1000000021,"id_endpoint":1000000021,"first_usage":"conso","last_usage":"conso","picto":"","name":"Consommation PAC","widget_behavior":{"tutorial_id":"6_RecepteurRF_serie6000_4"}}],"os":"ios","version_application":"4.17.40 (1629)","groups":[{"id":12932271,"is_group_user":false,"name":"TOTAL","usage":"light","group_all":true},{"usage":"shutter","id":100000023,"group_all":true,"is_group_user":false,"name":"TOTAL"},{"name":"TOTAL","id":1000000024,"is_group_user":false,"usage":"awning","group_all":true},{"is_group_user":false,"id":100000025,"name":"TOTAL","group_all":true,"usage":"plug"},{"group_all":false,"name":"Volets Jour","is_group_user":true,"id":1000000026,"picto":"picto_shutter","usage":"shutter"},{"is_group_user":true,"usage":"light","name":"Arrière TV","id":1000000027,"picto":"picto_lamp","group_all":false},{"picto":"picto_shutter","is_group_user":true,"group_all":false,"name":"Salle et Cuisine","id":1000000028,"usage":"shutter"}],"areas":[],"old_tycam":false,"new_tycam":true,"zigbee_networks":[{"extended_pan_id":"0x870E17478E172E5C","name":"WarpZigbeeNet","is_connected":true,"type":"coordinator"}]}
+=========================================================
+
+FRAME TYPE: AREAS
+RECEIVED AFTER: GET /areas/data with transaction id 1000000000041
+
+==================== WEBSOCKET FRAME ====================
+index=19 | timestamp=2026-02-22T17:08:13.415Z | uriOrigin=/areas/data | transactionId=1000000000041 | parseError=n/a | payloadBytes=173
+HTTP/1.1 200 OK
+Server: Tydom-100000000001
+Uri-Origin: /areas/data
+Content-Type: application/json
+Transfer-Encoding: chunked
+Transac-Id: 1000000000041
+
+4
+[]
+
+0
+
+
+=========================================================
+
+FRAME TYPE: MOMENTS
+RECEIVED AFTER: GET /moments/file with transaction id 1000000000042
+
+==================== WEBSOCKET FRAME ====================
+index=21 | timestamp=2026-02-22T17:08:31.941Z | uriOrigin=/moments/file | transactionId=1000000000042 | parseError=n/a | payloadBytes=305
+HTTP/1.1 200 OK
+Server: Tydom-100000000001
+Uri-Origin: /moments/file
+Content-Type: application/json
+Content-Length: 134
+Transac-Id: 1000000000042
+File-Version: 1
+
+{"mom":[],"rdv":[],"prog":[{"wed":[],"id":0,"sun":[],"tue":[],"mon":[],"fri":[],"thu":[],"sat":[]}],"event":[{"rRule":[],"progId":0}]}
+=========================================================
+
+FRAME TYPE: DEVICE (Shutter)
+RECEIVED AFTER: GET /devices/1000000010/endpoints/1000000010/data with transaction id 1000000000043
+
+==================== WEBSOCKET FRAME ====================
+index=25 | timestamp=2026-02-22T17:09:29.154Z | uriOrigin=/devices/1000000010/endpoints/1000000010/data | transactionId=1000000000043 | parseError=n/a | payloadBytes=1253
+HTTP/1.1 200 OK
+Server: Tydom-100000000001
+Uri-Origin: /devices/1000000010/endpoints/1000000010/data
+Content-Type: application/json
+Transfer-Encoding: chunked
+Transac-Id: 1000000000043
+
+22
+{"id":1000000010,"error":0,"data":
+3D
+[{"name":"thermicDefect","validity":"upToDate","value":false}
+36
+,{"name":"position","validity":"upToDate","value":100}
+38
+,{"name":"onFavPos","validity":"upToDate","value":false}
+3E
+,{"name":"obstacleDefect","validity":"upToDate","value":false}
+39
+,{"name":"intrusion","validity":"upToDate","value":false}
+3A
+,{"name":"battDefect","validity":"upToDate","value":false}
+35
+,{"name":"jobsMP","validity":"upToDate","value":3096}
+41
+,{"name":"softVersion0","validity":"upToDate","value":"01.04.00"}
+41
+,{"name":"softPlan0","validity":"upToDate","value":"24.28.00.20"}
+41
+,{"name":"softVersion1","validity":"upToDate","value":"02.05.02"}
+41
+,{"name":"softPlan1","validity":"upToDate","value":"24.94.00.11"}
+41
+,{"name":"softVersion2","validity":"upToDate","value":"01.00.00"}
+41
+,{"name":"softPlan2","validity":"upToDate","value":"24.28.00.31"}
+41
+,{"name":"softVersion3","validity":"upToDate","value":"01.01.00"}
+45
+,{"name":"softPlan3","validity":"upToDate","value":"22.10.00.30"}]}
+
+0
+
+
+=========================================================
+
+FRAME TYPE: DEVICE (Light)
+RECEIVED AFTER: GET /devices/1000000012/endpoints/1000000012/data with transaction id 1000000000044
+
+==================== WEBSOCKET FRAME ====================
+index=29 | timestamp=2026-02-22T17:10:14.436Z | uriOrigin=/devices/1000000012/endpoints/1000000012/data | transactionId=1000000000044 | parseError=n/a | payloadBytes=842
+HTTP/1.1 200 OK
+Server: Tydom-100000000001
+Uri-Origin: /devices/1000000012/endpoints/1000000012/data
+Content-Type: application/json
+Transfer-Encoding: chunked
+Transac-Id: 1000000000044
+
+58
+{"id":1000000012,"error":0,"data":[{"name":"zclVersion","validity":"upToDate","value":3}
+43
+,{"name":"manufacturer","validity":"upToDate","value":"Rademacher"}
+48
+,{"name":"modelIdentifier","validity":"upToDate","value":"RDM-35274001"}
+31
+,{"name":"level","validity":"upToDate","value":0}
+3B
+,{"name":"colorXY","validity":"upToDate","value":100000013}
+3F
+,{"name":"miredTemperatureW","validity":"upToDate","value":153}
+42
+,{"name":"minMiredTemperatureW","validity":"upToDate","value":153}
+42
+,{"name":"maxMiredTemperatureW","validity":"upToDate","value":555}
+3C
+,{"name":"colorMode","validity":"upToDate","value":"XY"}]}
+
+0
+
+
+=========================================================
+
+FRAME TYPE: DEVICE (SUNLIGHT SENSOR)
+RECEIVED AFTER: GET /devices/1000000017/endpoints/1000000017/data with transaction id 1000000000045
+
+==================== WEBSOCKET FRAME ====================
+index=15 | timestamp=2026-02-22T17:51:01.932Z | uriOrigin=/devices/1000000017/endpoints/1000000017/data | transactionId=1000000000045 | parseError=n/a | payloadBytes=482
+HTTP/1.1 200 OK
+Server: Tydom-100000000001
+Uri-Origin: /devices/1000000017/endpoints/1000000017/data
+Content-Type: application/json
+Transfer-Encoding: chunked
+Transac-Id: 1000000000045
+
+5C
+{"id":1000000017,"error":0,"data":[{"name":"battDefect","validity":"upToDate","value":false}
+38
+,{"name":"configSensor","validity":"upToDate","value":8}
+36
+,{"name":"lightPower","validity":"upToDate","value":0}
+3A
+,{"name":"configTemp","validity":"upToDate","value":0}]}
+
+0
+
+
+=========================================================
+
+==================== SENT COMMAND ====================
+{
+  "body" : null,
+  "entryType" : "outboundCommand",
+  "headers" : {
+    "content-length" : "0",
+    "content-type" : "application\/json; charset=UTF-8",
+    "transac-id" : "1000000000046"
+  },
+  "index" : 17,
+  "requestLine" : "GET \/devices\/1000000021\/endpoints\/1000000021\/data HTTP\/1.1",
+  "timestamp" : "2026-02-22T17:52:04.017Z",
+  "transactionId" : "1000000000046"
+}
+=========================================================
+
+FRAME TYPE: DEVICE (HEAT PUMP ENERGY)
+RECEIVED AFTER: GET /devices/1000000021/endpoints/1000000021/data with transaction id 1000000000046
+
+==================== WEBSOCKET FRAME ====================
+index=18 | timestamp=2026-02-22T17:52:04.028Z | uriOrigin=/devices/1000000021/endpoints/1000000021/data | transactionId=1000000000046 | parseError=n/a | payloadBytes=521
+HTTP/1.1 200 OK
+Server: Tydom-100000000001
+Uri-Origin: /devices/1000000021/endpoints/1000000021/data
+Content-Type: application/json
+Transfer-Encoding: chunked
+Transac-Id: 1000000000046
+
+66
+{"id":1000000021,"error":0,"data":[{"name":"energyIndexHeatWatt","validity":"upToDate","value":782000}
+43
+,{"name":"energyIndexECSWatt","validity":"upToDate","value":366000}
+3F
+,{"name":"energyIndexCoolWatt","validity":"upToDate","value":0}
+43
+,{"name":"outTemperature","validity":"upToDate","value":11.000}]}
+
+0
+
+
+=========================================================
+
+FRAME TYPE: DEVICE (FIRE DETECTOR)
+RECEIVED AFTER: GET /devices/1000000016/endpoints/1000000016/data with transaction id 1000000000047
+
+==================== WEBSOCKET FRAME ====================
+index=20 | timestamp=2026-02-22T17:53:51.691Z | uriOrigin=/devices/1000000016/endpoints/1000000016/data | transactionId=1000000000047 | parseError=n/a | payloadBytes=495
+HTTP/1.1 200 OK
+Server: Tydom-100000000001
+Uri-Origin: /devices/1000000016/endpoints/1000000016/data
+Content-Type: application/json
+Transfer-Encoding: chunked
+Transac-Id: 1000000000047
+
+54
+{"id":1000000016,"error":0,"data":[{"name":"config","validity":"upToDate","value":2}
+3A
+,{"name":"battDefect","validity":"upToDate","value":false}
+40
+,{"name":"supervisionMode","validity":"upToDate","value":"LONG"}
+43
+,{"name":"techSmokeDefect","validity":"upToDate","value":false}]}
+
+0
+
+
+=========================================================
+
+FRAME TYPE: DEVICE (HEAT PUMP)
+RECEIVED AFTER: GET /devices/1000000018/endpoints/1000000018/data with transaction id 1000000000048
+
+==================== WEBSOCKET FRAME ====================
+index=23 | timestamp=2026-02-22T17:55:22.193Z | uriOrigin=/devices/1000000018/endpoints/1000000018/data | transactionId=1000000000048 | parseError=n/a | payloadBytes=1497
+HTTP/1.1 200 OK
+Server: Tydom-100000000001
+Uri-Origin: /devices/1000000018/endpoints/1000000018/data
+Content-Type: application/json
+Transfer-Encoding: chunked
+Transac-Id: 1000000000048
+
+63
+{"id":1000000018,"error":0,"data":[{"name":"authorization","validity":"upToDate","value":"HEATING"}
+39
+,{"name":"setpoint","validity":"upToDate","value":20.000}
+3B
+,{"name":"thermicLevel","validity":"upToDate","value":null}
+3B
+,{"name":"hvacMode","validity":"upToDate","value":"NORMAL"}
+35
+,{"name":"timeDelay","validity":"upToDate","value":0}
+3C
+,{"name":"temperature","validity":"upToDate","value":20.750}
+37
+,{"name":"tempoOn","validity":"upToDate","value":false}
+3B
+,{"name":"antifrostOn","validity":"upToDate","value":false}
+3E
+,{"name":"loadSheddingOn","validity":"upToDate","value":false}
+3F
+,{"name":"openingDetected","validity":"upToDate","value":false}
+40
+,{"name":"presenceDetected","validity":"upToDate","value":false}
+37
+,{"name":"absence","validity":"upToDate","value":false}
+40
+,{"name":"productionDefect","validity":"upToDate","value":false}
+40
+,{"name":"batteryCmdDefect","validity":"upToDate","value":false}
+40
+,{"name":"tempSensorDefect","validity":"upToDate","value":false}
+42
+,{"name":"tempSensorShortCut","validity":"upToDate","value":false}
+42
+,{"name":"tempSensorOpenCirc","validity":"upToDate","value":false}
+37
+,{"name":"boostOn","validity":"upToDate","value":false}
+3D
+,{"name":"anticipCoeff","validity":"upToDate","value":30}]}
+
+0
+
+
+=========================================================
+
+FRAME TYPE: DEVICE (OUTSIDE TEMPERATURE)
+RECEIVED AFTER: GET /devices/1000000003/endpoints/1000000003/data with transaction id 1000000000049
+
+==================== WEBSOCKET FRAME ====================
+index=25 | timestamp=2026-02-22T17:56:36.481Z | uriOrigin=/devices/1000000003/endpoints/1000000003/data | transactionId=1000000000049 | parseError=n/a | payloadBytes=431
+HTTP/1.1 200 OK
+Server: Tydom-100000000001
+Uri-Origin: /devices/1000000003/endpoints/1000000003/data
+Content-Type: application/json
+Transfer-Encoding: chunked
+Transac-Id: 1000000000049
+
+5C
+{"id":1000000003,"error":0,"data":[{"name":"battDefect","validity":"upToDate","value":false}
+38
+,{"name":"configTemp","validity":"upToDate","value":520}
+43
+,{"name":"outTemperature","validity":"upToDate","value":11.200}]}
+
+0
+
+
+=========================================================
+
+FRAME TYPE: DEVICE (THERMOSTAT)
+RECEIVED AFTER: GET /devices/1000000019/endpoints/1000000019/data with transaction id 1000000000050
+
+==================== WEBSOCKET FRAME ====================
+index=28 | timestamp=2026-02-22T17:57:28.405Z | uriOrigin=/devices/1000000019/endpoints/1000000019/data | transactionId=1000000000050 | parseError=n/a | payloadBytes=1082
+HTTP/1.1 200 OK
+Server: Tydom-100000000001
+Uri-Origin: /devices/1000000019/endpoints/1000000019/data
+Content-Type: application/json
+Transfer-Encoding: chunked
+Transac-Id: 1000000000050
+
+5B
+{"id":1000000019,"error":0,"data":[{"name":"synchroPps","validity":"upToDate","value":true}
+30
+,{"name":"jobs","validity":"upToDate","value":3}
+32
+,{"name":"jobsRM","validity":"upToDate","value":8}
+35
+,{"name":"battLevel","validity":"upToDate","value":2}
+36
+,{"name":"jobsMP","validity":"upToDate","value":24594}
+43
+,{"name":"ambientTemperature","validity":"upToDate","value":20.600}
+38
+,{"name":"hygroIn","validity":"upToDate","value":62.000}
+40
+,{"name":"softVersion","validity":"upToDate","value":"01.04.03"}
+40
+,{"name":"softPlan","validity":"upToDate","value":"25.60.00.10"}
+50
+,{"name":"uid","validity":"upToDate","value":"10000000000000000000000000000020"}
+39
+,{"name":"nbRFActuators","validity":"upToDate","value":1}
+38
+,{"name":"selectedProg","validity":"upToDate","value":0}
+39
+,{"name":"shutterCmd","validity":"upToDate","value":null}
+4
+]}
+
+0
+
+
+=========================================================
+
+FRAME TYPE: DEVICES
+RECEIVED AFTER: unsolicited
+
+==================== WEBSOCKET FRAME ====================
+index=56 | timestamp=2026-02-22T17:16:29.110Z | uriOrigin=/devices/data | transactionId=n/a | parseError=n/a | payloadBytes=252
+PUT /devices/data HTTP/1.1
+Server: Tydom-100000000001
+content-type: application/json
+Transfer-Encoding: chunked
+
+7B
+[{"id":1000000012,"endpoints":[{"id":1000000012,"error":0,"data":[{"name":"level","validity":"upToDate","value":100}]}]}]
+
+0
+
+
+=========================================================
+
+FRAME TYPE: DEVICES
+RECEIVED AFTER: unsolicited
+
+==================== WEBSOCKET FRAME ====================
+index=27 | timestamp=2026-02-22T17:09:49.541Z | uriOrigin=/devices/data | transactionId=n/a | parseError=n/a | payloadBytes=264
+PUT /devices/data HTTP/1.1
+Server: Tydom-100000000001
+content-type: application/json
+Transfer-Encoding: chunked
+
+87
+[{"id":1000000003,"endpoints":[{"id":1000000003,"error":0,"data":[{"name":"outTemperature","validity":"upToDate","value":11.280}]}]}]
+
+0
+
+
+=========================================================
+
+FRAME TYPE: DEVICES
+RECEIVED AFTER: unsolicited
+
+==================== WEBSOCKET FRAME ====================
+index=26 | timestamp=2026-02-22T17:09:32.748Z | uriOrigin=/devices/data | transactionId=n/a | parseError=n/a | payloadBytes=255
+PUT /devices/data HTTP/1.1
+Server: Tydom-100000000001
+content-type: application/json
+Transfer-Encoding: chunked
+
+7E
+[{"id":1000000017,"endpoints":[{"id":1000000017,"error":0,"data":[{"name":"lightPower","validity":"upToDate","value":1}]}]}]
+
+0
+
+
+=========================================================
+
+FRAME TYPE: DEVICES
+RECEIVED AFTER: unsolicited
+
+==================== WEBSOCKET FRAME ====================
+index=51 | timestamp=2026-02-22T17:13:56.902Z | uriOrigin=/devices/data | transactionId=n/a | parseError=n/a | payloadBytes=254
+PUT /devices/data HTTP/1.1
+Server: Tydom-100000000001
+content-type: application/json
+Transfer-Encoding: chunked
+
+7D
+[{"id":1000000009,"endpoints":[{"id":1000000009,"error":0,"data":[{"name":"position","validity":"upToDate","value":83}]}]}]
+
+0
+
+
+=========================================================
+
+FRAME TYPE: DEVICES
+RECEIVED AFTER: unsolicited
+
+==================== WEBSOCKET FRAME ====================
+index=52 | timestamp=2026-02-22T17:14:04.728Z | uriOrigin=/devices/data | transactionId=n/a | parseError=n/a | payloadBytes=255
+PUT /devices/data HTTP/1.1
+Server: Tydom-100000000001
+content-type: application/json
+Transfer-Encoding: chunked
+
+7E
+[{"id":1000000009,"endpoints":[{"id":1000000009,"error":0,"data":[{"name":"position","validity":"upToDate","value":100}]}]}]
+
+0
+
+
+=========================================================
+
+FRAME TYPE: DEVICES
+RECEIVED AFTER: unsolicited
+
+==================== WEBSOCKET FRAME ====================
+index=55 | timestamp=2026-02-22T17:15:27.723Z | uriOrigin=/devices/data | transactionId=n/a | parseError=n/a | payloadBytes=250
+PUT /devices/data HTTP/1.1
+Server: Tydom-100000000001
+content-type: application/json
+Transfer-Encoding: chunked
+
+79
+[{"id":1000000012,"endpoints":[{"id":1000000012,"error":0,"data":[{"name":"level","validity":"upToDate","value":0}]}]}]
+
+0
+
+
+=========================================================
+
+FRAME TYPE: DEVICES
+RECEIVED AFTER: unsolicited
+
+==================== WEBSOCKET FRAME ====================
+index=85 | timestamp=2026-02-22T17:25:50.164Z | uriOrigin=/devices/data | transactionId=n/a | parseError=n/a | payloadBytes=380
+PUT /devices/data HTTP/1.1
+Server: Tydom-100000000001
+content-type: application/json
+Transfer-Encoding: chunked
+
+75
+[{"id":1000000008,"endpoints":[{"id":1000000008,"error":0,"data":[{"name":"position","validity":"upToDate","value":1}
+80
+]}]},{"id":1000000009,"endpoints":[{"id":1000000009,"error":0,"data":[{"name":"position","validity":"upToDate","value":1}]}]}]
+
+0
+
+
+=========================================================
+
+FRAME TYPE: ACK
+RECEIVED AFTER: GET /refresh/all with transaction id 1000000000051
+
+==================== WEBSOCKET FRAME ====================
+index=50 | timestamp=2026-02-22T17:13:53.943Z | uriOrigin=/refresh/all | transactionId=1000000000051 | parseError=n/a | payloadBytes=151
+HTTP/1.1 200 OK
+Server: Tydom-100000000001
+Uri-Origin: /refresh/all
+Content-Type: application/json
+Content-Length: 0
+Transac-Id: 1000000000051
+
+
+=========================================================
+
+FRAME TYPE: ACK
+RECEIVED AFTER: PUT /devices/1000000012/endpoints/1000000012/data with transaction id 1000000000052
+
+==================== WEBSOCKET FRAME ====================
+index=54 | timestamp=2026-02-22T17:15:27.601Z | uriOrigin=/devices/1000000012/endpoints/1000000012/data | transactionId=1000000000052 | parseError=n/a | payloadBytes=184
+HTTP/1.1 200 OK
+Server: Tydom-100000000001
+Uri-Origin: /devices/1000000012/endpoints/1000000012/data
+Content-Type: application/json
+Content-Length: 0
+Transac-Id: 1000000000052
+
+
+=========================================================
+
+FRAME TYPE: ACK
+RECEIVED AFTER: PUT /devices/1000000018/endpoints/1000000018/data with transaction id 1000000000053
+
+==================== WEBSOCKET FRAME ====================
+index=63 | timestamp=2026-02-22T17:20:21.829Z | uriOrigin=/devices/1000000018/endpoints/1000000018/data | transactionId=1000000000053 | parseError=n/a | payloadBytes=184
+HTTP/1.1 200 OK
+Server: Tydom-100000000001
+Uri-Origin: /devices/1000000018/endpoints/1000000018/data
+Content-Type: application/json
+Content-Length: 0
+Transac-Id: 1000000000053
+
+
+=========================================================
+
+
+FRAME TYPE: DEVICES METADATA
+RECEIVED AFTER: GET /devices/meta with transaction id 1000000000100
+
+==================== WEBSOCKET FRAME ====================
+index=90 | timestamp=2026-02-23T12:59:32.198Z | uriOrigin=/devices/meta | transactionId=1000000000100 | parseError=n/a | payloadBytes=326
+HTTP/1.1 200 OK
+Server: Tydom-100000000001
+Uri-Origin: /devices/meta
+Content-Type: application/json
+Content-Length: 102
+Transac-Id: 1000000000100
+
+[{"id":1000000001,"endpoints":[{"id":1000000002,"metadata":[{"name":"position","min":0,"max":100}]}]}]
+
+
+=========================================================
+
+FRAME TYPE: DEVICES CMETADATA
+RECEIVED AFTER: GET /devices/cmeta with transaction id 1000000000101
+
+==================== WEBSOCKET FRAME ====================
+index=91 | timestamp=2026-02-23T13:03:18.849Z | uriOrigin=/devices/cmeta | transactionId=1000000000101 | parseError=n/a | payloadBytes=408
+HTTP/1.1 200 OK
+Server: Tydom-100000000001
+Uri-Origin: /devices/cmeta
+Content-Type: application/json
+Content-Length: 177
+Transac-Id: 1000000000101
+
+[{"id":1000000001,"endpoints":[{"id":1000000002,"cmetadata":[{"name":"dataSupport","permission":"r","parameters":[{"name":"source","enum_values":["DATA","INFO"]}]}]}]}]
+
+
+=========================================================
+
+FRAME TYPE: AREAS META
+RECEIVED AFTER: GET /areas/meta with transaction id 1000000000102
+
+==================== WEBSOCKET FRAME ====================
+index=92 | timestamp=2026-02-23T13:18:47.244Z | uriOrigin=/areas/meta | transactionId=1000000000102 | parseError=n/a | payloadBytes=173
+HTTP/1.1 200 OK
+Server: Tydom-100000000001
+Uri-Origin: /areas/meta
+Content-Type: application/json
+Content-Length: 2
+Transac-Id: 1000000000102
+
+[]
+
+
+=========================================================
+
+FRAME TYPE: AREAS CMETA
+RECEIVED AFTER: GET /areas/cmeta with transaction id 1000000000103
+
+==================== WEBSOCKET FRAME ====================
+index=93 | timestamp=2026-02-23T13:19:40.186Z | uriOrigin=/areas/cmeta | transactionId=1000000000103 | parseError=n/a | payloadBytes=174
+HTTP/1.1 200 OK
+Server: Tydom-100000000001
+Uri-Origin: /areas/cmeta
+Content-Type: application/json
+Content-Length: 2
+Transac-Id: 1000000000103
+
+[]
+
+
+=========================================================
+

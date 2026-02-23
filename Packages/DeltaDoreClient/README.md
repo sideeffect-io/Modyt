@@ -150,3 +150,6 @@ Options:
   --clear-storage              Clear stored data before running
   --help                       Show this help
 ```
+
+After connection, the CLI starts in `wizard` mode by default (`menu` is an alias).
+Type `help` to use command mode, or `wizard` to re-enter the guided flow.

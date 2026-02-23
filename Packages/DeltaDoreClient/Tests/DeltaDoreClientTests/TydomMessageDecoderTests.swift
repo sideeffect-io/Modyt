@@ -20,8 +20,8 @@ import Testing
     let message = await pipeline.decodeAndHydrate(payload)
 
     // Then
-    if case .gatewayInfo(let info, let transactionId) = message {
-        #expect(transactionId == "123")
+    if case .gatewayInfo(let info, let metadata) = message {
+        #expect(metadata.transactionId == "123")
         #expect(info.payload["version"] == JSONValue.string("1.0"))
         #expect(info.payload["mac"] == JSONValue.string("AA:BB"))
     } else {
@@ -60,8 +60,8 @@ import Testing
     let message = await pipeline.decodeAndHydrate(payload)
 
     // Then
-    if case .devices(let devices, let transactionId) = message {
-        #expect(transactionId == "456")
+    if case .devices(let devices, let metadata) = message {
+        #expect(metadata.transactionId == "456")
         #expect(devices.count == 1)
         let device = devices[0]
         #expect(device.id == 1)
@@ -104,8 +104,8 @@ import Testing
     let message = await pipeline.decodeAndHydrate(payload)
 
     // Then
-    if case .devices(let devices, let transactionId) = message {
-        #expect(transactionId == "456-endpoint")
+    if case .devices(let devices, let metadata) = message {
+        #expect(metadata.transactionId == "456-endpoint")
         #expect(devices.count == 1)
         let device = devices[0]
         #expect(device.id == 1757536112)
@@ -118,7 +118,7 @@ import Testing
     }
 }
 
-@Test func tydomMessageDecoder_filtersOnlyPolledUpdatesFromBroadcastDevicesData() async {
+@Test func tydomMessageDecoder_doesNotFilterBroadcastDevicesData() async {
     // Given
     let pipeline = MessagePipelineHarness(
         deviceInfo: { uniqueId in
@@ -130,9 +130,6 @@ import Testing
             default:
                 return nil
             }
-        },
-        isPostPutPollingActive: { uniqueId in
-            uniqueId == "2_2"
         },
         applyCacheMutation: { _ in }
     )
@@ -161,17 +158,16 @@ import Testing
     let message = await pipeline.decodeAndHydrate(payload)
 
     // Then
-    if case .devices(let devices, let transactionId) = message {
-        #expect(transactionId == "broadcast-1")
-        #expect(devices.count == 1)
-        #expect(devices.first?.uniqueId == "1_1")
-        #expect(devices.first?.data["level"] == JSONValue.number(80))
+    if case .devices(let devices, let metadata) = message {
+        #expect(metadata.transactionId == "broadcast-1")
+        #expect(devices.count == 2)
+        #expect(Set(devices.map(\.uniqueId)) == Set(["1_1", "2_2"]))
     } else {
         #expect(Bool(false), "Expected devices message")
     }
 }
 
-@Test func tydomMessageDecoder_keepsEndpointPollUpdateEvenWhenPollingIsActive() async {
+@Test func tydomMessageDecoder_keepsEndpointDeviceUpdate() async {
     // Given
     let pipeline = MessagePipelineHarness(
         deviceInfo: { uniqueId in
@@ -179,9 +175,6 @@ import Testing
                 return TydomDeviceInfo(name: "Light B", usage: "light", metadata: nil)
             }
             return nil
-        },
-        isPostPutPollingActive: { uniqueId in
-            uniqueId == "2_2"
         },
         applyCacheMutation: { _ in }
     )
@@ -199,8 +192,8 @@ import Testing
     let message = await pipeline.decodeAndHydrate(payload)
 
     // Then
-    if case .devices(let devices, let transactionId) = message {
-        #expect(transactionId == "endpoint-1")
+    if case .devices(let devices, let metadata) = message {
+        #expect(metadata.transactionId == "endpoint-1")
         #expect(devices.count == 1)
         #expect(devices.first?.uniqueId == "2_2")
         #expect(devices.first?.data["level"] == JSONValue.number(40))
@@ -251,8 +244,8 @@ import Testing
     let message = await pipeline.decodeAndHydrate(payload)
 
     // Then
-    if case .devices(let devices, let transactionId) = message {
-        #expect(transactionId == "457")
+    if case .devices(let devices, let metadata) = message {
+        #expect(metadata.transactionId == "457")
         #expect(devices.count == 1)
         let device = devices[0]
         #expect(device.data["ambientTemperature"] == JSONValue.number(23.7))
@@ -294,8 +287,8 @@ import Testing
     let message = await pipeline.decodeAndHydrate(payload)
 
     // Then
-    if case .devices(let devices, let transactionId) = message {
-        #expect(transactionId == "789")
+    if case .devices(let devices, let metadata) = message {
+        #expect(metadata.transactionId == "789")
         #expect(devices.count == 1)
         let device = devices[0]
         #expect(device.name == "Energy")
@@ -324,15 +317,16 @@ import Testing
     let message = await pipeline.decodeAndHydrate(payload)
 
     // Then
-    if case .raw(let raw) = message {
-        #expect(raw.uriOrigin == "/unknown")
-        #expect(raw.transactionId == "000")
+    if case .raw(let metadata) = message {
+        #expect(metadata.uriOrigin == "/unknown")
+        #expect(metadata.transactionId == "000")
+        #expect(metadata.bodyJSON == .object(["foo": .string("bar")]))
     } else {
         #expect(Bool(false), "Expected raw message")
     }
 }
 
-@Test func tydomMessageDecoder_bodylessResponseDecodesEcho() async {
+@Test func tydomMessageDecoder_bodylessResponseIsAck() async {
     // Given
     let pipeline = MessagePipelineHarness(
         deviceInfo: { _ in nil },
@@ -348,17 +342,17 @@ import Testing
     let message = await pipeline.decodeAndHydrate(payload)
 
     // Then
-    if case .echo(let echo) = message {
-        #expect(echo.uriOrigin == "/devices/1/endpoints/2/data")
-        #expect(echo.transactionId == "echo-1")
-        #expect(echo.statusCode == 200)
-        #expect(echo.reason == "OK")
+    if case .ack(let ack, let metadata) = message {
+        #expect(ack.statusCode == 200)
+        #expect(metadata.uriOrigin == "/devices/1/endpoints/2/data")
+        #expect(metadata.transactionId == "echo-1")
+        #expect(metadata.body == nil)
     } else {
-        #expect(Bool(false), "Expected echo message")
+        #expect(Bool(false), "Expected ack message")
     }
 }
 
-@Test func tydomMessageDecoder_bodylessResponseMissingRoutingFieldsIsRaw() async {
+@Test func tydomMessageDecoder_bodylessResponseMissingRoutingFieldsIsAck() async {
     // Given
     let pipeline = MessagePipelineHarness(
         deviceInfo: { _ in nil },
@@ -373,11 +367,12 @@ import Testing
     let message = await pipeline.decodeAndHydrate(payload)
 
     // Then
-    if case .raw(let raw) = message {
-        #expect(raw.transactionId == nil)
-        #expect(raw.uriOrigin == nil)
+    if case .ack(let ack, let metadata) = message {
+        #expect(ack.statusCode == 200)
+        #expect(metadata.transactionId == nil)
+        #expect(metadata.uriOrigin == nil)
     } else {
-        #expect(Bool(false), "Expected raw message")
+        #expect(Bool(false), "Expected ack message")
     }
 }
 
@@ -446,16 +441,24 @@ import Testing
     let payload = httpResponse(uriOrigin: "/devices/meta", transactionId: "222", body: body)
 
     // When
-    _ = await pipeline.decodeAndHydrate(payload)
+    let message = await pipeline.decodeAndHydrate(payload)
+
+    // Then
+    if case .devicesMeta(let entries, let metadata) = message {
+        #expect(metadata.transactionId == "222")
+        #expect(entries.count == 1)
+        #expect(entries.first?.id == 1)
+    } else {
+        #expect(Bool(false), "Expected devicesMeta message")
+    }
 
     await cache.upsert(TydomDeviceCacheEntry(uniqueId: "2_1", name: "Living Room", usage: "shutter"))
     let device = await cache.deviceInfo(for: "2_1")
 
-    // Then
     #expect(device?.metadata?["position"] == JSONValue.object(["min": .number(0), "max": .number(100)]))
 }
 
-@Test func tydomMessageDecoder_devicesCmetaSchedulesPolling() async {
+@Test func tydomMessageDecoder_devicesCmetaDoesNotSchedulePolling() async {
     // Given
     let body = """
     [
@@ -474,15 +477,7 @@ import Testing
     let envelope = TydomMessageDecoder.decode(raw)
 
     // Then
-    #expect(envelope.effects.count == 1)
-    if case .schedulePoll(let urls, let intervalSeconds) = envelope.effects[0] {
-        #expect(intervalSeconds == 10)
-        #expect(urls.contains("/devices/1/endpoints/2/cdata?name=energyIndex&dest=ELEC&reset=false"))
-        #expect(urls.contains("/devices/1/endpoints/2/cdata?name=energyIndex&dest=GAS&reset=false"))
-        #expect(urls.contains("/devices/1/endpoints/2/cdata?name=energyInstant&unit=ELEC_A&reset=false"))
-    } else {
-        #expect(Bool(false), "Expected schedulePoll effect")
-    }
+    #expect(envelope.effects.isEmpty)
 }
 
 @Test func tydomMessageDecoder_devicesCmetaEnrichesCacheWithCapabilities() async {
@@ -528,10 +523,17 @@ import Testing
     let payload = httpResponse(uriOrigin: "/devices/cmeta", transactionId: "334", body: body)
 
     // When
-    _ = await pipeline.decodeAndHydrate(payload)
+    let message = await pipeline.decodeAndHydrate(payload)
     let metadata = await cache.deviceInfo(for: "2_1")?.metadata
 
     // Then
+    if case .devicesCMeta(let entries, let messageMetadata) = message {
+        #expect(messageMetadata.transactionId == "334")
+        #expect(entries.count == 1)
+        #expect(entries.first?.id == 1)
+    } else {
+        #expect(Bool(false), "Expected devicesCMeta message")
+    }
     #expect(metadata?["position"] == .object(["min": .number(0), "max": .number(100)]))
     let cmetadata = metadata?["__cmetadata"]?.arrayValue
     #expect(cmetadata?.count == 2)
@@ -539,7 +541,47 @@ import Testing
     #expect(cmetadata?.first?.objectValue?["permission"] == .string("r"))
 }
 
-@Test func tydomMessageDecoder_eventsTriggerRefreshAll() async {
+@Test func tydomMessageDecoder_areasMetaProducesTypedMessage() async {
+    // Given
+    let pipeline = MessagePipelineHarness(
+        deviceInfo: { _ in nil },
+        applyCacheMutation: { _ in }
+    )
+    let payload = httpResponse(uriOrigin: "/areas/meta", transactionId: "446", body: "[]")
+
+    // When
+    let message = await pipeline.decodeAndHydrate(payload)
+
+    // Then
+    if case .areasMeta(let entries, let metadata) = message {
+        #expect(metadata.transactionId == "446")
+        #expect(entries.isEmpty)
+    } else {
+        #expect(Bool(false), "Expected areasMeta message")
+    }
+}
+
+@Test func tydomMessageDecoder_areasCmetaProducesTypedMessage() async {
+    // Given
+    let pipeline = MessagePipelineHarness(
+        deviceInfo: { _ in nil },
+        applyCacheMutation: { _ in }
+    )
+    let payload = httpResponse(uriOrigin: "/areas/cmeta", transactionId: "447", body: "[]")
+
+    // When
+    let message = await pipeline.decodeAndHydrate(payload)
+
+    // Then
+    if case .areasCMeta(let entries, let metadata) = message {
+        #expect(metadata.transactionId == "447")
+        #expect(entries.isEmpty)
+    } else {
+        #expect(Bool(false), "Expected areasCMeta message")
+    }
+}
+
+@Test func tydomMessageDecoder_eventsDoNotTriggerRefresh() async {
     // Given
     let payload = httpResponse(uriOrigin: "/events", transactionId: "444", body: "{}")
     let raw = TydomRawMessageParser.parse(payload)
@@ -548,7 +590,7 @@ import Testing
     let envelope = TydomMessageDecoder.decode(raw)
 
     // Then
-    #expect(envelope.effects == [.refreshAll])
+    #expect(envelope.effects.isEmpty)
 }
 
 @Test func tydomMessageDecoder_areasDataProducesAreasMessage() async {
@@ -570,8 +612,8 @@ import Testing
     let message = await pipeline.decodeAndHydrate(payload)
 
     // Then
-    if case .areas(let areas, let transactionId) = message {
-        #expect(transactionId == "445")
+    if case .areas(let areas, let metadata) = message {
+        #expect(metadata.transactionId == "445")
         #expect(areas.count == 2)
         #expect(areas[0].id == 101)
     } else {
@@ -613,8 +655,8 @@ import Testing
     let message = await pipeline.decodeAndHydrate(scenariosPayload)
 
     // Then
-    if case .scenarios(let scenarios, let transactionId) = message {
-        #expect(transactionId == "556")
+    if case .scenarios(let scenarios, let metadata) = message {
+        #expect(metadata.transactionId == "556")
         #expect(scenarios.count == 1)
         #expect(scenarios[0].name == "Wake")
         #expect(scenarios[0].type == "NORMAL")
@@ -647,18 +689,18 @@ import Testing
     let message = await pipeline.decodeAndHydrate(payload)
 
     // Then
-    if case .groupMetadata(let metadata, let transactionId) = message {
-        #expect(transactionId == "557")
-        #expect(metadata.count == 2)
-        #expect(metadata[0].id == 12932271)
-        #expect(metadata[0].name == "TOTAL")
-        #expect(metadata[0].usage == "light")
-        #expect(metadata[0].isGroupAll == true)
-        #expect(metadata[0].isGroupUser == false)
-        #expect(metadata[1].id == 1722950600)
-        #expect(metadata[1].picto == "picto_lamp")
-        #expect(metadata[1].isGroupAll == false)
-        #expect(metadata[1].isGroupUser == true)
+    if case .groupMetadata(let groups, let metadata) = message {
+        #expect(metadata.transactionId == "557")
+        #expect(groups.count == 2)
+        #expect(groups[0].id == 12932271)
+        #expect(groups[0].name == "TOTAL")
+        #expect(groups[0].usage == "light")
+        #expect(groups[0].isGroupAll == true)
+        #expect(groups[0].isGroupUser == false)
+        #expect(groups[1].id == 1722950600)
+        #expect(groups[1].picto == "picto_lamp")
+        #expect(groups[1].isGroupAll == false)
+        #expect(groups[1].isGroupUser == true)
     } else {
         #expect(Bool(false), "Expected group metadata message")
     }
@@ -700,8 +742,8 @@ import Testing
     let message = await pipeline.decodeAndHydrate(payload)
 
     // Then
-    if case .groups(let groups, let transactionId) = message {
-        #expect(transactionId == "558")
+    if case .groups(let groups, let metadata) = message {
+        #expect(metadata.transactionId == "558")
         #expect(groups.count == 2)
         #expect(groups[0].id == 12932271)
         #expect(groups[0].devices.count == 2)
@@ -762,15 +804,13 @@ private struct MessagePipelineHarness: Sendable {
     init(
         deviceInfo: @escaping @Sendable (String) async -> TydomDeviceInfo?,
         scenarioMetadata: @escaping @Sendable (Int) async -> TydomScenarioMetadata? = { _ in nil },
-        isPostPutPollingActive: @escaping @Sendable (String) async -> Bool = { _ in false },
         applyCacheMutation: @escaping @Sendable (TydomCacheMutation) async -> Void
     ) {
         self.hydrator = TydomMessageHydrator(
             dependencies: TydomMessageHydratorDependencies(
                 deviceInfo: deviceInfo,
                 scenarioMetadata: scenarioMetadata,
-                applyCacheMutation: applyCacheMutation,
-                isPostPutPollingActive: isPostPutPollingActive
+                applyCacheMutation: applyCacheMutation
             )
         )
     }

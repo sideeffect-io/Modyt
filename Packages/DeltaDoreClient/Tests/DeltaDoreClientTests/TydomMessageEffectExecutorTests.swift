@@ -11,18 +11,16 @@ import Testing
     // When
     await executor.enqueue([
         .sendCommands([TydomCommand(request: "A"), TydomCommand(request: "B")]),
-        .schedulePoll(urls: ["/a"], intervalSeconds: 30),
         .pongReceived,
         .cdataReplyChunk(chunk)
     ])
 
-    let values = await probe.nextValues(count: 5)
+    let values = await probe.nextValues(count: 4)
 
     // Then
     #expect(values == [
         "send:A",
         "send:B",
-        "poll:/a:30",
         "pong",
         "cdata:t1"
     ])
@@ -45,15 +43,13 @@ import Testing
                     cancelContinuation.yield(())
                 })
             },
-            pollScheduler: { _, _ in },
-            pollOnceScheduled: {},
             onPong: {},
             onCDataReplyChunk: { _ in }
         )
     )
 
     // When
-    await executor?.enqueue([.refreshAll])
+    await executor?.enqueue([.sendCommands([TydomCommand(request: "BLOCK")])])
     var startedIterator = startedStream.makeAsyncIterator()
     _ = await startedIterator.next()
     executor = nil
@@ -74,8 +70,6 @@ import Testing
                 var iterator = blockStream.makeAsyncIterator()
                 _ = await iterator.next()
             },
-            pollScheduler: { _, _ in },
-            pollOnceScheduled: {},
             onPong: {},
             onCDataReplyChunk: { _ in }
         )
@@ -83,7 +77,7 @@ import Testing
 
     let (input, continuation) = AsyncStream<Int>.makeStream()
     let output = input
-        .map { value in (message: value, effects: [TydomMessageEffect.refreshAll]) }
+        .map { value in (message: value, effects: [TydomMessageEffect.sendCommands([TydomCommand(request: "M")])]) }
         .map { hydrated in
             Task { await executor.enqueue(hydrated.effects) }
             return hydrated.message
@@ -145,13 +139,6 @@ private extension TydomMessageEffectExecutor.Dependencies {
         TydomMessageEffectExecutor.Dependencies(
             sendCommand: { command in
                 await probe.record("send:\(command.request)")
-            },
-            pollScheduler: { urls, interval in
-                let urlList = urls.joined(separator: ",")
-                await probe.record("poll:\(urlList):\(interval)")
-            },
-            pollOnceScheduled: {
-                await probe.record("pollOnce")
             },
             onPong: {
                 await probe.record("pong")

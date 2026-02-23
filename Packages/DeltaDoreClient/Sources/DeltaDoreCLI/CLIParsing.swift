@@ -145,6 +145,7 @@ func helpText() -> String {
     lines.append("  --no-ping-polling            Disable keep-alive /ping polling and initial ping")
     lines.append("  --help                       Show this help")
     lines.append("")
-    lines.append("Once connected, type `help` to list interactive commands.")
+    lines.append("Once connected, the CLI starts in guided wizard mode by default.")
+    lines.append("Type `help` for command mode, or `wizard` to re-enter the guided flow.")
     return lines.joined(separator: "\n")
 }

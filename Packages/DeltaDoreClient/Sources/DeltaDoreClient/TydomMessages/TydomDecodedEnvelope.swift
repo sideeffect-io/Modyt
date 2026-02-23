@@ -1,7 +1,7 @@
 import Foundation
 
 struct TydomDecodedEnvelope: Sendable, Equatable {
-    let raw: TydomRawMessage
+    let metadata: TydomMessageMetadata
     let payload: TydomDecodedPayload
     let cacheMutations: [TydomCacheMutation]
     let effects: [TydomMessageEffect]
@@ -12,22 +12,44 @@ struct TydomDecodedEnvelope: Sendable, Equatable {
         cacheMutations: [TydomCacheMutation] = [],
         effects: [TydomMessageEffect] = []
     ) {
-        self.raw = raw
+        self.init(
+            metadata: TydomMessageMetadata(raw: raw),
+            payload: payload,
+            cacheMutations: cacheMutations,
+            effects: effects
+        )
+    }
+
+    init(
+        metadata: TydomMessageMetadata,
+        payload: TydomDecodedPayload,
+        cacheMutations: [TydomCacheMutation] = [],
+        effects: [TydomMessageEffect] = []
+    ) {
+        self.metadata = metadata
         self.payload = payload
         self.cacheMutations = cacheMutations
         self.effects = effects
+    }
+
+    var raw: TydomRawMessage {
+        metadata.raw
     }
 }
 
 enum TydomDecodedPayload: Sendable, Equatable {
     case gatewayInfo(TydomGatewayInfo)
     case deviceUpdates([TydomDeviceUpdate])
+    case devicesMeta([TydomMetadataEntry])
+    case devicesCMeta([TydomMetadataEntry])
     case scenarios([TydomScenarioPayload])
     case groupMetadata([TydomGroupMetadata])
     case groups([TydomGroup])
     case moments([TydomMoment])
     case areas([TydomArea])
-    case echo(TydomEchoMessage)
+    case areasMeta([TydomMetadataEntry])
+    case areasCMeta([TydomMetadataEntry])
+    case ack(TydomAck)
     case none
 }
 
@@ -78,6 +100,7 @@ struct TydomDeviceUpdate: Sendable, Equatable {
     let endpointId: Int
     let uniqueId: String
     let data: [String: JSONValue]
+    let entries: [TydomDeviceDataEntry]
     let metadata: [String: JSONValue]?
     let cdataEntries: [JSONValue]?
     let source: Source
@@ -87,6 +110,7 @@ struct TydomDeviceUpdate: Sendable, Equatable {
         endpointId: Int,
         uniqueId: String,
         data: [String: JSONValue],
+        entries: [TydomDeviceDataEntry] = [],
         metadata: [String: JSONValue]? = nil,
         cdataEntries: [JSONValue]? = nil,
         source: Source
@@ -95,6 +119,7 @@ struct TydomDeviceUpdate: Sendable, Equatable {
         self.endpointId = endpointId
         self.uniqueId = uniqueId
         self.data = data
+        self.entries = entries
         self.metadata = metadata
         self.cdataEntries = cdataEntries
         self.source = source

@@ -1,33 +1,78 @@
 import Foundation
 
 public enum TydomMessage: Sendable, Equatable {
-    case gatewayInfo(TydomGatewayInfo, transactionId: String?)
-    case devices([TydomDevice], transactionId: String?)
-    case scenarios([TydomScenario], transactionId: String?)
-    case groupMetadata([TydomGroupMetadata], transactionId: String?)
-    case groups([TydomGroup], transactionId: String?)
-    case moments([TydomMoment], transactionId: String?)
-    case areas([TydomArea], transactionId: String?)
-    case echo(TydomEchoMessage)
-    case raw(TydomRawMessage)
+    case gatewayInfo(TydomGatewayInfo, metadata: TydomMessageMetadata)
+    case devices([TydomDevice], metadata: TydomMessageMetadata)
+    case devicesMeta([TydomMetadataEntry], metadata: TydomMessageMetadata)
+    case devicesCMeta([TydomMetadataEntry], metadata: TydomMessageMetadata)
+    case scenarios([TydomScenario], metadata: TydomMessageMetadata)
+    case groupMetadata([TydomGroupMetadata], metadata: TydomMessageMetadata)
+    case groups([TydomGroup], metadata: TydomMessageMetadata)
+    case moments([TydomMoment], metadata: TydomMessageMetadata)
+    case areas([TydomArea], metadata: TydomMessageMetadata)
+    case areasMeta([TydomMetadataEntry], metadata: TydomMessageMetadata)
+    case areasCMeta([TydomMetadataEntry], metadata: TydomMessageMetadata)
+    case ack(TydomAck, metadata: TydomMessageMetadata)
+    case raw(TydomMessageMetadata)
+
+    public var metadata: TydomMessageMetadata {
+        switch self {
+        case .gatewayInfo(_, let metadata),
+             .devices(_, let metadata),
+             .devicesMeta(_, let metadata),
+             .devicesCMeta(_, let metadata),
+             .scenarios(_, let metadata),
+             .groupMetadata(_, let metadata),
+             .groups(_, let metadata),
+             .moments(_, let metadata),
+             .areas(_, let metadata),
+             .areasMeta(_, let metadata),
+             .areasCMeta(_, let metadata),
+             .ack(_, let metadata):
+            return metadata
+        case .raw(let metadata):
+            return metadata
+        }
+    }
+
+    public var transactionId: String? {
+        metadata.transactionId
+    }
 }
 
-public struct TydomEchoMessage: Sendable, Equatable {
-    public let uriOrigin: String
-    public let transactionId: String
+public struct TydomMessageMetadata: Sendable, Equatable {
+    public let raw: TydomRawMessage
+    public let uriOrigin: String?
+    public let transactionId: String?
+    public let body: Data?
+    public let bodyJSON: JSONValue?
+
+    public init(
+        raw: TydomRawMessage,
+        uriOrigin: String? = nil,
+        transactionId: String? = nil,
+        body: Data? = nil,
+        bodyJSON: JSONValue? = nil
+    ) {
+        self.raw = raw
+        self.uriOrigin = uriOrigin ?? raw.uriOrigin
+        self.transactionId = transactionId ?? raw.transactionId
+        self.body = body ?? raw.frame?.body
+        self.bodyJSON = bodyJSON ?? Self.decodeBodyJSON(from: self.body)
+    }
+
+    private static func decodeBodyJSON(from data: Data?) -> JSONValue? {
+        guard let data, data.isEmpty == false else { return nil }
+        return try? JSONDecoder().decode(JSONValue.self, from: data)
+    }
+}
+
+public struct TydomAck: Sendable, Equatable {
     public let statusCode: Int
     public let reason: String?
     public let headers: [String: String]
 
-    public init(
-        uriOrigin: String,
-        transactionId: String,
-        statusCode: Int,
-        reason: String?,
-        headers: [String: String]
-    ) {
-        self.uriOrigin = uriOrigin
-        self.transactionId = transactionId
+    public init(statusCode: Int, reason: String?, headers: [String: String]) {
         self.statusCode = statusCode
         self.reason = reason
         self.headers = headers
@@ -180,6 +225,16 @@ public struct TydomArea: Sendable, Equatable {
     }
 }
 
+public struct TydomMetadataEntry: Sendable, Equatable {
+    public let id: Int?
+    public let payload: [String: JSONValue]
+
+    public init(id: Int?, payload: [String: JSONValue]) {
+        self.id = id
+        self.payload = payload
+    }
+}
+
 struct TydomDeviceInfo: Sendable, Equatable {
     let name: String
     let usage: String
@@ -192,6 +247,25 @@ struct TydomDeviceInfo: Sendable, Equatable {
     }
 }
 
+public struct TydomDeviceDataEntry: Sendable, Equatable {
+    public let name: String
+    public let validity: String?
+    public let value: JSONValue
+    public let payload: [String: JSONValue]
+
+    public init(
+        name: String,
+        validity: String?,
+        value: JSONValue,
+        payload: [String: JSONValue]
+    ) {
+        self.name = name
+        self.validity = validity
+        self.value = value
+        self.payload = payload
+    }
+}
+
 
 public struct TydomDevice: Sendable, Equatable {
     public let id: Int
@@ -201,6 +275,7 @@ public struct TydomDevice: Sendable, Equatable {
     public let usage: String
     public let kind: TydomDeviceKind
     public let data: [String: JSONValue]
+    public let entries: [TydomDeviceDataEntry]
     public let metadata: [String: JSONValue]?
 
     public init(
@@ -211,6 +286,7 @@ public struct TydomDevice: Sendable, Equatable {
         usage: String,
         kind: TydomDeviceKind,
         data: [String: JSONValue],
+        entries: [TydomDeviceDataEntry],
         metadata: [String: JSONValue]?
     ) {
         self.id = id
@@ -220,6 +296,7 @@ public struct TydomDevice: Sendable, Equatable {
         self.usage = usage
         self.kind = kind
         self.data = data
+        self.entries = entries
         self.metadata = metadata
     }
 }

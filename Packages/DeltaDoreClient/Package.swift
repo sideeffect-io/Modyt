@@ -42,6 +42,9 @@ let package = Package(
         .testTarget(
             name: "DeltaDoreClientTests",
             dependencies: ["DeltaDoreClient"],
+            resources: [
+                .copy("Fixtures/frame_types.redacted.txt")
+            ],
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency=complete")
             ]

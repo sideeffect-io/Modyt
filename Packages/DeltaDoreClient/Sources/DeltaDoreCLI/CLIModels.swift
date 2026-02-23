@@ -47,6 +47,7 @@ struct NewOptions: Sendable {
 
 enum CLICommand: Sendable {
     case help
+    case wizard
     case quit
     case setActive(Bool)
     case send(TydomCommand)
@@ -56,6 +57,20 @@ enum CLICommand: Sendable {
 
 struct CLIParseError: Error, Sendable {
     let message: String
+}
+
+actor CLITransactionIDGenerator {
+    private var lastIssued: Int = 0
+
+    func next() -> String {
+        let nowMilliseconds = Int(Date().timeIntervalSince1970 * 1000)
+        if nowMilliseconds > lastIssued {
+            lastIssued = nowMilliseconds
+        } else {
+            lastIssued += 1
+        }
+        return String(lastIssued)
+    }
 }
 
 actor ConsoleWriter {

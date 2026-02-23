@@ -66,7 +66,6 @@ struct TydomConnectionResolver: Sendable {
         let siteIndex: Int?
         let allowInsecureTLS: Bool?
         let timeout: TimeInterval
-        let polling: TydomConnection.Configuration.Polling
         let onDecision: (@Sendable (TydomConnectionState.Decision) async -> Void)?
 
         init(
@@ -78,7 +77,6 @@ struct TydomConnectionResolver: Sendable {
             siteIndex: Int? = nil,
             allowInsecureTLS: Bool? = nil,
             timeout: TimeInterval = 10.0,
-            polling: TydomConnection.Configuration.Polling = .init(),
             onDecision: (@Sendable (TydomConnectionState.Decision) async -> Void)? = nil
         ) {
             self.mode = mode
@@ -89,7 +87,6 @@ struct TydomConnectionResolver: Sendable {
             self.siteIndex = siteIndex
             self.allowInsecureTLS = allowInsecureTLS
             self.timeout = timeout
-            self.polling = polling
             self.onDecision = onDecision
         }
     }
@@ -360,8 +357,7 @@ struct TydomConnectionResolver: Sendable {
                 password: credentials.password,
                 cloudCredentials: nil,
                 allowInsecureTLS: allowInsecureTLS,
-                timeout: timeout,
-                polling: options.polling
+                timeout: timeout
             )
             let connection = await self.environment.connect(
                 config,
@@ -444,8 +440,7 @@ struct TydomConnectionResolver: Sendable {
                 password: credentials.password,
                 cloudCredentials: nil,
                 allowInsecureTLS: options.allowInsecureTLS,
-                timeout: options.timeout,
-                polling: options.polling
+                timeout: options.timeout
             )
         case .remote(let host):
             let resolvedHost = environment.remoteHost.isEmpty == false ? environment.remoteHost : host
@@ -455,8 +450,7 @@ struct TydomConnectionResolver: Sendable {
                 password: credentials.password,
                 cloudCredentials: nil,
                 allowInsecureTLS: options.allowInsecureTLS,
-                timeout: options.timeout,
-                polling: options.polling
+                timeout: options.timeout
             )
         }
     }

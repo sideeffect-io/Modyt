@@ -2,8 +2,6 @@ import Foundation
 
 enum TydomMessageEffect: Sendable, Equatable {
     case sendCommands([TydomCommand])
-    case schedulePoll(urls: [String], intervalSeconds: Int)
-    case refreshAll
     case pongReceived
     case cdataReplyChunk(TydomCDataReplyChunk)
 }

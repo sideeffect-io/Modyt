@@ -8,6 +8,9 @@ func parseInputCommand(_ line: String) -> Result<CLICommand, CLIParseError>? {
     if trimmed == "help" || trimmed == "?" {
         return .success(.help)
     }
+    if trimmed == "wizard" || trimmed == "menu" {
+        return .success(.wizard)
+    }
     if trimmed == "quit" || trimmed == "exit" {
         return .success(.quit)
     }
@@ -89,6 +92,82 @@ func parseInputCommand(_ line: String) -> Result<CLICommand, CLIParseError>? {
             name: args[2],
             value: value
         )))
+    case "alarm-cdata":
+        guard (3...6).contains(args.count) else {
+            return .failure(
+                CLIParseError(
+                    message: "alarm-cdata <deviceId> <endpointId> <value> [alarmPin|-] [zoneId|-] [legacyZones]"
+                )
+            )
+        }
+        let alarmPin = args.count > 3 ? parseOptionalCLIArgument(args[3]) : nil
+        let zoneId = args.count > 4 ? parseOptionalCLIArgument(args[4]) : nil
+        let legacyZones: Bool
+        if args.count > 5 {
+            guard let parsed = parseBool(args[5]) else {
+                return .failure(CLIParseError(message: "legacyZones must be true or false."))
+            }
+            legacyZones = parsed
+        } else {
+            legacyZones = false
+        }
+        let commands = TydomCommand.alarmCData(
+            deviceId: args[0],
+            endpointId: args[1],
+            alarmPin: alarmPin,
+            value: args[2],
+            zoneId: zoneId,
+            legacyZones: legacyZones
+        )
+        guard commands.isEmpty == false else {
+            return .failure(CLIParseError(message: "alarm-cdata produced no command. Provide zoneId when legacyZones is true."))
+        }
+        if commands.count == 1, let single = commands.first {
+            return .success(.send(single))
+        }
+        return .success(.sendMany(commands))
+    case "ack-events-cdata":
+        guard (2...3).contains(args.count) else {
+            return .failure(CLIParseError(message: "ack-events-cdata <deviceId> <endpointId> [alarmPin|-]"))
+        }
+        let alarmPin = args.count > 2 ? parseOptionalCLIArgument(args[2]) : nil
+        return .success(.send(.ackEventsCData(
+            deviceId: args[0],
+            endpointId: args[1],
+            alarmPin: alarmPin
+        )))
+    case "historic-cdata":
+        guard (2...5).contains(args.count) else {
+            return .failure(
+                CLIParseError(message: "historic-cdata <deviceId> <endpointId> [eventType|-] [indexStart] [nbElement]")
+            )
+        }
+        let eventType = args.count > 2 ? parseOptionalCLIArgument(args[2]) : nil
+        let indexStart: Int
+        if args.count > 3 {
+            guard let parsed = Int(args[3]) else {
+                return .failure(CLIParseError(message: "indexStart must be an integer."))
+            }
+            indexStart = parsed
+        } else {
+            indexStart = 0
+        }
+        let nbElement: Int
+        if args.count > 4 {
+            guard let parsed = Int(args[4]) else {
+                return .failure(CLIParseError(message: "nbElement must be an integer."))
+            }
+            nbElement = parsed
+        } else {
+            nbElement = 10
+        }
+        return .success(.send(.historicCData(
+            deviceId: args[0],
+            endpointId: args[1],
+            eventType: eventType,
+            indexStart: indexStart,
+            nbElement: nbElement
+        )))
     default:
         return .failure(CLIParseError(message: "Unknown command: \(command). Type `help` for the list."))
     }
@@ -137,6 +216,7 @@ private func parseDeviceDataValue(value: String, typeHint: String?) -> TydomComm
 func commandHelpText() -> String {
     let entries: [(String, String)] = [
         ("help", "Show available commands"),
+        ("wizard | menu", "Run guided command wizard (default mode)"),
         ("quit | exit", "Disconnect and quit"),
         ("set-active <true|false>", "Toggle app activity for polling"),
         ("ping", "GET /ping"),
@@ -161,6 +241,9 @@ func commandHelpText() -> String {
         ("activate-scenario <scenarioId>", "PUT /scenarios/<id>"),
         ("put-data <path> <name> <value> [type]", "PUT <path> with JSON body"),
         ("put-devices-data <deviceId> <endpointId> <name> <value> [type]", "PUT devices data"),
+        ("alarm-cdata <deviceId> <endpointId> <value> [alarmPin|-] [zoneId|-] [legacyZones]", "PUT alarm/zone/part cdata"),
+        ("ack-events-cdata <deviceId> <endpointId> [alarmPin|-]", "PUT ackEventCmd cdata"),
+        ("historic-cdata <deviceId> <endpointId> [eventType|-] [indexStart] [nbElement]", "GET histo cdata"),
         ("raw <request>", "Send a raw HTTP request string")
     ]
 
@@ -179,5 +262,18 @@ private func parseBool(_ value: String) -> Bool? {
         return false
     default:
         return nil
+    }
+}
+
+private func parseOptionalCLIArgument(_ value: String) -> String? {
+    let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard normalized.isEmpty == false else {
+        return nil
+    }
+    switch normalized.lowercased() {
+    case "-", "none", "nil", "null":
+        return nil
+    default:
+        return normalized
     }
 }

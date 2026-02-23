@@ -9,8 +9,6 @@ import Testing
     let hydrator = TydomMessageHydrator(dependencies: .live(cache))
     let executor = TydomMessageEffectExecutor(dependencies: .init(
         sendCommand: { _ in },
-        pollScheduler: { _, _ in },
-        pollOnceScheduled: {},
         onPong: {},
         onCDataReplyChunk: { _ in }
     ))
@@ -60,14 +58,14 @@ import Testing
 
     // Then
     #expect(messages.count == 2)
-    if case .gatewayInfo(_, let transactionId) = messages[0] {
-        #expect(transactionId == "t1")
+    if case .gatewayInfo(_, let metadata) = messages[0] {
+        #expect(metadata.transactionId == "t1")
     } else {
         #expect(Bool(false), "Expected gateway info")
     }
 
-    if case .devices(let devices, let transactionId) = messages[1] {
-        #expect(transactionId == "t2")
+    if case .devices(let devices, let metadata) = messages[1] {
+        #expect(metadata.transactionId == "t2")
         #expect(devices.count == 1)
         #expect(devices[0].name == "Living Room")
         #expect(devices[0].data["level"] == JSONValue.number(10))

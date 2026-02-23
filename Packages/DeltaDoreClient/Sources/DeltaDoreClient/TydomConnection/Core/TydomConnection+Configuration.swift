@@ -2,20 +2,6 @@ import Foundation
 
 extension TydomConnection {
     public struct Configuration: Sendable {
-        public struct Polling: Sendable {
-            public let intervalSeconds: Int
-            public let onlyWhenActive: Bool
-
-            public init(intervalSeconds: Int = 60, onlyWhenActive: Bool = true) {
-                self.intervalSeconds = intervalSeconds
-                self.onlyWhenActive = onlyWhenActive
-            }
-
-            public var isEnabled: Bool {
-                intervalSeconds > 0
-            }
-        }
-
         public struct KeepAlive: Sendable {
             public let intervalSeconds: Int
             public let onlyWhenActive: Bool
@@ -41,7 +27,6 @@ extension TydomConnection {
         public let cloudCredentials: CloudCredentials?
         public let allowInsecureTLS: Bool
         public let timeout: TimeInterval
-        public let polling: Polling
         public let keepAlive: KeepAlive
 
         public init(
@@ -51,7 +36,6 @@ extension TydomConnection {
             cloudCredentials: CloudCredentials? = nil,
             allowInsecureTLS: Bool? = nil,
             timeout: TimeInterval = 10.0,
-            polling: Polling = Polling(),
             keepAlive: KeepAlive = KeepAlive()
         ) {
             self.mode = mode
@@ -60,7 +44,6 @@ extension TydomConnection {
             self.cloudCredentials = cloudCredentials
             self.allowInsecureTLS = allowInsecureTLS ?? true
             self.timeout = timeout
-            self.polling = polling
             self.keepAlive = keepAlive
         }
 

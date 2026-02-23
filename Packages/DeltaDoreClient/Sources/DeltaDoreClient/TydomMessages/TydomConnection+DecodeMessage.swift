@@ -2,30 +2,41 @@ import Foundation
 
 extension TydomConnection {
     public func decodedMessages() -> AsyncStream<TydomMessage> {
-        decodedMessages(logger: { _ in })
+        decodedMessages(logger: { _ in }, rawFrameHandler: { _ in })
     }
 
     public func decodedMessages(
-        logger: @escaping @Sendable (String) -> Void
+        logger: @escaping @Sendable (String) -> Void,
+        rawFrameHandler: @escaping @Sendable (TydomRawMessage) -> Void = { _ in }
     ) -> AsyncStream<TydomMessage> {
-        let dependencies = TydomMessagePipelineDependencies.live(connection: self, log: logger)
         return AsyncStream { continuation in
             let task = Task { [weak self] in
                 guard let self else {
                     continuation.finish()
                     return
                 }
-                for await data in await self.messages() {
-                    let raw = dependencies.dataToRawMessage(data)
+                for await data in await self.rawMessages() {
+                    let cleanData: Data
+                    if let prefix = self.configuration.commandPrefix, data.first == prefix {
+                        cleanData = Data(data.dropFirst())
+                    } else {
+                        cleanData = data
+                    }
+                    let parsed = TydomRawMessageParser.parse(cleanData)
+                    let raw = TydomRawMessage(
+                        payload: data,
+                        frame: parsed.frame,
+                        uriOrigin: parsed.uriOrigin,
+                        transactionId: parsed.transactionId,
+                        parseError: parsed.parseError
+                    )
+                    rawFrameHandler(raw)
                     if let parseError = raw.parseError {
                         let snippet = String(data: raw.payload.prefix(200), encoding: .isoLatin1)
                             ?? String(decoding: raw.payload.prefix(200), as: UTF8.self)
                         logger("Decode parse error=\(parseError) bytes=\(raw.payload.count) snippet=\(snippet)")
                     }
-                    let decoded = dependencies.rawMessageToEnvelope(raw)
-                    let hydrated = await dependencies.hydrateFromCache(decoded)
-                    Task { await dependencies.enqueueEffects(hydrated.effects) }
-                    continuation.yield(hydrated.message)
+                    continuation.yield(.raw(TydomMessageMetadata(raw: raw)))
                 }
                 continuation.finish()
             }
@@ -33,24 +44,5 @@ extension TydomConnection {
                 task.cancel()
             }
         }
-    }
-}
-
-struct TydomMessagePipelineDependencies: Sendable {
-    let dataToRawMessage: @Sendable (Data) -> TydomRawMessage
-    let rawMessageToEnvelope: @Sendable (TydomRawMessage) -> TydomDecodedEnvelope
-    let hydrateFromCache: @Sendable (TydomDecodedEnvelope) async -> TydomHydratedEnvelope
-    let enqueueEffects: @Sendable ([TydomMessageEffect]) async -> Void
-
-    init(
-        dataToRawMessage: @escaping @Sendable (Data) -> TydomRawMessage,
-        rawMessageToEnvelope: @escaping @Sendable (TydomRawMessage) -> TydomDecodedEnvelope,
-        hydrateFromCache: @escaping @Sendable (TydomDecodedEnvelope) async -> TydomHydratedEnvelope,
-        enqueueEffects: @escaping @Sendable ([TydomMessageEffect]) async -> Void
-    ) {
-        self.dataToRawMessage = dataToRawMessage
-        self.rawMessageToEnvelope = rawMessageToEnvelope
-        self.hydrateFromCache = hydrateFromCache
-        self.enqueueEffects = enqueueEffects
     }
 }

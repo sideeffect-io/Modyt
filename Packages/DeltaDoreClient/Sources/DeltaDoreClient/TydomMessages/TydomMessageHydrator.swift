@@ -5,20 +5,17 @@ struct TydomMessageHydratorDependencies: Sendable {
     let scenarioMetadata: @Sendable (Int) async -> TydomScenarioMetadata?
     let applyCacheMutation: @Sendable (TydomCacheMutation) async -> Void
     let log: @Sendable (String) -> Void
-    let isPostPutPollingActive: @Sendable (String) async -> Bool
 
     init(
         deviceInfo: @escaping @Sendable (String) async -> TydomDeviceInfo?,
         scenarioMetadata: @escaping @Sendable (Int) async -> TydomScenarioMetadata?,
         applyCacheMutation: @escaping @Sendable (TydomCacheMutation) async -> Void,
-        log: @escaping @Sendable (String) -> Void = { _ in },
-        isPostPutPollingActive: @escaping @Sendable (String) async -> Bool = { _ in false }
+        log: @escaping @Sendable (String) -> Void = { _ in }
     ) {
         self.deviceInfo = deviceInfo
         self.scenarioMetadata = scenarioMetadata
         self.applyCacheMutation = applyCacheMutation
         self.log = log
-        self.isPostPutPollingActive = isPostPutPollingActive
     }
 }
 
@@ -30,6 +27,8 @@ struct TydomMessageHydrator: Sendable {
     }
 
     func hydrate(_ decoded: TydomDecodedEnvelope) async -> TydomHydratedEnvelope {
+        let metadata = decoded.metadata
+
         for mutation in decoded.cacheMutations {
             await dependencies.applyCacheMutation(mutation)
         }
@@ -37,84 +36,93 @@ struct TydomMessageHydrator: Sendable {
         switch decoded.payload {
         case .gatewayInfo(let info):
             return TydomHydratedEnvelope(
-                message: .gatewayInfo(info, transactionId: decoded.raw.transactionId),
+                message: .gatewayInfo(info, metadata: metadata),
                 effects: decoded.effects
             )
         case .deviceUpdates(let updates):
             let result = await hydrateDeviceUpdates(
                 from: updates,
-                transactionId: decoded.raw.transactionId,
-                uriOrigin: decoded.raw.uriOrigin
+                transactionId: metadata.transactionId
             )
             let devices = result.devices
             let extraEffects = result.effects
             if devices.isEmpty {
                 return TydomHydratedEnvelope(
-                    message: .raw(decoded.raw),
+                    message: .raw(metadata),
                     effects: decoded.effects + extraEffects
                 )
             }
             return TydomHydratedEnvelope(
-                message: .devices(devices, transactionId: decoded.raw.transactionId),
+                message: .devices(devices, metadata: metadata),
                 effects: decoded.effects + extraEffects
+            )
+        case .devicesMeta(let entries):
+            return TydomHydratedEnvelope(
+                message: .devicesMeta(entries, metadata: metadata),
+                effects: decoded.effects
+            )
+        case .devicesCMeta(let entries):
+            return TydomHydratedEnvelope(
+                message: .devicesCMeta(entries, metadata: metadata),
+                effects: decoded.effects
             )
         case .scenarios(let payloads):
             let scenarios = await hydrateScenarios(from: payloads)
             return TydomHydratedEnvelope(
-                message: .scenarios(scenarios, transactionId: decoded.raw.transactionId),
+                message: .scenarios(scenarios, metadata: metadata),
                 effects: decoded.effects
             )
-        case .groupMetadata(let metadata):
+        case .groupMetadata(let groupMetadata):
             return TydomHydratedEnvelope(
-                message: .groupMetadata(metadata, transactionId: decoded.raw.transactionId),
+                message: .groupMetadata(groupMetadata, metadata: decoded.metadata),
                 effects: decoded.effects
             )
         case .groups(let groups):
             return TydomHydratedEnvelope(
-                message: .groups(groups, transactionId: decoded.raw.transactionId),
+                message: .groups(groups, metadata: metadata),
                 effects: decoded.effects
             )
         case .moments(let moments):
             return TydomHydratedEnvelope(
-                message: .moments(moments, transactionId: decoded.raw.transactionId),
+                message: .moments(moments, metadata: metadata),
                 effects: decoded.effects
             )
         case .areas(let areas):
             return TydomHydratedEnvelope(
-                message: .areas(areas, transactionId: decoded.raw.transactionId),
+                message: .areas(areas, metadata: metadata),
                 effects: decoded.effects
             )
-        case .echo(let echo):
-            return TydomHydratedEnvelope(message: .echo(echo), effects: decoded.effects)
+        case .areasMeta(let entries):
+            return TydomHydratedEnvelope(
+                message: .areasMeta(entries, metadata: metadata),
+                effects: decoded.effects
+            )
+        case .areasCMeta(let entries):
+            return TydomHydratedEnvelope(
+                message: .areasCMeta(entries, metadata: metadata),
+                effects: decoded.effects
+            )
+        case .ack(let ack):
+            return TydomHydratedEnvelope(
+                message: .ack(ack, metadata: metadata),
+                effects: decoded.effects
+            )
         case .none:
-            return TydomHydratedEnvelope(message: .raw(decoded.raw), effects: decoded.effects)
+            return TydomHydratedEnvelope(message: .raw(metadata), effects: decoded.effects)
         }
     }
 
     private func hydrateDeviceUpdates(
         from updates: [TydomDeviceUpdate],
-        transactionId: String?,
-        uriOrigin: String?
+        transactionId: String?
     ) async -> (devices: [TydomDevice], effects: [TydomMessageEffect]) {
         var devices: [TydomDevice] = []
         var effects: [TydomMessageEffect] = []
         var missingInfo = 0
         var skippedCData = 0
         var emptyData = 0
-        var filteredByPolling = 0
         var missingInfoSamples: [String] = []
-        let isBroadcastDevicesData = uriOrigin == "/devices/data"
         for update in updates {
-            if isBroadcastDevicesData,
-               update.source == .data,
-               await dependencies.isPostPutPollingActive(update.uniqueId) {
-                filteredByPolling += 1
-                dependencies.log(
-                    "Post-PUT filter drop uri=/devices/data tx=\(transactionId ?? "nil") uniqueId=\(update.uniqueId) reason=active-polling"
-                )
-                continue
-            }
-
             guard let info = await dependencies.deviceInfo(update.uniqueId) else {
                 missingInfo += 1
                 if missingInfoSamples.count < 5 {
@@ -162,11 +170,12 @@ struct TydomMessageHydrator: Sendable {
                 usage: info.usage,
                 kind: TydomDeviceKind.fromUsage(info.usage),
                 data: update.data,
+                entries: update.entries,
                 metadata: info.metadata ?? update.metadata
             ))
         }
         dependencies.log(
-            "Hydrate device updates total=\(updates.count) devices=\(devices.count) missingInfo=\(missingInfo) skippedCData=\(skippedCData) emptyData=\(emptyData) filteredByPolling=\(filteredByPolling) missingInfoSample=\(missingInfoSamples)"
+            "Hydrate device updates total=\(updates.count) devices=\(devices.count) missingInfo=\(missingInfo) skippedCData=\(skippedCData) emptyData=\(emptyData) missingInfoSample=\(missingInfoSamples)"
         )
         return (devices, effects)
     }

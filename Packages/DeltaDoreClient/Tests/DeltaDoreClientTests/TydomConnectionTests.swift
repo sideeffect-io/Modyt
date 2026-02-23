@@ -110,7 +110,6 @@ private func makeConfiguration() -> TydomConnection.Configuration {
         password: "secret",
         allowInsecureTLS: true,
         timeout: 1.0,
-        polling: .init(intervalSeconds: 0, onlyWhenActive: false),
         keepAlive: .init(intervalSeconds: 0, onlyWhenActive: false)
     )
 }
