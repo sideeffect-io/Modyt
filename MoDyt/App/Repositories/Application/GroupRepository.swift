@@ -1,0 +1,138 @@
+import Foundation
+
+struct GroupMetadataUpsert: DomainUpsert, Equatable {
+    let id: String
+    let name: String
+    let usage: String
+    let picto: String?
+    let isGroupUser: Bool
+    let isGroupAll: Bool
+}
+
+struct GroupMembershipUpsert: DomainUpsert, Equatable {
+    let id: String
+    let memberUniqueIds: [String]
+}
+
+enum GroupUpsertEvent: DomainUpsert {
+    case metadata(GroupMetadataUpsert)
+    case membership(GroupMembershipUpsert)
+
+    var id: String {
+        switch self {
+        case .metadata(let metadata):
+            metadata.id
+        case .membership(let membership):
+            membership.id
+        }
+    }
+}
+
+typealias GroupRepository = SQLiteDomainRepository<Group, GroupUpsertEvent>
+
+extension SQLiteDomainRepository where Item == Group, Upsert == GroupUpsertEvent {
+    static func makeGroupRepository(
+        databasePath: String,
+        now: @escaping @Sendable () -> Date = Date.init,
+        log: @escaping @Sendable (String) -> Void = { _ in }
+    ) -> Self {
+        Self(
+            configuration: .init(
+                databasePath: databasePath,
+                tableName: tableName,
+                createTableSQL: createTableSQL,
+                createDashboardOrderIndexSQL: createDashboardOrderIndexSQL,
+                resolveUpsert: resolveUpsert
+            ),
+            now: now,
+            log: log
+        )
+    }
+
+    func upsertMetadata(_ values: [GroupMetadataUpsert]) throws {
+        try upsert(values.map(GroupUpsertEvent.metadata))
+    }
+
+    func upsertMembership(_ values: [GroupMembershipUpsert]) throws {
+        try upsert(values.map(GroupUpsertEvent.membership))
+    }
+
+    private static func resolveUpsert(
+        existing: Group?,
+        upsert: GroupUpsertEvent,
+        timestamp: Date
+    ) -> SQLiteDomainMergeDecision<Group> {
+        switch upsert {
+        case .metadata(let metadata):
+            return .upsert(makeGroup(existing: existing, metadata: metadata, timestamp: timestamp))
+        case .membership(let membership):
+            return .upsert(makeGroup(existing: existing, membership: membership, timestamp: timestamp))
+        }
+    }
+
+    private static func makeGroup(
+        existing: Group?,
+        metadata: GroupMetadataUpsert,
+        timestamp: Date
+    ) -> Group {
+        let memberUniqueIDs = existing?.memberUniqueIds.uniquePreservingOrder() ?? []
+
+        return Group(
+            id: metadata.id,
+            name: metadata.name,
+            usage: metadata.usage,
+            picto: metadata.picto,
+            isGroupUser: metadata.isGroupUser,
+            isGroupAll: metadata.isGroupAll,
+            memberUniqueIds: memberUniqueIDs,
+            isFavorite: existing?.isFavorite ?? false,
+            dashboardOrder: existing?.dashboardOrder,
+            updatedAt: timestamp
+        )
+    }
+
+    private static func makeGroup(
+        existing: Group?,
+        membership: GroupMembershipUpsert,
+        timestamp: Date
+    ) -> Group {
+        let memberUniqueIDs = membership.memberUniqueIds.uniquePreservingOrder() 
+
+        let isGroupUser = existing?.isGroupUser ?? false
+
+        return Group(
+            id: membership.id,
+            name: existing?.name ?? "Group \(membership.id)",
+            usage: existing?.usage ?? "unknown",
+            picto: existing?.picto,
+            isGroupUser: isGroupUser,
+            isGroupAll: existing?.isGroupAll ?? false,
+            memberUniqueIds: memberUniqueIDs,
+            isFavorite: existing?.isFavorite ?? false,
+            dashboardOrder: existing?.dashboardOrder,
+            updatedAt: timestamp
+        )
+    }
+
+    private static let tableName = "groups"
+
+    private static let createTableSQL = """
+    CREATE TABLE IF NOT EXISTS \(tableName) (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        usage TEXT NOT NULL,
+        picto TEXT,
+        isGroupUser INTEGER NOT NULL,
+        isGroupAll INTEGER NOT NULL,
+        memberUniqueIds TEXT NOT NULL,
+        isFavorite INTEGER NOT NULL,
+        dashboardOrder INTEGER,
+        updatedAt REAL NOT NULL
+    );
+    """
+
+    private static let createDashboardOrderIndexSQL = """
+    CREATE INDEX IF NOT EXISTS groups_favorites_order_idx
+    ON \(tableName) (isFavorite, dashboardOrder);
+    """
+}

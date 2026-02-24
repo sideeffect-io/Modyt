@@ -45,14 +45,14 @@ public struct TydomMessageMetadata: Sendable, Equatable {
     public let uriOrigin: String?
     public let transactionId: String?
     public let body: Data?
-    public let bodyJSON: JSONValue?
+    public let bodyJSON: PayloadValue?
 
     public init(
         raw: TydomRawMessage,
         uriOrigin: String? = nil,
         transactionId: String? = nil,
         body: Data? = nil,
-        bodyJSON: JSONValue? = nil
+        bodyJSON: PayloadValue? = nil
     ) {
         self.raw = raw
         self.uriOrigin = uriOrigin ?? raw.uriOrigin
@@ -61,9 +61,9 @@ public struct TydomMessageMetadata: Sendable, Equatable {
         self.bodyJSON = bodyJSON ?? Self.decodeBodyJSON(from: self.body)
     }
 
-    private static func decodeBodyJSON(from data: Data?) -> JSONValue? {
+    private static func decodeBodyJSON(from data: Data?) -> PayloadValue? {
         guard let data, data.isEmpty == false else { return nil }
-        return try? JSONDecoder().decode(JSONValue.self, from: data)
+        return try? JSONDecoder().decode(PayloadValue.self, from: data)
     }
 }
 
@@ -102,9 +102,9 @@ public struct TydomRawMessage: Sendable, Equatable {
 }
 
 public struct TydomGatewayInfo: Sendable, Equatable {
-    public let payload: [String: JSONValue]
+    public let payload: [String: PayloadValue]
 
-    public init(payload: [String: JSONValue]) {
+    public init(payload: [String: PayloadValue]) {
         self.payload = payload
     }
 }
@@ -115,7 +115,7 @@ public struct TydomScenario: Sendable, Equatable {
     public let type: String
     public let picto: String
     public let ruleId: String?
-    public let payload: [String: JSONValue]
+    public let payload: [String: PayloadValue]
 
     public init(
         id: Int,
@@ -123,7 +123,7 @@ public struct TydomScenario: Sendable, Equatable {
         type: String,
         picto: String,
         ruleId: String?,
-        payload: [String: JSONValue]
+        payload: [String: PayloadValue]
     ) {
         self.id = id
         self.name = name
@@ -141,7 +141,7 @@ public struct TydomGroupMetadata: Sendable, Equatable {
     public let picto: String?
     public let isGroupUser: Bool
     public let isGroupAll: Bool
-    public let payload: [String: JSONValue]
+    public let payload: [String: PayloadValue]
 
     public init(
         id: Int,
@@ -150,7 +150,7 @@ public struct TydomGroupMetadata: Sendable, Equatable {
         picto: String?,
         isGroupUser: Bool,
         isGroupAll: Bool,
-        payload: [String: JSONValue]
+        payload: [String: PayloadValue]
     ) {
         self.id = id
         self.name = name
@@ -192,13 +192,13 @@ public struct TydomGroup: Sendable, Equatable {
     public let id: Int
     public let devices: [DeviceMember]
     public let areas: [AreaMember]
-    public let payload: [String: JSONValue]
+    public let payload: [String: PayloadValue]
 
     public init(
         id: Int,
         devices: [DeviceMember],
         areas: [AreaMember],
-        payload: [String: JSONValue]
+        payload: [String: PayloadValue]
     ) {
         self.id = id
         self.devices = devices
@@ -208,18 +208,18 @@ public struct TydomGroup: Sendable, Equatable {
 }
 
 public struct TydomMoment: Sendable, Equatable {
-    public let payload: [String: JSONValue]
+    public let payload: [String: PayloadValue]
 
-    public init(payload: [String: JSONValue]) {
+    public init(payload: [String: PayloadValue]) {
         self.payload = payload
     }
 }
 
 public struct TydomArea: Sendable, Equatable {
     public let id: Int?
-    public let payload: [String: JSONValue]
+    public let payload: [String: PayloadValue]
 
-    public init(id: Int?, payload: [String: JSONValue]) {
+    public init(id: Int?, payload: [String: PayloadValue]) {
         self.id = id
         self.payload = payload
     }
@@ -227,9 +227,9 @@ public struct TydomArea: Sendable, Equatable {
 
 public struct TydomMetadataEntry: Sendable, Equatable {
     public let id: Int?
-    public let payload: [String: JSONValue]
+    public let payload: [String: PayloadValue]
 
-    public init(id: Int?, payload: [String: JSONValue]) {
+    public init(id: Int?, payload: [String: PayloadValue]) {
         self.id = id
         self.payload = payload
     }
@@ -238,9 +238,9 @@ public struct TydomMetadataEntry: Sendable, Equatable {
 struct TydomDeviceInfo: Sendable, Equatable {
     let name: String
     let usage: String
-    let metadata: [String: JSONValue]?
+    let metadata: [String: PayloadValue]?
 
-    init(name: String, usage: String, metadata: [String: JSONValue]? = nil) {
+    init(name: String, usage: String, metadata: [String: PayloadValue]? = nil) {
         self.name = name
         self.usage = usage
         self.metadata = metadata
@@ -250,14 +250,14 @@ struct TydomDeviceInfo: Sendable, Equatable {
 public struct TydomDeviceDataEntry: Sendable, Equatable {
     public let name: String
     public let validity: String?
-    public let value: JSONValue
-    public let payload: [String: JSONValue]
+    public let value: PayloadValue
+    public let payload: [String: PayloadValue]
 
     public init(
         name: String,
         validity: String?,
-        value: JSONValue,
-        payload: [String: JSONValue]
+        value: PayloadValue,
+        payload: [String: PayloadValue]
     ) {
         self.name = name
         self.validity = validity
@@ -274,9 +274,9 @@ public struct TydomDevice: Sendable, Equatable {
     public let name: String
     public let usage: String
     public let kind: TydomDeviceKind
-    public let data: [String: JSONValue]
+    public let data: [String: PayloadValue]
     public let entries: [TydomDeviceDataEntry]
-    public let metadata: [String: JSONValue]?
+    public let metadata: [String: PayloadValue]?
 
     public init(
         id: Int,
@@ -285,9 +285,9 @@ public struct TydomDevice: Sendable, Equatable {
         name: String,
         usage: String,
         kind: TydomDeviceKind,
-        data: [String: JSONValue],
+        data: [String: PayloadValue],
         entries: [TydomDeviceDataEntry],
-        metadata: [String: JSONValue]?
+        metadata: [String: PayloadValue]?
     ) {
         self.id = id
         self.endpointId = endpointId

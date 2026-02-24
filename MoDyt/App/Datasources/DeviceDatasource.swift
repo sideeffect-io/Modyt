@@ -2,7 +2,7 @@ import Foundation
 import DeltaDoreClient
 import Persistence
 
-actor DeviceRepository {
+actor DeviceDatasource {
     enum RepositoryError: Error {
         case notReady
     }
@@ -160,11 +160,11 @@ actor DeviceRepository {
         await notifyObservers()
     }
 
-    func applyOptimisticUpdate(uniqueId: String, key: String, value: JSONValue) async {
+    func applyOptimisticUpdate(uniqueId: String, key: String, value: PayloadValue) async {
         await applyOptimisticUpdates(uniqueId: uniqueId, changes: [key: value])
     }
 
-    func applyOptimisticUpdates(uniqueId: String, changes: [String: JSONValue]) async {
+    func applyOptimisticUpdates(uniqueId: String, changes: [String: PayloadValue]) async {
         guard !changes.isEmpty else { return }
         guard let deviceDAO = try? await requireDAO() else { return }
         guard var existing = try? await deviceDAO.read(.text(uniqueId)) else { return }
@@ -259,21 +259,22 @@ actor DeviceRepository {
 
     func applyMessage(_ message: TydomMessage) async {
         switch message {
-        case .devices(let devices, let transactionId):
-            log("Apply devices message count=\(devices.count) tx=\(transactionId ?? "nil")")
+        case .devices(let devices, let metadata):
+            log("Apply devices message count=\(devices.count) tx=\(metadata.transactionId ?? "nil")")
             await upsertDevices(
                 devices,
-                transactionId: transactionId,
+                transactionId: metadata.transactionId,
                 source: "message"
             )
         case .areas(let areas, _):
             log("Apply areas message count=\(areas.count)")
             await applyAreasData(areas)
-        case .echo(let echo):
-            let looksLikeDeviceDataPath = echo.uriOrigin.contains("/devices/")
-                && echo.uriOrigin.contains("/data")
+        case .ack(let ack, let metadata):
+            let uriOrigin = metadata.uriOrigin ?? ""
+            let looksLikeDeviceDataPath = uriOrigin.contains("/devices/")
+                && uriOrigin.contains("/data")
             log(
-                "Ignore echo message status=\(echo.statusCode) tx=\(echo.transactionId) uri=\(echo.uriOrigin) deviceDataLike=\(looksLikeDeviceDataPath)"
+                "Ignore ack message status=\(ack.statusCode) tx=\(metadata.transactionId ?? "nil") uri=\(uriOrigin) deviceDataLike=\(looksLikeDeviceDataPath)"
             )
         default:
             break
@@ -374,7 +375,7 @@ actor DeviceRepository {
         }
     }
 
-    private static func linkedAreaId(in data: [String: JSONValue]) -> Int? {
+    private static func linkedAreaId(in data: [String: PayloadValue]) -> Int? {
         if let value = data["__linkedAreaId"]?.numberValue {
             return Int(value.rounded())
         }
@@ -385,11 +386,11 @@ actor DeviceRepository {
     }
 
     private static func extractAreaDataValues(
-        from payload: [String: JSONValue]
-    ) -> [String: JSONValue] {
+        from payload: [String: PayloadValue]
+    ) -> [String: PayloadValue] {
         guard let entries = payload["data"]?.arrayValue else { return [:] }
 
-        var values: [String: JSONValue] = [:]
+        var values: [String: PayloadValue] = [:]
         for entry in entries {
             guard let object = entry.objectValue else { continue }
             guard let name = object["name"]?.stringValue else { continue }
@@ -458,7 +459,7 @@ actor DeviceRepository {
         return "key=\(descriptor.key) value=\(formatNumber(descriptor.value)) range=\(formatNumber(descriptor.range.lowerBound))...\(formatNumber(descriptor.range.upperBound)) kind=\(descriptor.kind)"
     }
 
-    private static func positionTrace(in data: [String: JSONValue]?) -> String {
+    private static func positionTrace(in data: [String: PayloadValue]?) -> String {
         guard let data else { return "nil" }
         if let value = data["position"] {
             return "position:\(value.traceString)"
@@ -483,8 +484,8 @@ actor DeviceRepository {
     }
 
     private static func isLikelyThermostatData(
-        _ data: [String: JSONValue],
-        metadata: [String: JSONValue]?
+        _ data: [String: PayloadValue],
+        metadata: [String: PayloadValue]?
     ) -> Bool {
         var keys = Set(data.keys.map { $0.lowercased() })
         if let metadata {
@@ -560,9 +561,9 @@ private func merge(
 }
 
 private func mergeDictionaries(
-    _ existing: [String: JSONValue]?,
-    _ incoming: [String: JSONValue]?
-) -> [String: JSONValue] {
+    _ existing: [String: PayloadValue]?,
+    _ incoming: [String: PayloadValue]?
+) -> [String: PayloadValue] {
     var merged = existing ?? [:]
     if let incoming {
         for (key, value) in incoming {
@@ -572,7 +573,7 @@ private func mergeDictionaries(
     return merged
 }
 
-private extension JSONValue {
+private extension PayloadValue {
     var traceString: String {
         switch self {
         case .string(let text):

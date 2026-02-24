@@ -1,14 +1,14 @@
 import Foundation
 
 actor DashboardRepository {
-    private let deviceRepository: DeviceRepository
-    private let sceneRepository: SceneRepository
-    private let groupRepository: GroupRepository
+    private let deviceRepository: DeviceDatasource
+    private let sceneRepository: SceneDatasource
+    private let groupRepository: GroupDatasource
 
     init(
-        deviceRepository: DeviceRepository,
-        sceneRepository: SceneRepository,
-        groupRepository: GroupRepository
+        deviceRepository: DeviceDatasource,
+        sceneRepository: SceneDatasource,
+        groupRepository: GroupDatasource
     ) {
         self.deviceRepository = deviceRepository
         self.sceneRepository = sceneRepository

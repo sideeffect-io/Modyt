@@ -4,13 +4,13 @@ struct TydomDeviceCacheEntry: Sendable, Equatable {
     let uniqueId: String
     var name: String?
     var usage: String?
-    var metadata: [String: JSONValue]?
+    var metadata: [String: PayloadValue]?
 
     init(
         uniqueId: String,
         name: String? = nil,
         usage: String? = nil,
-        metadata: [String: JSONValue]? = nil
+        metadata: [String: PayloadValue]? = nil
     ) {
         self.uniqueId = uniqueId
         self.name = name
@@ -174,7 +174,7 @@ enum TydomMessageDecoder {
     }
 
     private static func decodeGatewayInfo(_ data: Data) -> TydomGatewayInfo? {
-        guard let payload = try? JSONDecoder().decode([String: JSONValue].self, from: data) else {
+        guard let payload = try? JSONDecoder().decode([String: PayloadValue].self, from: data) else {
             return nil
         }
         return TydomGatewayInfo(payload: payload)
@@ -210,7 +210,7 @@ enum TydomMessageDecoder {
     }
 
     private struct DataExtractionResult {
-        let values: [String: JSONValue]
+        let values: [String: PayloadValue]
         let entries: [TydomDeviceDataEntry]
     }
 
@@ -218,7 +218,7 @@ enum TydomMessageDecoder {
         guard endpoint.error == nil || endpoint.error == 0 else {
             return DataExtractionResult(values: [:], entries: [])
         }
-        var values: [String: JSONValue] = [:]
+        var values: [String: PayloadValue] = [:]
         var resolvedEntries: [TydomDeviceDataEntry] = []
         if let entries = endpoint.data {
             for entry in entries {
@@ -285,7 +285,7 @@ enum TydomMessageDecoder {
                 let uniqueId = "\(endpoint.id)_\(device.id)"
                 let values = extractCDataValues(from: endpoint)
                 let entries = endpoint.cdata ?? []
-                let entryPayloads = entries.map { JSONValue.object($0.payload) }
+                let entryPayloads = entries.map { PayloadValue.object($0.payload) }
                 guard entryPayloads.isEmpty == false || values.isEmpty == false else { continue }
 
                 updates.append(TydomDeviceUpdate(
@@ -302,9 +302,9 @@ enum TydomMessageDecoder {
         return updates
     }
 
-    private static func extractCDataValues(from endpoint: DevicesCDataPayload.Endpoint) -> [String: JSONValue] {
+    private static func extractCDataValues(from endpoint: DevicesCDataPayload.Endpoint) -> [String: PayloadValue] {
         guard let entries = endpoint.cdata else { return [:] }
-        var values: [String: JSONValue] = [:]
+        var values: [String: PayloadValue] = [:]
         for entry in entries {
             if let dest = entry.parameters?["dest"]?.stringValue,
                let counter = entry.values?["counter"] {
@@ -357,7 +357,7 @@ enum TydomMessageDecoder {
     }
 
     private static func decodeMetadataEntries(_ data: Data) -> [TydomMetadataEntry]? {
-        guard let values = decodePayloadArray(JSONValue.self, from: data) else { return nil }
+        guard let values = decodePayloadArray(PayloadValue.self, from: data) else { return nil }
         return values.compactMap { value in
             guard let payload = value.objectValue else { return nil }
             return TydomMetadataEntry(
@@ -367,7 +367,7 @@ enum TydomMessageDecoder {
         }
     }
 
-    private static func tracePositionValue(in data: [String: JSONValue]) -> String? {
+    private static func tracePositionValue(in data: [String: PayloadValue]) -> String? {
         if let position = data["position"] {
             return position.traceString
         }
@@ -436,7 +436,7 @@ enum TydomMessageDecoder {
         for device in payload {
             for endpoint in device.endpoints {
                 let uniqueId = "\(endpoint.id)_\(device.id)"
-                let metadata = (endpoint.metadata ?? []).reduce(into: [String: JSONValue]()) { acc, entry in
+                let metadata = (endpoint.metadata ?? []).reduce(into: [String: PayloadValue]()) { acc, entry in
                     acc[entry.name] = .object(entry.attributes)
                 }
                 let entry = TydomDeviceCacheEntry(uniqueId: uniqueId, name: nil, usage: nil, metadata: metadata)
@@ -460,7 +460,7 @@ enum TydomMessageDecoder {
                 let cmetadataEntries = endpoint.cmetadata ?? []
 
                 if cmetadataEntries.isEmpty == false {
-                    let metadata: [String: JSONValue] = [
+                    let metadata: [String: PayloadValue] = [
                         "__cmetadata": .array(
                             cmetadataEntries.map { .object($0.payload) }
                         )
@@ -545,13 +545,13 @@ enum TydomMessageDecoder {
     }
 
     private static func decodeGroupsFile(_ data: Data) -> [TydomGroup]? {
-        guard let payload = try? JSONDecoder().decode(JSONValue.self, from: data) else { return nil }
+        guard let payload = try? JSONDecoder().decode(PayloadValue.self, from: data) else { return nil }
         guard let groups = extractGroupValues(from: payload) else { return nil }
         return groups.compactMap(decodeGroupMembership(from:))
     }
 
     private static func decodeMomentsFile(_ data: Data) -> [TydomMoment]? {
-        guard let payload = try? JSONDecoder().decode([String: JSONValue].self, from: data) else { return nil }
+        guard let payload = try? JSONDecoder().decode([String: PayloadValue].self, from: data) else { return nil }
         guard let moments = payload["moments"]?.arrayValue ?? payload["mom"]?.arrayValue else { return [] }
         return moments.compactMap { value in
             value.objectValue.map { TydomMoment(payload: $0) }
@@ -559,7 +559,7 @@ enum TydomMessageDecoder {
     }
 
     private static func decodeScenariosFile(_ data: Data) -> [TydomScenarioPayload]? {
-        guard let payload = try? JSONDecoder().decode([String: JSONValue].self, from: data) else { return nil }
+        guard let payload = try? JSONDecoder().decode([String: PayloadValue].self, from: data) else { return nil }
         guard let scenarios = payload["scn"]?.arrayValue else { return [] }
         return scenarios.compactMap { value in
             guard let object = value.objectValue else { return nil }
@@ -569,7 +569,7 @@ enum TydomMessageDecoder {
     }
 
     private static func decodeAreasData(_ data: Data) -> [TydomArea]? {
-        if let array = try? JSONDecoder().decode([JSONValue].self, from: data) {
+        if let array = try? JSONDecoder().decode([PayloadValue].self, from: data) {
             return array.compactMap { value in
                 guard let object = value.objectValue else { return nil }
                 let id = object["id"]?.numberValue.map(Int.init)
@@ -577,7 +577,7 @@ enum TydomMessageDecoder {
             }
         }
 
-        if let single = try? JSONDecoder().decode(JSONValue.self, from: data),
+        if let single = try? JSONDecoder().decode(PayloadValue.self, from: data),
            let object = single.objectValue {
             let id = object["id"]?.numberValue.map(Int.init)
             return [TydomArea(id: id, payload: object)]
@@ -586,7 +586,7 @@ enum TydomMessageDecoder {
         return nil
     }
 
-    private static func extractGroupValues(from payload: JSONValue) -> [JSONValue]? {
+    private static func extractGroupValues(from payload: PayloadValue) -> [PayloadValue]? {
         if let array = payload.arrayValue {
             return array
         }
@@ -604,7 +604,7 @@ enum TydomMessageDecoder {
         return []
     }
 
-    private static func decodeGroupMembership(from value: JSONValue) -> TydomGroup? {
+    private static func decodeGroupMembership(from value: PayloadValue) -> TydomGroup? {
         guard let object = value.objectValue else { return nil }
         let payload = object["payload"]?.objectValue ?? object
         guard let id = intValue(from: payload["id"]) else { return nil }
@@ -624,7 +624,7 @@ enum TydomMessageDecoder {
         )
     }
 
-    private static func decodeGroupDeviceMember(from value: JSONValue) -> TydomGroup.DeviceMember? {
+    private static func decodeGroupDeviceMember(from value: PayloadValue) -> TydomGroup.DeviceMember? {
         guard let object = value.objectValue else { return nil }
         guard let id = intValue(from: object["id"]) else { return nil }
 
@@ -637,13 +637,13 @@ enum TydomMessageDecoder {
         return TydomGroup.DeviceMember(id: id, endpoints: endpoints)
     }
 
-    private static func decodeGroupAreaMember(from value: JSONValue) -> TydomGroup.AreaMember? {
+    private static func decodeGroupAreaMember(from value: PayloadValue) -> TydomGroup.AreaMember? {
         guard let object = value.objectValue else { return nil }
         guard let id = intValue(from: object["id"]) else { return nil }
         return TydomGroup.AreaMember(id: id)
     }
 
-    private static func intValue(from value: JSONValue?) -> Int? {
+    private static func intValue(from value: PayloadValue?) -> Int? {
         if let number = value?.numberValue {
             return Int(number.rounded())
         }
@@ -673,15 +673,15 @@ private struct DevicesDataPayload: Decodable {
 
     struct Entry: Decodable {
         let name: String
-        let value: JSONValue?
+        let value: PayloadValue?
         let validity: String?
-        let payload: [String: JSONValue]
+        let payload: [String: PayloadValue]
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: DynamicCodingKey.self)
-            var payload: [String: JSONValue] = [:]
+            var payload: [String: PayloadValue] = [:]
             for key in container.allKeys {
-                payload[key.stringValue] = try container.decode(JSONValue.self, forKey: key)
+                payload[key.stringValue] = try container.decode(PayloadValue.self, forKey: key)
             }
 
             guard let name = payload["name"]?.stringValue else {
@@ -719,16 +719,16 @@ private struct DevicesCDataPayload: Decodable {
 
     struct Entry: Decodable {
         let name: String
-        let parameters: [String: JSONValue]?
-        let values: [String: JSONValue]?
+        let parameters: [String: PayloadValue]?
+        let values: [String: PayloadValue]?
         let EOR: Bool?
-        let payload: [String: JSONValue]
+        let payload: [String: PayloadValue]
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: DynamicCodingKey.self)
-            var payload: [String: JSONValue] = [:]
+            var payload: [String: PayloadValue] = [:]
             for key in container.allKeys {
-                payload[key.stringValue] = try container.decode(JSONValue.self, forKey: key)
+                payload[key.stringValue] = try container.decode(PayloadValue.self, forKey: key)
             }
 
             guard let nameValue = payload["name"]?.stringValue else {
@@ -755,7 +755,7 @@ private extension String {
     }
 }
 
-private extension JSONValue {
+private extension PayloadValue {
     var traceString: String {
         switch self {
         case .string(let text):
@@ -819,7 +819,7 @@ private struct ConfigsFilePayload: Decodable {
         let picto: String?
         let isGroupUser: Bool?
         let isGroupAll: Bool?
-        let payload: [String: JSONValue]
+        let payload: [String: PayloadValue]
 
         private enum CodingKeys: String, CodingKey {
             case id
@@ -840,9 +840,9 @@ private struct ConfigsFilePayload: Decodable {
             self.isGroupAll = try keyed.decodeIfPresent(Bool.self, forKey: .isGroupAll)
 
             let raw = try decoder.container(keyedBy: DynamicCodingKey.self)
-            var payload: [String: JSONValue] = [:]
+            var payload: [String: PayloadValue] = [:]
             for key in raw.allKeys {
-                payload[key.stringValue] = try raw.decode(JSONValue.self, forKey: key)
+                payload[key.stringValue] = try raw.decode(PayloadValue.self, forKey: key)
             }
             self.payload = payload
         }
@@ -860,18 +860,18 @@ private struct DevicesMetaPayload: Decodable {
 
     struct MetadataEntry: Decodable {
         let name: String
-        let attributes: [String: JSONValue]
+        let attributes: [String: PayloadValue]
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: DynamicCodingKey.self)
             var name: String?
-            var attributes: [String: JSONValue] = [:]
+            var attributes: [String: PayloadValue] = [:]
 
             for key in container.allKeys {
                 if key.stringValue == "name" {
                     name = try container.decode(String.self, forKey: key)
                 } else {
-                    attributes[key.stringValue] = try container.decode(JSONValue.self, forKey: key)
+                    attributes[key.stringValue] = try container.decode(PayloadValue.self, forKey: key)
                 }
             }
 
@@ -901,7 +901,7 @@ private struct DevicesCMetaPayload: Decodable {
     struct CMetaEntry: Decodable {
         let name: String
         let parameters: [CMetaParameter]?
-        let payload: [String: JSONValue]
+        let payload: [String: PayloadValue]
 
         private enum CodingKeys: String, CodingKey {
             case name
@@ -914,9 +914,9 @@ private struct DevicesCMetaPayload: Decodable {
             self.parameters = try keyed.decodeIfPresent([CMetaParameter].self, forKey: .parameters)
 
             let raw = try decoder.container(keyedBy: DynamicCodingKey.self)
-            var payload: [String: JSONValue] = [:]
+            var payload: [String: PayloadValue] = [:]
             for key in raw.allKeys {
-                payload[key.stringValue] = try raw.decode(JSONValue.self, forKey: key)
+                payload[key.stringValue] = try raw.decode(PayloadValue.self, forKey: key)
             }
             self.payload = payload
         }
@@ -925,7 +925,7 @@ private struct DevicesCMetaPayload: Decodable {
     struct CMetaParameter: Decodable {
         let name: String
         let enumValues: [String]
-        let payload: [String: JSONValue]
+        let payload: [String: PayloadValue]
 
         private enum CodingKeys: String, CodingKey {
             case name
@@ -938,9 +938,9 @@ private struct DevicesCMetaPayload: Decodable {
             self.enumValues = try keyed.decodeIfPresent([String].self, forKey: .enumValues) ?? []
 
             let raw = try decoder.container(keyedBy: DynamicCodingKey.self)
-            var payload: [String: JSONValue] = [:]
+            var payload: [String: PayloadValue] = [:]
             for key in raw.allKeys {
-                payload[key.stringValue] = try raw.decode(JSONValue.self, forKey: key)
+                payload[key.stringValue] = try raw.decode(PayloadValue.self, forKey: key)
             }
             self.payload = payload
         }

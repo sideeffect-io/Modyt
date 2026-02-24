@@ -30,9 +30,9 @@ struct ShutterStoreFactory {
                                 target: target,
                                 repository: environment.repository
                             )
-                            environment.log(
-                                "ShutterTrace factory command uniqueId=\(uniqueId) target=\(target) key=\(command.key) value=\(command.value.traceString)"
-                            )
+//                            environment.log(
+//                                "ShutterTrace factory command uniqueId=\(uniqueId) target=\(target) key=\(command.key) value=\(command.value.traceString)"
+//                            )
                             await environment.sendDeviceCommand(
                                 uniqueId,
                                 command.key,
@@ -77,8 +77,8 @@ struct ShutterStoreFactory {
     private static func command(
         for uniqueId: String,
         target: Int,
-        repository: DeviceRepository
-    ) async -> (key: String, value: JSONValue) {
+        repository: DeviceDatasource
+    ) async -> (key: String, value: PayloadValue) {
         let descriptor = await repository
             .device(uniqueId: uniqueId)?
             .primaryControlDescriptor()
@@ -88,7 +88,7 @@ struct ShutterStoreFactory {
     static func mappedCommand(
         targetPosition: Int,
         descriptor: DeviceControlDescriptor?
-    ) -> (key: String, value: JSONValue) {
+    ) -> (key: String, value: PayloadValue) {
         let clampedTarget = max(0, min(targetPosition, 100))
         guard let descriptor else {
             return ("level", .number(Double(clampedTarget)))

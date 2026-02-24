@@ -27,66 +27,10 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		1A180D2B2F363304005359B9 /* Exceptions for "MoDyt" folder in "MoDytTests" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				MoDytTests/AppRootStoreTests.swift,
-				MoDytTests/AsyncSequenceRemoveDuplicatesTests.swift,
-				MoDytTests/AuthenticationStoreTests.swift,
-				MoDytTests/DashboardDeviceCardStoreTests.swift,
-				MoDytTests/DashboardRepositoryTests.swift,
-				MoDytTests/DashboardStoreTests.swift,
-				MoDytTests/DeviceRecordTests.swift,
-				MoDytTests/DeviceRepositoryCommandEchoTests.swift,
-				MoDytTests/DevicesStoreTests.swift,
-				MoDytTests/GroupRepositoryTests.swift,
-				MoDytTests/GroupsStoreTests.swift,
-				MoDytTests/HeatPumpStoreTests.swift,
-				MoDytTests/LightStoreTests.swift,
-				MoDytTests/MoDytTests.swift,
-				MoDytTests/RootTabStoreTests.swift,
-				MoDytTests/SceneExecutionStoreTests.swift,
-				MoDytTests/SceneRepositoryTests.swift,
-				MoDytTests/ScenesStoreTests.swift,
-				MoDytTests/SettingsStoreTests.swift,
-				MoDytTests/ShutterLightInteractionIntegrationTests.swift,
-				MoDytTests/ShutterStoreTests.swift,
-				MoDytTests/SmokeStoreTests.swift,
-				MoDytTests/StoreTestSupport.swift,
-				MoDytTests/TemperatureStoreTests.swift,
-				MoDytTests/TestSupport.swift,
-			);
-			target = 1A50E6C42F2D19650072A200 /* MoDytTests */;
-		};
 		1A67EE742F2F595100ED3D15 /* Exceptions for "MoDyt" folder in "MoDyt" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
-				MoDytTests/AppRootStoreTests.swift,
-				MoDytTests/AsyncSequenceRemoveDuplicatesTests.swift,
-				MoDytTests/AuthenticationStoreTests.swift,
-				MoDytTests/DashboardDeviceCardStoreTests.swift,
-				MoDytTests/DashboardRepositoryTests.swift,
-				MoDytTests/DashboardStoreTests.swift,
-				MoDytTests/DeviceRecordTests.swift,
-				MoDytTests/DeviceRepositoryCommandEchoTests.swift,
-				MoDytTests/DevicesStoreTests.swift,
-				MoDytTests/GroupRepositoryTests.swift,
-				MoDytTests/GroupsStoreTests.swift,
-				MoDytTests/HeatPumpStoreTests.swift,
-				MoDytTests/LightStoreTests.swift,
-				MoDytTests/MoDytTests.swift,
-				MoDytTests/RootTabStoreTests.swift,
-				MoDytTests/SceneExecutionStoreTests.swift,
-				MoDytTests/SceneRepositoryTests.swift,
-				MoDytTests/ScenesStoreTests.swift,
-				MoDytTests/SettingsStoreTests.swift,
-				MoDytTests/ShutterLightInteractionIntegrationTests.swift,
-				MoDytTests/ShutterStoreTests.swift,
-				MoDytTests/SmokeStoreTests.swift,
-				MoDytTests/StoreTestSupport.swift,
-				MoDytTests/TemperatureStoreTests.swift,
-				MoDytTests/TestSupport.swift,
 			);
 			target = 1A50E6B72F2D19640072A200 /* MoDyt */;
 		};
@@ -97,7 +41,6 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				1A67EE742F2F595100ED3D15 /* Exceptions for "MoDyt" folder in "MoDyt" target */,
-				1A180D2B2F363304005359B9 /* Exceptions for "MoDyt" folder in "MoDytTests" target */,
 			);
 			path = MoDyt;
 			sourceTree = "<group>";

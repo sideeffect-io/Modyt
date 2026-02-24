@@ -23,7 +23,7 @@ import Testing
     let cache = TydomDeviceCacheStore()
     await cache.upsert(TydomDeviceCacheEntry(uniqueId: "2_1", name: "Living Room", usage: "shutter"))
 
-    let payloadMetadata: [String: JSONValue] = [
+    let payloadMetadata: [String: PayloadValue] = [
         "position": .object(["min": .number(0), "max": .number(100)])
     ]
 
@@ -39,7 +39,7 @@ import Testing
 @Test func tydomDeviceCacheStore_devicesMetaBeforeConfigsIsRetained() async {
     // Given
     let cache = TydomDeviceCacheStore()
-    let payloadMetadata: [String: JSONValue] = [
+    let payloadMetadata: [String: PayloadValue] = [
         "position": .object(["min": .number(0), "max": .number(100)])
     ]
 

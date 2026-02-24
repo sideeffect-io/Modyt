@@ -1,22 +1,22 @@
 import Foundation
 
 public struct DAO<Entity: Codable & Sendable>: Sendable {
-    public let create: @Sendable (Entity) async throws -> Entity
-    public let read: @Sendable (SQLiteValue) async throws -> Entity?
-    public let update: @Sendable (Entity) async throws -> Entity
-    public let delete: @Sendable (SQLiteValue) async throws -> Void
-    public let list: @Sendable () async throws -> [Entity]
-    public let query: @Sendable (String, [SQLiteValue]) async throws -> [Entity]
-    public let queryRows: @Sendable (String, [SQLiteValue]) async throws -> [Row]
+    public let create: @Sendable (Entity) throws -> Entity
+    public let read: @Sendable (SQLiteValue) throws -> Entity?
+    public let update: @Sendable (Entity) throws -> Entity
+    public let delete: @Sendable (SQLiteValue) throws -> Void
+    public let list: @Sendable () throws -> [Entity]
+    public let query: @Sendable (String, [SQLiteValue]) throws -> [Entity]
+    public let queryRows: @Sendable (String, [SQLiteValue]) throws -> [Row]
 
     public init(
-        create: @escaping @Sendable (Entity) async throws -> Entity,
-        read: @escaping @Sendable (SQLiteValue) async throws -> Entity?,
-        update: @escaping @Sendable (Entity) async throws -> Entity,
-        delete: @escaping @Sendable (SQLiteValue) async throws -> Void,
-        list: @escaping @Sendable () async throws -> [Entity],
-        query: @escaping @Sendable (String, [SQLiteValue]) async throws -> [Entity],
-        queryRows: @escaping @Sendable (String, [SQLiteValue]) async throws -> [Row]
+        create: @escaping @Sendable (Entity) throws -> Entity,
+        read: @escaping @Sendable (SQLiteValue) throws -> Entity?,
+        update: @escaping @Sendable (Entity) throws -> Entity,
+        delete: @escaping @Sendable (SQLiteValue) throws -> Void,
+        list: @escaping @Sendable () throws -> [Entity],
+        query: @escaping @Sendable (String, [SQLiteValue]) throws -> [Entity],
+        queryRows: @escaping @Sendable (String, [SQLiteValue]) throws -> [Row]
     ) {
         self.create = create
         self.read = read
@@ -39,12 +39,12 @@ extension DAO {
                 let columns = values.keys.sorted()
                 let sql = insertSQL(table: schema.table, columns: columns)
                 let bindings = columns.map { values[$0] ?? .null }
-                try await database.execute(sql, bindings)
+                try database.execute(sql, bindings)
                 return entity
             },
             read: { id in
                 let sql = selectByIDSQL(table: schema.table, primaryKey: schema.primaryKey)
-                let rows = try await database.query(sql, [id])
+                let rows = try database.query(sql, [id])
                 guard let row = rows.first else { return nil }
                 return try schema.decode(row)
             },
@@ -59,24 +59,24 @@ extension DAO {
                 }
                 let sql = updateSQL(table: schema.table, primaryKey: schema.primaryKey, columns: columns)
                 let bindings = columns.map { values[$0] ?? .null } + [idValue]
-                try await database.execute(sql, bindings)
+                try database.execute(sql, bindings)
                 return entity
             },
             delete: { id in
                 let sql = deleteSQL(table: schema.table, primaryKey: schema.primaryKey)
-                try await database.execute(sql, [id])
+                try database.execute(sql, [id])
             },
             list: {
                 let sql = selectAllSQL(table: schema.table)
-                let rows = try await database.query(sql)
+                let rows = try database.query(sql)
                 return try rows.map(schema.decode)
             },
             query: { sql, bindings in
-                let rows = try await database.query(sql, bindings)
+                let rows = try database.query(sql, bindings)
                 return try rows.map(schema.decode)
             },
             queryRows: { sql, bindings in
-                try await database.query(sql, bindings)
+                try database.query(sql, bindings)
             }
         )
     }

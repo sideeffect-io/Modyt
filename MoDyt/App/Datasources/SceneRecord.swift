@@ -10,7 +10,7 @@ struct SceneRecord: Codable, Identifiable, Sendable, Equatable {
     var type: String
     var picto: String
     var ruleId: String?
-    var payload: [String: JSONValue]
+    var payload: [String: PayloadValue]
     var isFavorite: Bool
     var favoriteOrder: Int?
     var dashboardOrder: Int?

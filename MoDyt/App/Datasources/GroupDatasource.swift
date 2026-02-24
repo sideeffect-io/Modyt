@@ -6,10 +6,10 @@ struct GroupFanOutCommand: Sendable, Equatable {
     let deviceId: Int
     let endpointId: Int
     let key: String
-    let value: JSONValue
+    let value: PayloadValue
 }
 
-actor GroupRepository {
+actor GroupDatasource {
     enum RepositoryError: Error {
         case notReady
     }
@@ -22,7 +22,7 @@ actor GroupRepository {
     }
 
     private let databasePath: String
-    private let deviceRepository: DeviceRepository
+    private let deviceRepository: DeviceDatasource
     private let now: @Sendable () -> Date
     private let log: @Sendable (String) -> Void
 
@@ -37,12 +37,12 @@ actor GroupRepository {
     private var devicesByUniqueId: [String: DeviceRecord] = [:]
     private var deviceObservationTask: Task<Void, Never>?
 
-    private var optimisticLightDataByUniqueId: [String: [String: JSONValue]] = [:]
+    private var optimisticLightDataByUniqueId: [String: [String: PayloadValue]] = [:]
     private var optimisticLightSetAtByUniqueId: [String: Date] = [:]
 
     init(
         databasePath: String,
-        deviceRepository: DeviceRepository,
+        deviceRepository: DeviceDatasource,
         now: @escaping @Sendable () -> Date = Date.init,
         log: @escaping @Sendable (String) -> Void = { _ in }
     ) {
@@ -220,7 +220,7 @@ actor GroupRepository {
 
     func applyOptimisticControlChanges(
         uniqueId: String,
-        changes: [String: JSONValue]
+        changes: [String: PayloadValue]
     ) async {
         guard !changes.isEmpty else { return }
         guard let group = groupsByUniqueId[uniqueId] else { return }
@@ -238,7 +238,7 @@ actor GroupRepository {
     func fanOutCommands(
         uniqueId: String,
         key: String,
-        value: JSONValue
+        value: PayloadValue
     ) async -> [GroupFanOutCommand] {
         guard let group = groupsByUniqueId[uniqueId] else { return [] }
         let resolvedGroup = group.resolvedGroup
@@ -403,7 +403,7 @@ actor GroupRepository {
     }
 
     private func isLightOverrideSatisfied(
-        overrides: [String: JSONValue],
+        overrides: [String: PayloadValue],
         actual: DrivingLightControlDescriptor
     ) -> Bool {
         if let rawLevel = overrides["level"]?.numberValue {
@@ -499,7 +499,7 @@ actor GroupRepository {
             )
         }
 
-        var data: [String: JSONValue] = [:]
+        var data: [String: PayloadValue] = [:]
         data[descriptor.powerKey ?? "on"] = .bool(descriptor.isOn)
         data[descriptor.levelKey ?? "level"] = .number(descriptor.level)
         for (key, value) in overrides {
@@ -546,7 +546,7 @@ actor GroupRepository {
     private func mapPassthroughCommands(
         for group: GroupRecord,
         key: String,
-        value: JSONValue
+        value: PayloadValue
     ) -> [GroupFanOutCommand] {
         resolveMemberEndpoints(for: group).map { member in
             GroupFanOutCommand(
@@ -561,7 +561,7 @@ actor GroupRepository {
     private func mapLightCommands(
         for group: GroupRecord,
         key: String,
-        value: JSONValue
+        value: PayloadValue
     ) -> [GroupFanOutCommand] {
         let members = resolveMemberEndpoints(for: group)
         guard members.isEmpty == false else { return [] }
@@ -665,7 +665,7 @@ actor GroupRepository {
     private func mapShutterCommands(
         for group: GroupRecord,
         key: String,
-        value: JSONValue
+        value: PayloadValue
     ) -> [GroupFanOutCommand] {
         let members = resolveMemberEndpoints(for: group)
         guard members.isEmpty == false else { return [] }
@@ -760,7 +760,7 @@ actor GroupRepository {
         return (endpointId, deviceId)
     }
 
-    private static func normalizedValueForGroupControl(_ value: JSONValue) -> Double {
+    private static func normalizedValueForGroupControl(_ value: PayloadValue) -> Double {
         if let boolValue = value.boolValue {
             return boolValue ? 1 : 0
         }

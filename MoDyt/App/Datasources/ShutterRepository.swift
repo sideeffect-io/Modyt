@@ -24,7 +24,7 @@ actor ShutterRepository {
     }
 
     private let databasePath: String
-    private let deviceRepository: DeviceRepository
+    private let deviceRepository: DeviceDatasource
     private let now: @Sendable () -> Date
     private let log: @Sendable (String) -> Void
 
@@ -35,7 +35,7 @@ actor ShutterRepository {
 
     init(
         databasePath: String,
-        deviceRepository: DeviceRepository,
+        deviceRepository: DeviceDatasource,
         now: @escaping @Sendable () -> Date = Date.init,
         log: @escaping @Sendable (String) -> Void = { _ in }
     ) {

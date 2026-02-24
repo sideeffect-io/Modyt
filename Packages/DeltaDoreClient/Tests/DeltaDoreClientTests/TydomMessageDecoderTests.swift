@@ -22,8 +22,8 @@ import Testing
     // Then
     if case .gatewayInfo(let info, let metadata) = message {
         #expect(metadata.transactionId == "123")
-        #expect(info.payload["version"] == JSONValue.string("1.0"))
-        #expect(info.payload["mac"] == JSONValue.string("AA:BB"))
+        #expect(info.payload["version"] == PayloadValue.string("1.0"))
+        #expect(info.payload["mac"] == PayloadValue.string("AA:BB"))
     } else {
         #expect(Bool(false), "Expected gateway info")
     }
@@ -70,7 +70,7 @@ import Testing
         #expect(device.name == "Living Room")
         #expect(device.usage == "shutter")
         #expect(device.kind == TydomDeviceKind.shutter)
-        #expect(device.data["level"] == JSONValue.number(50))
+        #expect(device.data["level"] == PayloadValue.number(50))
     } else {
         #expect(Bool(false), "Expected devices message")
     }
@@ -111,8 +111,8 @@ import Testing
         #expect(device.id == 1757536112)
         #expect(device.endpointId == 1757536112)
         #expect(device.uniqueId == "1757536112_1757536112")
-        #expect(device.data["position"] == JSONValue.number(50))
-        #expect(device.data["jobsMP"] == JSONValue.number(3096))
+        #expect(device.data["position"] == PayloadValue.number(50))
+        #expect(device.data["jobsMP"] == PayloadValue.number(3096))
     } else {
         #expect(Bool(false), "Expected devices message")
     }
@@ -196,7 +196,7 @@ import Testing
         #expect(metadata.transactionId == "endpoint-1")
         #expect(devices.count == 1)
         #expect(devices.first?.uniqueId == "2_2")
-        #expect(devices.first?.data["level"] == JSONValue.number(40))
+        #expect(devices.first?.data["level"] == PayloadValue.number(40))
     } else {
         #expect(Bool(false), "Expected devices message")
     }
@@ -248,9 +248,9 @@ import Testing
         #expect(metadata.transactionId == "457")
         #expect(devices.count == 1)
         let device = devices[0]
-        #expect(device.data["ambientTemperature"] == JSONValue.number(23.7))
-        #expect(device.data["__linkedAreaId"] == JSONValue.number(1739197415))
-        #expect(device.data["__linkedAreaSubtype"] == JSONValue.string("thermicCtrl"))
+        #expect(device.data["ambientTemperature"] == PayloadValue.number(23.7))
+        #expect(device.data["__linkedAreaId"] == PayloadValue.number(1739197415))
+        #expect(device.data["__linkedAreaSubtype"] == PayloadValue.string("thermicCtrl"))
     } else {
         #expect(Bool(false), "Expected devices message")
     }
@@ -294,7 +294,7 @@ import Testing
         #expect(device.name == "Energy")
         #expect(device.usage == "conso")
         #expect(device.kind == TydomDeviceKind.energy)
-        #expect(device.data["energyIndex_ELEC"] == JSONValue.number(123))
+        #expect(device.data["energyIndex_ELEC"] == PayloadValue.number(123))
     } else {
         #expect(Bool(false), "Expected devices message")
     }
@@ -455,7 +455,7 @@ import Testing
     await cache.upsert(TydomDeviceCacheEntry(uniqueId: "2_1", name: "Living Room", usage: "shutter"))
     let device = await cache.deviceInfo(for: "2_1")
 
-    #expect(device?.metadata?["position"] == JSONValue.object(["min": .number(0), "max": .number(100)]))
+    #expect(device?.metadata?["position"] == PayloadValue.object(["min": .number(0), "max": .number(100)]))
 }
 
 @Test func tydomMessageDecoder_devicesCmetaDoesNotSchedulePolling() async {

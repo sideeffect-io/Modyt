@@ -11,13 +11,13 @@ enum SceneExecutionResult: Sendable, Equatable {
 
 struct AppEnvironment: Sendable {
     let client: DeltaDoreClient
-    let repository: DeviceRepository
-    let sceneRepository: SceneRepository
-    let groupRepository: GroupRepository
+    let repository: DeviceDatasource
+    let sceneRepository: SceneDatasource
+    let groupRepository: GroupDatasource
     let dashboardRepository: DashboardRepository
     let newShutterRepository: ShutterRepository
     let requestRefreshAll: @Sendable () async -> Void
-    let sendDeviceCommand: @Sendable (String, String, JSONValue) async -> Void
+    let sendDeviceCommand: @Sendable (String, String, PayloadValue) async -> Void
     let executeScene: @Sendable (String) async -> SceneExecutionResult
     let requestDisconnect: @Sendable () async -> Void
     let now: @Sendable () -> Date
@@ -33,15 +33,15 @@ struct AppEnvironment: Sendable {
             #endif
         }
         let sceneExecutionStatusStore = SceneExecutionStatusStore()
-        let repository = DeviceRepository(databasePath: databaseURL.path, log: log)
-        let sceneRepository = SceneRepository(
+        let repository = DeviceDatasource(databasePath: databaseURL.path, log: log)
+        let sceneRepository = SceneDatasource(
             databasePath: databaseURL.path,
             log: log,
             trackMessage: { message in
                 await sceneExecutionStatusStore.track(message)
             }
         )
-        let groupRepository = GroupRepository(
+        let groupRepository = GroupDatasource(
             databasePath: databaseURL.path,
             deviceRepository: repository,
             log: log
@@ -66,7 +66,7 @@ struct AppEnvironment: Sendable {
             }
         }
 
-        let sendDeviceCommand: @Sendable (String, String, JSONValue) async -> Void = { uniqueId, key, value in
+        let sendDeviceCommand: @Sendable (String, String, PayloadValue) async -> Void = { uniqueId, key, value in
             if GroupRecord.isGroupUniqueId(uniqueId) {
                 let fanOut = await groupRepository.fanOutCommands(
                     uniqueId: uniqueId,
@@ -91,10 +91,10 @@ struct AppEnvironment: Sendable {
                     )
                     let isShutterLikeCommand = key == "position" || key == "level"
                     if isShutterLikeCommand {
-                        let memberUniqueId = "\(command.endpointId)_\(command.deviceId)"
-                        log(
-                            "ShutterTrace command group-send source=\(uniqueId) member=\(memberUniqueId) tx=\(transactionId) key=\(command.key) value=\(command.value.traceString)"
-                        )
+//                        let memberUniqueId = "\(command.endpointId)_\(command.deviceId)"
+//                        log(
+//                            "ShutterTrace command group-send source=\(uniqueId) member=\(memberUniqueId) tx=\(transactionId) key=\(command.key) value=\(command.value.traceString)"
+//                        )
                     }
 
                     do {
@@ -126,9 +126,9 @@ struct AppEnvironment: Sendable {
             )
             let isShutterCommand = device.group == .shutter || key == "position" || key == "level"
             if isShutterCommand {
-                log(
-                    "ShutterTrace command send uniqueId=\(uniqueId) deviceId=\(device.deviceId) endpointId=\(device.endpointId) tx=\(transactionId) key=\(key) value=\(value.traceString) usage=\(device.usage)"
-                )
+//                log(
+//                    "ShutterTrace command send uniqueId=\(uniqueId) deviceId=\(device.deviceId) endpointId=\(device.endpointId) tx=\(transactionId) key=\(key) value=\(value.traceString) usage=\(device.usage)"
+//                )
             }
 
             do {
@@ -214,16 +214,19 @@ private actor SceneExecutionStatusStore {
     private let maxBufferedReplies = 32
 
     func track(_ message: TydomMessage) {
-        guard case .echo(let echo) = message else { return }
-        guard echo.uriOrigin.hasPrefix("/scenarios/"), echo.uriOrigin != "/scenarios/file" else { return }
+        guard case .ack(let ack, let metadata) = message else { return }
+        guard let uriOrigin = metadata.uriOrigin,
+              uriOrigin.hasPrefix("/scenarios/"),
+              uriOrigin != "/scenarios/file" else { return }
+        guard let transactionId = metadata.transactionId else { return }
 
-        let status: SceneExecutionGatewayStatus = if (200..<300).contains(echo.statusCode) {
-            .success(echo.statusCode)
+        let status: SceneExecutionGatewayStatus = if (200..<300).contains(ack.statusCode) {
+            .success(ack.statusCode)
         } else {
-            .failure(echo.statusCode)
+            .failure(ack.statusCode)
         }
 
-        resolve(transactionId: echo.transactionId, status: status)
+        resolve(transactionId: transactionId, status: status)
     }
 
     func awaitScenarioExecutionStatus(
@@ -303,7 +306,7 @@ private actor CommandTransactionIdGenerator {
     }
 }
 
-private func deviceCommandValue(from value: JSONValue) -> TydomCommand.DeviceDataValue {
+private func deviceCommandValue(from value: PayloadValue) -> TydomCommand.DeviceDataValue {
     switch value {
     case .bool(let flag):
         return .bool(flag)

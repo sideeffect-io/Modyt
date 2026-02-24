@@ -3,7 +3,7 @@ import Foundation
 actor TydomCDataReplyStore {
     struct Reply: Sendable, Equatable {
         let transactionId: String
-        let events: [JSONValue]
+        let events: [PayloadValue]
         let done: Bool
     }
 

@@ -68,7 +68,7 @@ import Testing
         #expect(metadata.transactionId == "t2")
         #expect(devices.count == 1)
         #expect(devices[0].name == "Living Room")
-        #expect(devices[0].data["level"] == JSONValue.number(10))
+        #expect(devices[0].data["level"] == PayloadValue.number(10))
     } else {
         #expect(Bool(false), "Expected devices message")
     }

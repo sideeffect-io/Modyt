@@ -187,7 +187,7 @@ struct TydomMessageHydrator: Sendable {
             || usage == "swingShutter"
     }
 
-    private func tracePositionValue(in data: [String: JSONValue]) -> String? {
+    private func tracePositionValue(in data: [String: PayloadValue]) -> String? {
         if let position = data["position"] {
             return position.traceString
         }
@@ -229,7 +229,7 @@ struct TydomHydratedEnvelope: Sendable, Equatable {
     }
 }
 
-private extension JSONValue {
+private extension PayloadValue {
     var traceString: String {
         switch self {
         case .string(let text):

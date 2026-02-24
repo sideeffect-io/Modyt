@@ -13,7 +13,7 @@ struct FrameCaptureFixture {
         let statusCode: Int?
         let headers: [String: String]
         let bodyData: Data?
-        let bodyJSON: JSONValue?
+        let bodyJSON: PayloadValue?
         let replayData: Data
     }
 
@@ -91,9 +91,9 @@ struct FrameCaptureFixture {
         )
         let bodyData = replayBodyAndDecoded.decodedBody
 
-        let bodyJSON: JSONValue? = {
+        let bodyJSON: PayloadValue? = {
             guard let bodyData, bodyData.isEmpty == false else { return nil }
-            return try? JSONDecoder().decode(JSONValue.self, from: bodyData)
+            return try? JSONDecoder().decode(PayloadValue.self, from: bodyData)
         }()
 
         let replayHeader = headerLines.joined(separator: "\r\n")

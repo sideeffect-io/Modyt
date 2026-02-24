@@ -82,9 +82,9 @@ struct TydomScenarioMetadata: Sendable, Equatable {
 
 struct TydomScenarioPayload: Sendable, Equatable {
     let id: Int
-    let payload: [String: JSONValue]
+    let payload: [String: PayloadValue]
 
-    init(id: Int, payload: [String: JSONValue]) {
+    init(id: Int, payload: [String: PayloadValue]) {
         self.id = id
         self.payload = payload
     }
@@ -99,20 +99,20 @@ struct TydomDeviceUpdate: Sendable, Equatable {
     let id: Int
     let endpointId: Int
     let uniqueId: String
-    let data: [String: JSONValue]
+    let data: [String: PayloadValue]
     let entries: [TydomDeviceDataEntry]
-    let metadata: [String: JSONValue]?
-    let cdataEntries: [JSONValue]?
+    let metadata: [String: PayloadValue]?
+    let cdataEntries: [PayloadValue]?
     let source: Source
 
     init(
         id: Int,
         endpointId: Int,
         uniqueId: String,
-        data: [String: JSONValue],
+        data: [String: PayloadValue],
         entries: [TydomDeviceDataEntry] = [],
-        metadata: [String: JSONValue]? = nil,
-        cdataEntries: [JSONValue]? = nil,
+        metadata: [String: PayloadValue]? = nil,
+        cdataEntries: [PayloadValue]? = nil,
         source: Source
     ) {
         self.id = id

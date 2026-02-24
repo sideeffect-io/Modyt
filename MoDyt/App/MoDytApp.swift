@@ -43,7 +43,7 @@ struct MoDytApp: App {
         settingsStoreFactory = .live(environment: environment)
     }
 
-    var body: some Scene {
+    var body: some SwiftUI.Scene {
         WindowGroup {
             AppRootView()
                 .environment(\.appCoordinatorStoreFactory, appCoordinatorStoreFactory)

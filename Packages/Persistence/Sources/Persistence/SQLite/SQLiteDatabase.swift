@@ -1,10 +1,10 @@
 import Foundation
 import SQLite3
 
-public actor SQLiteDatabase {
+public class SQLiteDatabase: @unchecked Sendable {
     private let handle: SQLiteHandle
 
-    public init(path: String) async throws {
+    public init(path: String) throws {
         var db: OpaquePointer?
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
         if sqlite3_open_v2(path, &db, flags, nil) != SQLITE_OK {
@@ -14,10 +14,11 @@ public actor SQLiteDatabase {
         }
         let sqliteHandle = SQLiteHandle(pointer: db)
         self.handle = sqliteHandle
-        try await execute("PRAGMA foreign_keys = ON")
+
+        try execute("PRAGMA foreign_keys = ON")
     }
 
-    public func execute(_ sql: String, _ bindings: [SQLiteValue] = []) async throws {
+    public func execute(_ sql: String, _ bindings: [SQLiteValue] = []) throws {
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
 
@@ -29,7 +30,7 @@ public actor SQLiteDatabase {
         }
     }
 
-    public func query(_ sql: String, _ bindings: [SQLiteValue] = []) async throws -> [Row] {
+    public func query(_ sql: String, _ bindings: [SQLiteValue] = []) throws -> [Row] {
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
 
@@ -51,15 +52,15 @@ public actor SQLiteDatabase {
     }
 
     public func withTransaction<T: Sendable>(
-        _ work: @Sendable (SQLiteDatabase) async throws -> T
+        _ work: @Sendable (SQLiteDatabase) throws -> T
     ) async throws -> T {
-        try await execute("BEGIN")
+        try execute("BEGIN")
         do {
-            let result = try await work(self)
-            try await execute("COMMIT")
+            let result = try work(self)
+            try execute("COMMIT")
             return result
         } catch {
-            try await execute("ROLLBACK")
+            try execute("ROLLBACK")
             throw error
         }
     }

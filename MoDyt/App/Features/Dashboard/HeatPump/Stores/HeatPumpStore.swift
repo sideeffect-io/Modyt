@@ -7,14 +7,14 @@ import DeltaDoreClient
 final class HeatPumpStore {
     struct Dependencies {
         let observeHeatPump: @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable
-        let applyOptimisticChanges: @Sendable (String, [String: JSONValue]) async -> Void
-        let sendCommand: @Sendable (String, String, JSONValue) async -> Void
+        let applyOptimisticChanges: @Sendable (String, [String: PayloadValue]) async -> Void
+        let sendCommand: @Sendable (String, String, PayloadValue) async -> Void
         let now: () -> Date
 
         init(
             observeHeatPump: @escaping @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable,
-            applyOptimisticChanges: @escaping @Sendable (String, [String: JSONValue]) async -> Void,
-            sendCommand: @escaping @Sendable (String, String, JSONValue) async -> Void,
+            applyOptimisticChanges: @escaping @Sendable (String, [String: PayloadValue]) async -> Void,
+            sendCommand: @escaping @Sendable (String, String, PayloadValue) async -> Void,
             now: @escaping () -> Date = Date.init
         ) {
             self.observeHeatPump = observeHeatPump
@@ -161,7 +161,7 @@ final class HeatPumpStore {
         return (bounded * factor).rounded() / factor
     }
 
-    private static func commandValue(for value: Double, step: Double) -> JSONValue {
+    private static func commandValue(for value: Double, step: Double) -> PayloadValue {
         let digits = fractionDigits(for: step)
         let commandText = formattedSetpoint(value, digits: digits)
         return .string(commandText)
@@ -195,14 +195,14 @@ final class HeatPumpStore {
     private actor Worker {
         private let uniqueId: String
         private let observeHeatPump: @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable
-        private let applyOptimisticChanges: @Sendable (String, [String: JSONValue]) async -> Void
-        private let sendCommand: @Sendable (String, String, JSONValue) async -> Void
+        private let applyOptimisticChanges: @Sendable (String, [String: PayloadValue]) async -> Void
+        private let sendCommand: @Sendable (String, String, PayloadValue) async -> Void
 
         init(
             uniqueId: String,
             observeHeatPump: @escaping @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable,
-            applyOptimisticChanges: @escaping @Sendable (String, [String: JSONValue]) async -> Void,
-            sendCommand: @escaping @Sendable (String, String, JSONValue) async -> Void
+            applyOptimisticChanges: @escaping @Sendable (String, [String: PayloadValue]) async -> Void,
+            sendCommand: @escaping @Sendable (String, String, PayloadValue) async -> Void
         ) {
             self.uniqueId = uniqueId
             self.observeHeatPump = observeHeatPump
@@ -223,7 +223,7 @@ final class HeatPumpStore {
             }
         }
 
-        func sendSetpoint(_ key: String, value: JSONValue) async {
+        func sendSetpoint(_ key: String, value: PayloadValue) async {
             await applyOptimisticChanges(uniqueId, [key: value])
             await sendCommand(uniqueId, key, value)
         }

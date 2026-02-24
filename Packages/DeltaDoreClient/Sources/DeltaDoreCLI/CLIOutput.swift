@@ -327,7 +327,7 @@ private func endpointDataEntries(from data: Data) -> [RawDevicesDataPayload.Entr
         return [entry]
     }
 
-    guard let value = try? decoder.decode(JSONValue.self, from: data) else {
+    guard let value = try? decoder.decode(PayloadValue.self, from: data) else {
         return nil
     }
 
@@ -428,7 +428,7 @@ private func parseHTTPHeaders(_ headerData: Data) -> [String: String] {
     return headers
 }
 
-private func extractEntries(from value: JSONValue) -> [RawDevicesDataPayload.Entry] {
+private func extractEntries(from value: PayloadValue) -> [RawDevicesDataPayload.Entry] {
     switch value {
     case .array(let array):
         var entries: [RawDevicesDataPayload.Entry] = []
@@ -472,7 +472,7 @@ private func extractEntries(from value: JSONValue) -> [RawDevicesDataPayload.Ent
     }
 }
 
-private func intValue(from value: JSONValue?) -> Int? {
+private func intValue(from value: PayloadValue?) -> Int? {
     if let number = value?.numberValue {
         return Int(number.rounded())
     }
@@ -511,7 +511,7 @@ private struct RawDevicesDataPayload: Decodable {
 
     struct Entry: Decodable {
         let name: String
-        let value: JSONValue?
+        let value: PayloadValue?
         let validity: String?
     }
 }
@@ -521,7 +521,7 @@ private struct RawDeviceEndpointDataPayload: Decodable {
     let data: [RawDevicesDataPayload.Entry]?
 }
 
-private func jsonValueText(_ value: JSONValue) -> String {
+private func jsonValueText(_ value: PayloadValue) -> String {
     switch value {
     case .string(let text):
         return text
@@ -541,7 +541,7 @@ private func jsonValueText(_ value: JSONValue) -> String {
     }
 }
 
-private func messageToJSONValue(_ message: TydomMessage) -> JSONValue {
+private func messageToJSONValue(_ message: TydomMessage) -> PayloadValue {
     switch message {
     case .gatewayInfo(let info, let metadata):
         return .object([
@@ -632,8 +632,8 @@ private func messageToJSONValue(_ message: TydomMessage) -> JSONValue {
     }
 }
 
-private func deviceToJSONValue(_ device: TydomDevice) -> JSONValue {
-    var object: [String: JSONValue] = [
+private func deviceToJSONValue(_ device: TydomDevice) -> PayloadValue {
+    var object: [String: PayloadValue] = [
         "id": .number(Double(device.id)),
         "endpointId": .number(Double(device.endpointId)),
         "uniqueId": .string(device.uniqueId),
@@ -651,7 +651,7 @@ private func deviceToJSONValue(_ device: TydomDevice) -> JSONValue {
     return .object(object)
 }
 
-private func deviceEntryToJSONValue(_ entry: TydomDeviceDataEntry) -> JSONValue {
+private func deviceEntryToJSONValue(_ entry: TydomDeviceDataEntry) -> PayloadValue {
     .object([
         "name": .string(entry.name),
         "validity": jsonOptionalString(entry.validity),
@@ -660,7 +660,7 @@ private func deviceEntryToJSONValue(_ entry: TydomDeviceDataEntry) -> JSONValue 
     ])
 }
 
-private func ackToJSONValue(_ ack: TydomAck) -> JSONValue {
+private func ackToJSONValue(_ ack: TydomAck) -> PayloadValue {
     .object([
         "statusCode": .number(Double(ack.statusCode)),
         "reason": jsonOptionalString(ack.reason),
@@ -668,7 +668,7 @@ private func ackToJSONValue(_ ack: TydomAck) -> JSONValue {
     ])
 }
 
-private func scenarioToJSONValue(_ scenario: TydomScenario) -> JSONValue {
+private func scenarioToJSONValue(_ scenario: TydomScenario) -> PayloadValue {
     return .object([
         "id": .number(Double(scenario.id)),
         "name": .string(scenario.name),
@@ -679,7 +679,7 @@ private func scenarioToJSONValue(_ scenario: TydomScenario) -> JSONValue {
     ])
 }
 
-private func groupMetadataToJSONValue(_ group: TydomGroupMetadata) -> JSONValue {
+private func groupMetadataToJSONValue(_ group: TydomGroupMetadata) -> PayloadValue {
     return .object([
         "id": .number(Double(group.id)),
         "name": .string(group.name),
@@ -691,9 +691,9 @@ private func groupMetadataToJSONValue(_ group: TydomGroupMetadata) -> JSONValue 
     ])
 }
 
-private func groupToJSONValue(_ group: TydomGroup) -> JSONValue {
+private func groupToJSONValue(_ group: TydomGroup) -> PayloadValue {
     let devices = group.devices.map { device in
-        JSONValue.object([
+        PayloadValue.object([
             "id": .number(Double(device.id)),
             "endpoints": .array(device.endpoints.map { endpoint in
                 .object(["id": .number(Double(endpoint.id))])
@@ -701,7 +701,7 @@ private func groupToJSONValue(_ group: TydomGroup) -> JSONValue {
         ])
     }
     let areas = group.areas.map { area in
-        JSONValue.object([
+        PayloadValue.object([
             "id": .number(Double(area.id))
         ])
     }
@@ -713,29 +713,29 @@ private func groupToJSONValue(_ group: TydomGroup) -> JSONValue {
     ])
 }
 
-private func momentToJSONValue(_ moment: TydomMoment) -> JSONValue {
+private func momentToJSONValue(_ moment: TydomMoment) -> PayloadValue {
     return .object([
         "payload": .object(moment.payload)
     ])
 }
 
-private func areaToJSONValue(_ area: TydomArea) -> JSONValue {
+private func areaToJSONValue(_ area: TydomArea) -> PayloadValue {
     return .object([
         "id": area.id.map { .number(Double($0)) } ?? .null,
         "payload": .object(area.payload)
     ])
 }
 
-private func metadataEntryToJSONValue(_ entry: TydomMetadataEntry) -> JSONValue {
+private func metadataEntryToJSONValue(_ entry: TydomMetadataEntry) -> PayloadValue {
     return .object([
         "id": entry.id.map { .number(Double($0)) } ?? .null,
         "payload": .object(entry.payload)
     ])
 }
 
-private func messageMetadataToJSONValue(_ metadata: TydomMessageMetadata) -> JSONValue {
+private func messageMetadataToJSONValue(_ metadata: TydomMessageMetadata) -> PayloadValue {
     let raw = metadata.raw
-    var object: [String: JSONValue] = [
+    var object: [String: PayloadValue] = [
         "type": .string("raw"),
         "uriOrigin": jsonOptionalString(metadata.uriOrigin),
         "transactionId": jsonOptionalString(metadata.transactionId),
@@ -763,14 +763,14 @@ private func messageMetadataToJSONValue(_ metadata: TydomMessageMetadata) -> JSO
     return .object(object)
 }
 
-private func rawMessageToJSONValue(_ raw: TydomRawMessage) -> JSONValue {
+private func rawMessageToJSONValue(_ raw: TydomRawMessage) -> PayloadValue {
     messageMetadataToJSONValue(TydomMessageMetadata(raw: raw))
 }
 
-private func httpFrameToJSONValue(_ frame: TydomHTTPFrame) -> JSONValue {
+private func httpFrameToJSONValue(_ frame: TydomHTTPFrame) -> PayloadValue {
     switch frame {
     case .request(let request):
-        var object: [String: JSONValue] = [
+        var object: [String: PayloadValue] = [
             "type": .string("request"),
             "method": .string(request.method),
             "path": .string(request.path),
@@ -785,7 +785,7 @@ private func httpFrameToJSONValue(_ frame: TydomHTTPFrame) -> JSONValue {
         }
         return .object(object)
     case .response(let response):
-        var object: [String: JSONValue] = [
+        var object: [String: PayloadValue] = [
             "type": .string("response"),
             "status": .number(Double(response.status)),
             "reason": jsonOptionalString(response.reason),
@@ -802,12 +802,12 @@ private func httpFrameToJSONValue(_ frame: TydomHTTPFrame) -> JSONValue {
     }
 }
 
-private func jsonObject(from headers: [String: String]) -> JSONValue {
-    let mapped = headers.mapValues { JSONValue.string($0) }
+private func jsonObject(from headers: [String: String]) -> PayloadValue {
+    let mapped = headers.mapValues { PayloadValue.string($0) }
     return .object(mapped)
 }
 
-private func jsonOptionalString(_ value: String?) -> JSONValue {
+private func jsonOptionalString(_ value: String?) -> PayloadValue {
     guard let value else { return .null }
     return .string(value)
 }

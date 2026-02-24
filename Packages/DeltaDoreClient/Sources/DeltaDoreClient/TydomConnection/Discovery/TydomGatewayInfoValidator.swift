@@ -12,7 +12,7 @@ enum TydomGatewayInfoValidator {
         return normalizedExtracted == normalizedExpected
     }
 
-    private static func extractMac(from payload: [String: JSONValue]) -> String? {
+    private static func extractMac(from payload: [String: PayloadValue]) -> String? {
         for (key, value) in payload where key.lowercased().contains("mac") {
             if let mac = findMac(in: value) {
                 return mac
@@ -26,7 +26,7 @@ enum TydomGatewayInfoValidator {
         return nil
     }
 
-    private static func findMac(in value: JSONValue) -> String? {
+    private static func findMac(in value: PayloadValue) -> String? {
         switch value {
         case .string(let string):
             let hex = string.filter { $0.isHexDigit }

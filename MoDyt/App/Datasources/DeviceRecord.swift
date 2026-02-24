@@ -8,8 +8,8 @@ struct DeviceRecord: Codable, Identifiable, Sendable, Equatable {
     var name: String
     var usage: String
     var kind: String
-    var data: [String: JSONValue]
-    var metadata: [String: JSONValue]?
+    var data: [String: PayloadValue]
+    var metadata: [String: PayloadValue]?
     var isFavorite: Bool
     var favoriteOrder: Int?
     var dashboardOrder: Int?
@@ -274,7 +274,7 @@ extension DeviceRecord {
         let smokeDetector: SmokeDetectorDescriptor?
         let sunlight: SunlightDescriptor?
         let energyConsumption: EnergyConsumptionDescriptor?
-        let fallbackData: [String: JSONValue]?
+        let fallbackData: [String: PayloadValue]?
     }
 
     struct FavoritesSignature: Sendable, Equatable {
@@ -292,7 +292,7 @@ extension DeviceRecord {
         let smokeDetector: SmokeDetectorDescriptor?
         let sunlight: SunlightDescriptor?
         let energyConsumption: EnergyConsumptionDescriptor?
-        let fallbackStatusData: [String: JSONValue]?
+        let fallbackStatusData: [String: PayloadValue]?
     }
 
     var observationSignature: ObservationSignature {
@@ -303,7 +303,7 @@ extension DeviceRecord {
         let smokeDetector = smokeDetectorDescriptor()
         let sunlight = sunlightDescriptor()
         let energyConsumption = energyConsumptionDescriptor()
-        let fallbackData: [String: JSONValue]? =
+        let fallbackData: [String: PayloadValue]? =
             (primaryControl == nil
             && drivingLightControl == nil
             && temperature == nil
@@ -339,7 +339,7 @@ extension DeviceRecord {
         let smokeDetector = smokeDetectorDescriptor()
         let sunlight = sunlightDescriptor()
         let energyConsumption = energyConsumptionDescriptor()
-        let fallbackStatusData: [String: JSONValue]? =
+        let fallbackStatusData: [String: PayloadValue]? =
             group == .light
             || group == .shutter
             || group == .boiler

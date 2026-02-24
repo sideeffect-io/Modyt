@@ -2,7 +2,7 @@ import Foundation
 import DeltaDoreClient
 import Persistence
 
-actor SceneRepository {
+actor SceneDatasource {
     enum RepositoryError: Error {
         case notReady
     }

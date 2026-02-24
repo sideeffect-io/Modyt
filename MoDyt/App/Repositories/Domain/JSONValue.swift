@@ -1,14 +1,14 @@
 import Foundation
 
-public enum PayloadValue: Sendable, Equatable, Codable {
+enum JSONValue: Sendable, Equatable, Codable {
     case string(String)
     case number(Double)
     case bool(Bool)
-    case object([String: PayloadValue])
-    case array([PayloadValue])
+    case object([String: JSONValue])
+    case array([JSONValue])
     case null
 
-    public var stringValue: String? {
+    var stringValue: String? {
         switch self {
         case .string(let value):
             return value
@@ -24,29 +24,29 @@ public enum PayloadValue: Sendable, Equatable, Codable {
         }
     }
 
-    public var objectValue: [String: PayloadValue]? {
+    var objectValue: [String: JSONValue]? {
         if case .object(let value) = self { return value }
         return nil
     }
 
-    public var arrayValue: [PayloadValue]? {
+    var arrayValue: [JSONValue]? {
         if case .array(let value) = self { return value }
         return nil
     }
 
-    public var boolValue: Bool? {
+    var boolValue: Bool? {
         if case .bool(let value) = self { return value }
         return nil
     }
 
-    public var numberValue: Double? {
+    var numberValue: Double? {
         if case .number(let value) = self { return value }
         return nil
     }
 }
 
-extension PayloadValue {
-    public init(from decoder: Decoder) throws {
+extension JSONValue {
+    init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if container.decodeNil() {
             self = .null
@@ -58,16 +58,19 @@ extension PayloadValue {
             self = .number(value)
         } else if let value = try? container.decode(String.self) {
             self = .string(value)
-        } else if let value = try? container.decode([String: PayloadValue].self) {
+        } else if let value = try? container.decode([String: JSONValue].self) {
             self = .object(value)
-        } else if let value = try? container.decode([PayloadValue].self) {
+        } else if let value = try? container.decode([JSONValue].self) {
             self = .array(value)
         } else {
-            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported JSON value")
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unsupported JSON value"
+            )
         }
     }
 
-    public func encode(to encoder: Encoder) throws {
+    func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         switch self {
         case .string(let value):

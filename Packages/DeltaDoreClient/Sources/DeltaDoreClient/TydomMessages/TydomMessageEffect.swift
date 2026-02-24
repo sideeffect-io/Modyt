@@ -8,10 +8,10 @@ enum TydomMessageEffect: Sendable, Equatable {
 
 struct TydomCDataReplyChunk: Sendable, Equatable {
     let transactionId: String
-    let events: [JSONValue]
+    let events: [PayloadValue]
     let done: Bool
 
-    init(transactionId: String, events: [JSONValue], done: Bool) {
+    init(transactionId: String, events: [PayloadValue], done: Bool) {
         self.transactionId = transactionId
         self.events = events
         self.done = done

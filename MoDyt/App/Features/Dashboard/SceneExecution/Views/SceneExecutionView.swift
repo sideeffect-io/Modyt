@@ -25,7 +25,7 @@ private struct SceneExecutionFeedbackRow: View {
     let feedback: SceneExecutionFeedback?
 
     var body: some View {
-        Group {
+        SwiftUI.Group {
             if let feedback {
                 Label(feedback.title, systemImage: feedback.symbolName)
                     .font(.system(.caption, design: .rounded).weight(.semibold))

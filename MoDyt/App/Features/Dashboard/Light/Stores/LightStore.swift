@@ -7,20 +7,20 @@ import DeltaDoreClient
 final class LightStore {
     private struct ControlChange: Sendable {
         let key: String
-        let value: JSONValue
+        let value: PayloadValue
     }
 
     struct Dependencies {
         let observeLight: @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable
-        let applyOptimisticChanges: @Sendable (String, [String: JSONValue]) async -> Void
-        let sendCommand: @Sendable (String, String, JSONValue) async -> Void
+        let applyOptimisticChanges: @Sendable (String, [String: PayloadValue]) async -> Void
+        let sendCommand: @Sendable (String, String, PayloadValue) async -> Void
         let now: () -> Date
         let pendingEchoSuppressionWindow: TimeInterval
 
         init(
             observeLight: @escaping @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable,
-            applyOptimisticChanges: @escaping @Sendable (String, [String: JSONValue]) async -> Void,
-            sendCommand: @escaping @Sendable (String, String, JSONValue) async -> Void,
+            applyOptimisticChanges: @escaping @Sendable (String, [String: PayloadValue]) async -> Void,
+            sendCommand: @escaping @Sendable (String, String, PayloadValue) async -> Void,
             now: @escaping () -> Date = Date.init,
             pendingEchoSuppressionWindow: TimeInterval = 0.9
         ) {
@@ -244,14 +244,14 @@ final class LightStore {
     private actor Worker {
         private let uniqueId: String
         private let observeLight: @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable
-        private let applyOptimisticChanges: @Sendable (String, [String: JSONValue]) async -> Void
-        private let sendCommand: @Sendable (String, String, JSONValue) async -> Void
+        private let applyOptimisticChanges: @Sendable (String, [String: PayloadValue]) async -> Void
+        private let sendCommand: @Sendable (String, String, PayloadValue) async -> Void
 
         init(
             uniqueId: String,
             observeLight: @escaping @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable,
-            applyOptimisticChanges: @escaping @Sendable (String, [String: JSONValue]) async -> Void,
-            sendCommand: @escaping @Sendable (String, String, JSONValue) async -> Void
+            applyOptimisticChanges: @escaping @Sendable (String, [String: PayloadValue]) async -> Void,
+            sendCommand: @escaping @Sendable (String, String, PayloadValue) async -> Void
         ) {
             self.uniqueId = uniqueId
             self.observeLight = observeLight
@@ -275,7 +275,7 @@ final class LightStore {
         func send(_ changes: [ControlChange]) async {
             guard !changes.isEmpty else { return }
 
-            var optimisticChanges: [String: JSONValue] = [:]
+            var optimisticChanges: [String: PayloadValue] = [:]
             optimisticChanges.reserveCapacity(changes.count)
             for change in changes {
                 optimisticChanges[change.key] = change.value

@@ -458,7 +458,7 @@ actor CLIGatewayCatalog {
     }
 
     private func ingestGroupsFile(_ data: Data) -> Bool {
-        guard let payload = try? JSONDecoder().decode(JSONValue.self, from: data) else {
+        guard let payload = try? JSONDecoder().decode(PayloadValue.self, from: data) else {
             return false
         }
         guard let values = extractGroupValues(from: payload) else {
@@ -494,7 +494,7 @@ actor CLIGatewayCatalog {
     }
 
     private func ingestScenariosFile(_ data: Data) -> Bool {
-        guard let payload = try? JSONDecoder().decode([String: JSONValue].self, from: data),
+        guard let payload = try? JSONDecoder().decode([String: PayloadValue].self, from: data),
               let values = payload["scn"]?.arrayValue else {
             return false
         }
@@ -579,7 +579,7 @@ actor CLIGatewayCatalog {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private func extractGroupValues(from payload: JSONValue) -> [JSONValue]? {
+    private func extractGroupValues(from payload: PayloadValue) -> [PayloadValue]? {
         if let array = payload.arrayValue {
             return array
         }
@@ -597,7 +597,7 @@ actor CLIGatewayCatalog {
         return []
     }
 
-    private func intValue(_ value: JSONValue?) -> Int? {
+    private func intValue(_ value: PayloadValue?) -> Int? {
         if let number = value?.numberValue {
             return Int(number.rounded())
         }
@@ -621,7 +621,7 @@ actor CLIGatewayCatalog {
         return members
     }
 
-    private func groupMembers(from source: [String: JSONValue]) -> [CLIWizardGroupMember] {
+    private func groupMembers(from source: [String: PayloadValue]) -> [CLIWizardGroupMember] {
         guard let devices = source["devices"]?.arrayValue else {
             return []
         }

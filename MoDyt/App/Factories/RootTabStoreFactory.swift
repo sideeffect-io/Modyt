@@ -139,28 +139,10 @@ private struct RootTabGatewayBootstrapper: Sendable {
             for await message in messages {
                 guard !Task.isCancelled else { return }
                 log("Message received \(message.logDescription)")
-                logShutterIngress(message)
                 await applyMessage(message)
                 await acknowledgements.track(message)
             }
             log("Message stream finished")
-        }
-
-        private func logShutterIngress(_ message: TydomMessage) {
-            guard case .devices(let devices, let transactionId) = message else { return }
-
-            let shutterUpdates = devices.compactMap { device -> String? in
-                guard DeviceGroup.from(usage: device.usage) == .shutter else { return nil }
-                let position = device.data["position"]?.traceString
-                    ?? device.data["level"]?.traceString
-                    ?? "nil"
-                return "\(device.uniqueId):\(position)"
-            }
-
-            guard shutterUpdates.isEmpty == false else { return }
-            log(
-                "ShutterTrace ingress tx=\(transactionId ?? "nil") updates=\(shutterUpdates.joined(separator: ","))"
-            )
         }
 
         func runBootstrap(
@@ -356,31 +338,40 @@ private actor RootTabBootstrapAcknowledgementTracker {
 
     func track(_ message: TydomMessage) {
         switch message {
-        case .raw(let raw):
-            guard case .response(let response)? = raw.frame else { return }
-            guard let transactionId = raw.transactionId, transactionId.isEmpty == false else { return }
+        case .raw(let metadata):
+            guard case .response(let response)? = metadata.raw.frame else { return }
+            guard let transactionId = metadata.transactionId, transactionId.isEmpty == false else { return }
             resolve(
                 transactionId: transactionId,
-                uriOrigin: raw.uriOrigin,
+                uriOrigin: metadata.uriOrigin,
                 status: status(from: response.status)
             )
 
-        case .gatewayInfo(_, let transactionId),
-             .devices(_, let transactionId),
-             .scenarios(_, let transactionId),
-             .groupMetadata(_, let transactionId),
-             .groups(_, let transactionId),
-             .moments(_, let transactionId),
-             .areas(_, let transactionId):
-            guard let transactionId, transactionId.isEmpty == false else { return }
+        case .ack(let ack, let metadata):
+            guard let transactionId = metadata.transactionId, transactionId.isEmpty == false else { return }
             resolve(
                 transactionId: transactionId,
-                uriOrigin: nil,
-                status: .acknowledged(statusCode: 200)
+                uriOrigin: metadata.uriOrigin,
+                status: status(from: ack.statusCode)
             )
 
-        case .echo:
-            return
+        case .gatewayInfo(_, let metadata),
+             .devices(_, let metadata),
+             .devicesMeta(_, let metadata),
+             .devicesCMeta(_, let metadata),
+             .scenarios(_, let metadata),
+             .groupMetadata(_, let metadata),
+             .groups(_, let metadata),
+             .moments(_, let metadata),
+             .areas(_, let metadata),
+             .areasMeta(_, let metadata),
+             .areasCMeta(_, let metadata):
+            guard let transactionId = metadata.transactionId, transactionId.isEmpty == false else { return }
+            resolve(
+                transactionId: transactionId,
+                uriOrigin: metadata.uriOrigin,
+                status: .acknowledged(statusCode: 200)
+            )
         }
     }
 
@@ -531,27 +522,36 @@ private actor RootTabBootstrapAcknowledgementTracker {
 private extension TydomMessage {
     var logDescription: String {
         switch self {
-        case .devices(let devices, let transactionId):
-            return "devices count=\(devices.count) tx=\(transactionId ?? "nil")"
-        case .gatewayInfo(_, let transactionId):
-            return "gatewayInfo tx=\(transactionId ?? "nil")"
-        case .scenarios(let scenarios, let transactionId):
-            return "scenarios count=\(scenarios.count) tx=\(transactionId ?? "nil")"
-        case .groupMetadata(let groups, let transactionId):
-            return "groupMetadata count=\(groups.count) tx=\(transactionId ?? "nil")"
-        case .groups(let groups, let transactionId):
-            return "groups count=\(groups.count) tx=\(transactionId ?? "nil")"
-        case .moments(_, let transactionId):
-            return "moments tx=\(transactionId ?? "nil")"
-        case .areas(let areas, let transactionId):
-            return "areas count=\(areas.count) tx=\(transactionId ?? "nil")"
-        case .echo(let echo):
-            return "echo status=\(echo.statusCode) tx=\(echo.transactionId) uri=\(echo.uriOrigin)"
-        case .raw(let raw):
+        case .devices(let devices, let metadata):
+            return "devices count=\(devices.count) tx=\(metadata.transactionId ?? "nil")"
+        case .devicesMeta(let entries, let metadata):
+            return "devicesMeta count=\(entries.count) tx=\(metadata.transactionId ?? "nil")"
+        case .devicesCMeta(let entries, let metadata):
+            return "devicesCMeta count=\(entries.count) tx=\(metadata.transactionId ?? "nil")"
+        case .gatewayInfo(_, let metadata):
+            return "gatewayInfo tx=\(metadata.transactionId ?? "nil")"
+        case .scenarios(let scenarios, let metadata):
+            return "scenarios count=\(scenarios.count) tx=\(metadata.transactionId ?? "nil")"
+        case .groupMetadata(let groups, let metadata):
+            return "groupMetadata count=\(groups.count) tx=\(metadata.transactionId ?? "nil")"
+        case .groups(let groups, let metadata):
+            return "groups count=\(groups.count) tx=\(metadata.transactionId ?? "nil")"
+        case .moments(_, let metadata):
+            return "moments tx=\(metadata.transactionId ?? "nil")"
+        case .areas(let areas, let metadata):
+            return "areas count=\(areas.count) tx=\(metadata.transactionId ?? "nil")"
+        case .areasMeta(let entries, let metadata):
+            return "areasMeta count=\(entries.count) tx=\(metadata.transactionId ?? "nil")"
+        case .areasCMeta(let entries, let metadata):
+            return "areasCMeta count=\(entries.count) tx=\(metadata.transactionId ?? "nil")"
+        case .ack(let ack, let metadata):
+            return "ack status=\(ack.statusCode) tx=\(metadata.transactionId ?? "nil") uri=\(metadata.uriOrigin ?? "nil")"
+        case .raw(let metadata):
+            let raw = metadata.raw
             let origin = raw.uriOrigin ?? "nil"
             let tx = raw.transactionId ?? "nil"
-            let bodyCount = raw.frame?.body?.count ?? 0
-            let preview = raw.frame?.body
+            let bodyCount = raw.frame?.body?.count ?? metadata.body?.count ?? 0
+            let preview = (raw.frame?.body ?? metadata.body)
                 .flatMap { data in
                     String(data: data.prefix(200), encoding: .isoLatin1)
                         ?? String(decoding: data.prefix(200), as: UTF8.self)
