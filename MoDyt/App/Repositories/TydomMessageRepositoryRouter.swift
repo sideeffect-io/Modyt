@@ -5,17 +5,20 @@ actor TydomMessageRepositoryRouter {
     private let deviceRepository: DeviceRepository
     private let groupRepository: GroupRepository
     private let sceneRepository: SceneRepository
+    private let ackRepository: ACKRepository
     private let log: @Sendable (String) -> Void
 
     init(
         deviceRepository: DeviceRepository,
         groupRepository: GroupRepository,
         sceneRepository: SceneRepository,
+        ackRepository: ACKRepository,
         log: @escaping @Sendable (String) -> Void = { _ in }
     ) {
         self.deviceRepository = deviceRepository
         self.groupRepository = groupRepository
         self.sceneRepository = sceneRepository
+        self.ackRepository = ackRepository
         self.log = log
     }
 
@@ -23,6 +26,7 @@ actor TydomMessageRepositoryRouter {
         try await deviceRepository.startIfNeeded()
         try await groupRepository.startIfNeeded()
         try await sceneRepository.startIfNeeded()
+        await ackRepository.startIfNeeded()
     }
 
     func ingest(_ message: TydomMessage) async {
@@ -51,6 +55,8 @@ actor TydomMessageRepositoryRouter {
             } catch {
                 log("Router failed to persist scenarios: \(error)")
             }
+        case .ack(let ack, let metadata):
+            await ackRepository.ingest(ack: ack, metadata: metadata)
         default:
             break
         }
