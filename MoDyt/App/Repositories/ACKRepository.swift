@@ -132,6 +132,18 @@ actor ACKRepository {
         }
     }
 
+    func waitForACK(transactionIds: [String]) async throws {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for transactionId in transactionIds {
+                group.addTask { [self, transactionId] in
+                    try await self.waitForACK(transactionId: transactionId)
+                }
+            }
+
+            try await group.waitForAll()
+        }
+    }
+
     private func timeoutWaiter(transactionId: String) {
         guard let waiter = pendingWaitersByTransactionId.removeValue(forKey: transactionId) else {
             return

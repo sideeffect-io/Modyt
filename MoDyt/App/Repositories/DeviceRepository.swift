@@ -1,4 +1,5 @@
 import Foundation
+import Persistence
 
 struct DeviceUpsert: DomainUpsert, Equatable {
     let id: String
@@ -10,24 +11,44 @@ struct DeviceUpsert: DomainUpsert, Equatable {
     let metadata: [String: JSONValue]?
 }
 
-typealias DeviceRepository = SQLiteDomainRepository<Device, DeviceUpsert>
+typealias DeviceRepository = DomainRepository<Device, DeviceUpsert>
 
-extension SQLiteDomainRepository where Item == Device, Upsert == DeviceUpsert {
+extension DomainRepository where Item == Device, Upsert == DeviceUpsert {
     static func makeDeviceRepository(
-        databasePath: String,
+        createDAO: @escaping DeviceRepository.DAOFactory,
         now: @escaping @Sendable () -> Date = Date.init,
         log: @escaping @Sendable (String) -> Void = { _ in }
     ) -> Self {
         Self(
             configuration: .init(
-                databasePath: databasePath,
-                tableName: tableName,
-                createTableSQL: createTableSQL,
-                createDashboardOrderIndexSQL: createDashboardOrderIndexSQL,
                 resolveUpsert: { existing, upsert, timestamp in
                         .upsert(makeDevice(existing: existing, upsert: upsert, timestamp: timestamp))
-                }
+                    }
             ),
+            createDAO: createDAO,
+            now: now,
+            log: log
+        )
+    }
+
+    static func makeDeviceRepository(
+        databasePath: String,
+        now: @escaping @Sendable () -> Date = Date.init,
+        log: @escaping @Sendable (String) -> Void = { _ in }
+    ) -> Self {
+        makeDeviceRepository(
+            createDAO: {
+                let database = try SQLiteDatabase(path: databasePath)
+                try database.execute(createTableSQL)
+                try database.execute(createDashboardOrderIndexSQL)
+
+                let schema = TableSchema<Device>.codable(
+                    table: tableName,
+                    primaryKey: "id"
+                )
+
+                return DAO.make(database: database, schema: schema)
+            },
             now: now,
             log: log
         )

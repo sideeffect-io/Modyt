@@ -1,4 +1,5 @@
 import Foundation
+import Persistence
 
 struct GroupMetadataUpsert: DomainUpsert, Equatable {
     let id: String
@@ -28,22 +29,42 @@ enum GroupUpsertEvent: DomainUpsert {
     }
 }
 
-typealias GroupRepository = SQLiteDomainRepository<Group, GroupUpsertEvent>
+typealias GroupRepository = DomainRepository<Group, GroupUpsertEvent>
 
-extension SQLiteDomainRepository where Item == Group, Upsert == GroupUpsertEvent {
+extension DomainRepository where Item == Group, Upsert == GroupUpsertEvent {
     static func makeGroupRepository(
-        databasePath: String,
+        createDAO: @escaping GroupRepository.DAOFactory,
         now: @escaping @Sendable () -> Date = Date.init,
         log: @escaping @Sendable (String) -> Void = { _ in }
     ) -> Self {
         Self(
             configuration: .init(
-                databasePath: databasePath,
-                tableName: tableName,
-                createTableSQL: createTableSQL,
-                createDashboardOrderIndexSQL: createDashboardOrderIndexSQL,
                 resolveUpsert: resolveUpsert
             ),
+            createDAO: createDAO,
+            now: now,
+            log: log
+        )
+    }
+
+    static func makeGroupRepository(
+        databasePath: String,
+        now: @escaping @Sendable () -> Date = Date.init,
+        log: @escaping @Sendable (String) -> Void = { _ in }
+    ) -> Self {
+        makeGroupRepository(
+            createDAO: {
+                let database = try SQLiteDatabase(path: databasePath)
+                try database.execute(createTableSQL)
+                try database.execute(createDashboardOrderIndexSQL)
+
+                let schema = TableSchema<Group>.codable(
+                    table: tableName,
+                    primaryKey: "id"
+                )
+
+                return DAO.make(database: database, schema: schema)
+            },
             now: now,
             log: log
         )
@@ -61,7 +82,7 @@ extension SQLiteDomainRepository where Item == Group, Upsert == GroupUpsertEvent
         existing: Group?,
         upsert: GroupUpsertEvent,
         timestamp: Date
-    ) -> SQLiteDomainMergeDecision<Group> {
+    ) -> DomainMergeDecision<Group> {
         switch upsert {
         case .metadata(let metadata):
             return .upsert(makeGroup(existing: existing, metadata: metadata, timestamp: timestamp))

@@ -1,4 +1,5 @@
 import Foundation
+import Persistence
 
 struct SceneUpsert: DomainUpsert, Equatable {
     let id: String
@@ -10,22 +11,42 @@ struct SceneUpsert: DomainUpsert, Equatable {
     let isGatewayInternal: Bool
 }
 
-typealias SceneRepository = SQLiteDomainRepository<Scene, SceneUpsert>
+typealias SceneRepository = DomainRepository<Scene, SceneUpsert>
 
-extension SQLiteDomainRepository where Item == Scene, Upsert == SceneUpsert {
+extension DomainRepository where Item == Scene, Upsert == SceneUpsert {
     static func makeSceneRepository(
-        databasePath: String,
+        createDAO: @escaping SceneRepository.DAOFactory,
         now: @escaping @Sendable () -> Date = Date.init,
         log: @escaping @Sendable (String) -> Void = { _ in }
     ) -> Self {
         Self(
             configuration: .init(
-                databasePath: databasePath,
-                tableName: tableName,
-                createTableSQL: createTableSQL,
-                createDashboardOrderIndexSQL: createDashboardOrderIndexSQL,
                 resolveUpsert: resolveUpsert
             ),
+            createDAO: createDAO,
+            now: now,
+            log: log
+        )
+    }
+
+    static func makeSceneRepository(
+        databasePath: String,
+        now: @escaping @Sendable () -> Date = Date.init,
+        log: @escaping @Sendable (String) -> Void = { _ in }
+    ) -> Self {
+        makeSceneRepository(
+            createDAO: {
+                let database = try SQLiteDatabase(path: databasePath)
+                try database.execute(createTableSQL)
+                try database.execute(createDashboardOrderIndexSQL)
+
+                let schema = TableSchema<Scene>.codable(
+                    table: tableName,
+                    primaryKey: "id"
+                )
+
+                return DAO.make(database: database, schema: schema)
+            },
             now: now,
             log: log
         )
@@ -35,7 +56,7 @@ extension SQLiteDomainRepository where Item == Scene, Upsert == SceneUpsert {
         existing: Scene?,
         upsert: SceneUpsert,
         timestamp: Date
-    ) -> SQLiteDomainMergeDecision<Scene> {
+    ) -> DomainMergeDecision<Scene> {
         if upsert.isGatewayInternal {
             return .delete(id: upsert.id)
         }

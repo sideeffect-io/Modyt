@@ -1,25 +1,24 @@
 import Foundation
 import Persistence
 
-enum SQLiteDomainMergeDecision<Item: DomainType>: Sendable {
+enum DomainMergeDecision<Item: DomainType>: Sendable {
     case upsert(Item)
     case delete(id: String)
 }
 
-actor SQLiteDomainRepository<Item: DomainType, Upsert: DomainUpsert> {
+actor DomainRepository<Item: DomainType, Upsert: DomainUpsert> {
     enum RepositoryError: Error {
         case notReady
     }
 
     struct Configuration: Sendable {
-        let databasePath: String
-        let tableName: String
-        let createTableSQL: String
-        let createDashboardOrderIndexSQL: String
-        let resolveUpsert: @Sendable (Item?, Upsert, Date) -> SQLiteDomainMergeDecision<Item>
+        let resolveUpsert: @Sendable (Item?, Upsert, Date) -> DomainMergeDecision<Item>
     }
 
+    typealias DAOFactory = @Sendable () throws -> DAO<Item>
+
     private let configuration: Configuration
+    private let createDAO: DAOFactory
     private let now: @Sendable () -> Date
     private let log: @Sendable (String) -> Void
 
@@ -29,10 +28,12 @@ actor SQLiteDomainRepository<Item: DomainType, Upsert: DomainUpsert> {
 
     init(
         configuration: Configuration,
+        createDAO: @escaping DAOFactory,
         now: @escaping @Sendable () -> Date = Date.init,
         log: @escaping @Sendable (String) -> Void = { _ in }
     ) {
         self.configuration = configuration
+        self.createDAO = createDAO
         self.now = now
         self.log = log
     }
@@ -42,16 +43,7 @@ actor SQLiteDomainRepository<Item: DomainType, Upsert: DomainUpsert> {
             return
         }
 
-        let database = try SQLiteDatabase(path: configuration.databasePath)
-        try database.execute(configuration.createTableSQL)
-        try database.execute(configuration.createDashboardOrderIndexSQL)
-
-        let schema = TableSchema<Item>.codable(
-            table: configuration.tableName,
-            primaryKey: "id"
-        )
-
-        self.dao = DAO.make(database: database, schema: schema)
+        self.dao = try createDAO()
     }
 
     func observeAll() -> some AsyncSequence<[Item], Never> & Sendable {
@@ -59,7 +51,7 @@ actor SQLiteDomainRepository<Item: DomainType, Upsert: DomainUpsert> {
             let snapshot = try currentSnapshot()
             return stream(initialSnapshot: snapshot).removeDuplicates()
         } catch {
-            log("\(type(of: self)) sqlite observeAll failed: \(error)")
+            log("\(type(of: self)) observeAll failed: \(error)")
             return AsyncStream<[Item]>.single([]).removeDuplicates()
         }
     }

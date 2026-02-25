@@ -90,6 +90,91 @@ struct ACKRepositoryTests {
     }
 
     @Test
+    func waitForMultipleResumesWhenAllACKsArrive() async throws {
+        let testTime = TestTimeDriver()
+        let repository = makeRepository(testTime: testTime)
+        let firstTransactionId = "tx-multi-first"
+        let secondTransactionId = "tx-multi-second"
+
+        let waiter = Task {
+            try await repository.waitForACK(transactionIds: [
+                firstTransactionId,
+                secondTransactionId
+            ])
+            return true
+        }
+
+        await settle()
+
+        await repository.ingest(
+            ack: makeACK(statusCode: 202),
+            metadata: makeMetadata(transactionId: secondTransactionId)
+        )
+
+        await settle()
+
+        await repository.ingest(
+            ack: makeACK(statusCode: 200),
+            metadata: makeMetadata(transactionId: firstTransactionId)
+        )
+
+        #expect(try await waiter.value)
+    }
+
+    @Test
+    func waitForMultipleStartsWaitersConcurrently() async {
+        let testTime = TestTimeDriver()
+        let configuration = ACKRepository.Configuration(
+            waitTimeout: .seconds(30),
+            retention: .seconds(300),
+            cleanupInterval: .seconds(300)
+        )
+        let repository = makeRepository(
+            testTime: testTime,
+            configuration: configuration
+        )
+        let firstTransactionId = "tx-concurrent-first"
+        let secondTransactionId = "tx-concurrent-second"
+
+        let waiter = Task {
+            try await repository.waitForACK(transactionIds: [
+                firstTransactionId,
+                secondTransactionId
+            ])
+        }
+
+        let completionFlag = CompletionFlag()
+        Task {
+            _ = await waiter.result
+            await completionFlag.markCompleted()
+        }
+
+        await settle()
+        await testTime.advance(by: .seconds(20))
+        await settle()
+
+        await repository.ingest(
+            ack: makeACK(statusCode: 200),
+            metadata: makeMetadata(transactionId: firstTransactionId)
+        )
+
+        await settle()
+        await testTime.advance(by: .seconds(11))
+        await settle(cycles: 16)
+
+        #expect(await completionFlag.isCompleted())
+
+        do {
+            try await waiter.value
+            Issue.record("Expected timeout for second transaction id")
+        } catch let error as ACKRepository.RepositoryError {
+            #expect(error == .timeout(transactionId: secondTransactionId))
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
+    @Test
     func duplicateACKRefreshesStoredTimestamp() async throws {
         let testTime = TestTimeDriver()
         let configuration = ACKRepository.Configuration(
@@ -395,6 +480,18 @@ private actor TestTimeDriver {
             return
         }
         request.continuation.resume(throwing: CancellationError())
+    }
+}
+
+private actor CompletionFlag {
+    private var didComplete = false
+
+    func markCompleted() {
+        didComplete = true
+    }
+
+    func isCompleted() -> Bool {
+        didComplete
     }
 }
 

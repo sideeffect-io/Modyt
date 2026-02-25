@@ -14,6 +14,7 @@ func makeSQLiteBackedRepositories(
     now: @escaping @Sendable () -> Date = Date.init,
     log: @escaping @Sendable (String) -> Void = { _ in }
 ) -> SQLiteBackedRepositories {
+
     let deviceRepository = DeviceRepository.makeDeviceRepository(
         databasePath: databasePath,
         now: now,
