@@ -29,6 +29,26 @@ actor TydomMessageRepositoryRouter {
         await ackRepository.startIfNeeded()
     }
 
+    func clearRepositories() async {
+        do {
+            try await deviceRepository.deleteAll()
+        } catch {
+            log("Router failed to clear devices: \(error)")
+        }
+
+        do {
+            try await groupRepository.deleteAll()
+        } catch {
+            log("Router failed to clear groups: \(error)")
+        }
+
+        do {
+            try await sceneRepository.deleteAll()
+        } catch {
+            log("Router failed to clear scenes: \(error)")
+        }
+    }
+
     func ingest(_ message: TydomMessage) async {
         switch message {
         case .devices(let devices, _):

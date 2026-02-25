@@ -179,6 +179,8 @@ public actor TydomConnection {
     }
 
     public func disconnect() async {
+        messageContinuation?.finish()
+        rawMessageContinuation?.finish()
         isWebSocketOpen = false
         receiveTask?.cancel()
         receiveTask = nil

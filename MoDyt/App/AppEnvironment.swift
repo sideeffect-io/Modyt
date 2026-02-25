@@ -10,6 +10,7 @@ enum SceneExecutionResult: Sendable, Equatable {
 }
 
 struct AppEnvironment: Sendable {
+    let dependencyBag: DependencyBag
     let client: DeltaDoreClient
     let repository: DeviceDatasource
     let sceneRepository: SceneDatasource
@@ -25,13 +26,18 @@ struct AppEnvironment: Sendable {
 
     static func live() -> AppEnvironment {
         let databaseURL = AppDirectories.databaseURL()
-        let client = DeltaDoreClient.live()
         let now: @Sendable () -> Date = Date.init
         let log: @Sendable (String) -> Void = { message in
             #if DEBUG
             print("[MoDyt] \(message)")
             #endif
         }
+        let dependencyBag = DependencyBag.live(
+            databasePath: databaseURL.path,
+            now: now,
+            log: log
+        )
+        let client = dependencyBag.client
         let sceneExecutionStatusStore = SceneExecutionStatusStore()
         let repository = DeviceDatasource(databasePath: databaseURL.path, log: log)
         let sceneRepository = SceneDatasource(
@@ -180,6 +186,7 @@ struct AppEnvironment: Sendable {
         }
 
         return AppEnvironment(
+            dependencyBag: dependencyBag,
             client: client,
             repository: repository,
             sceneRepository: sceneRepository,

@@ -5,6 +5,7 @@ public struct DAO<Entity: Codable & Sendable>: Sendable {
     public let read: @Sendable (SQLiteValue) throws -> Entity?
     public let update: @Sendable (Entity) throws -> Entity
     public let delete: @Sendable (SQLiteValue) throws -> Void
+    public let deleteAll: @Sendable () throws -> Void
     public let list: @Sendable () throws -> [Entity]
     public let query: @Sendable (String, [SQLiteValue]) throws -> [Entity]
     public let queryRows: @Sendable (String, [SQLiteValue]) throws -> [Row]
@@ -14,6 +15,7 @@ public struct DAO<Entity: Codable & Sendable>: Sendable {
         read: @escaping @Sendable (SQLiteValue) throws -> Entity?,
         update: @escaping @Sendable (Entity) throws -> Entity,
         delete: @escaping @Sendable (SQLiteValue) throws -> Void,
+        deleteAll: @escaping @Sendable () throws -> Void,
         list: @escaping @Sendable () throws -> [Entity],
         query: @escaping @Sendable (String, [SQLiteValue]) throws -> [Entity],
         queryRows: @escaping @Sendable (String, [SQLiteValue]) throws -> [Row]
@@ -22,6 +24,7 @@ public struct DAO<Entity: Codable & Sendable>: Sendable {
         self.read = read
         self.update = update
         self.delete = delete
+        self.deleteAll = deleteAll
         self.list = list
         self.query = query
         self.queryRows = queryRows
@@ -66,6 +69,10 @@ extension DAO {
                 let sql = deleteSQL(table: schema.table, primaryKey: schema.primaryKey)
                 try database.execute(sql, [id])
             },
+            deleteAll: {
+                let sql = deleteAllSQL(table: schema.table)
+                try database.execute(sql)
+            },
             list: {
                 let sql = selectAllSQL(table: schema.table)
                 let rows = try database.query(sql)
@@ -99,6 +106,10 @@ private func updateSQL(table: String, primaryKey: String, columns: [String]) -> 
 
 private func deleteSQL(table: String, primaryKey: String) -> String {
     "DELETE FROM \(quoted(table)) WHERE \(quoted(primaryKey)) = ?"
+}
+
+private func deleteAllSQL(table: String) -> String {
+    "DELETE FROM \(quoted(table))"
 }
 
 private func selectAllSQL(table: String) -> String {

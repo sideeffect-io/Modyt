@@ -1,6 +1,6 @@
 import Foundation
 
-struct SQLiteBackedRepositories: Sendable {
+struct LocalStorageDatasources: Sendable {
     let deviceRepository: DeviceRepository
     let groupRepository: GroupRepository
     let sceneRepository: SceneRepository
@@ -9,11 +9,11 @@ struct SQLiteBackedRepositories: Sendable {
     let tydomMessageRepositoryRouter: TydomMessageRepositoryRouter
 }
 
-func makeSQLiteBackedRepositories(
+func makeLocalStorageDatasources(
     databasePath: String,
     now: @escaping @Sendable () -> Date = Date.init,
     log: @escaping @Sendable (String) -> Void = { _ in }
-) -> SQLiteBackedRepositories {
+) -> LocalStorageDatasources {
 
     let deviceRepository = DeviceRepository.makeDeviceRepository(
         databasePath: databasePath,
@@ -49,7 +49,7 @@ func makeSQLiteBackedRepositories(
         log: log
     )
     
-    return SQLiteBackedRepositories(
+    return LocalStorageDatasources(
         deviceRepository: deviceRepository,
         groupRepository: groupRepository,
         sceneRepository: sceneRepository,

@@ -2,9 +2,14 @@ import SwiftUI
 
 @main
 struct MoDytApp: App {
+    let environment = AppEnvironment.live()
+
+    private let dependencyBag = DependencyBag.live()
     private let appCoordinatorStoreFactory: AppRootStoreFactory
     private let authenticationStoreFactory: AuthenticationStoreFactory
-    private let rootTabStoreFactory: RootTabStoreFactory
+    private let mainStoreFactory: MainStoreFactory
+    // to migrate
+    private let rootTabStoreFactory: RootTabStoreFactory // to remove
     private let dashboardStoreFactory: DashboardStoreFactory
     private let dashboardDeviceCardStoreFactory: DashboardDeviceCardStoreFactory
     private let sceneExecutionStoreFactory: SceneExecutionStoreFactory
@@ -22,10 +27,11 @@ struct MoDytApp: App {
     private let settingsStoreFactory: SettingsStoreFactory
 
     init() {
-        let environment = AppEnvironment.live()
         appCoordinatorStoreFactory = .live
-        authenticationStoreFactory = .live(environment: environment)
-        rootTabStoreFactory = .live(environment: environment)
+        authenticationStoreFactory = .live(dependencies: dependencyBag)
+        mainStoreFactory = .live(dependencies: dependencyBag)
+        // to migrate
+        rootTabStoreFactory = .live(environment: environment) // to remove
         dashboardStoreFactory = .live(environment: environment)
         dashboardDeviceCardStoreFactory = .live(environment: environment)
         sceneExecutionStoreFactory = .live(environment: environment)
@@ -48,6 +54,7 @@ struct MoDytApp: App {
             AppRootView()
                 .environment(\.appCoordinatorStoreFactory, appCoordinatorStoreFactory)
                 .environment(\.authenticationStoreFactory, authenticationStoreFactory)
+                .environment(\.mainStoreFactory, mainStoreFactory)
                 .environment(\.rootTabStoreFactory, rootTabStoreFactory)
                 .environment(\.dashboardStoreFactory, dashboardStoreFactory)
                 .environment(\.dashboardDeviceCardStoreFactory, dashboardDeviceCardStoreFactory)

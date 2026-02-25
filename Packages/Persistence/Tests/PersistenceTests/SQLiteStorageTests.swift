@@ -119,3 +119,28 @@ private struct Metadata: Codable, Sendable, Equatable {
     #expect(result[0].0 == .text("Ada"))
     #expect(result[0].1 == .text("Notes"))
 }
+
+@Test func sqliteDeleteAll() async throws {
+    let database = try await SQLiteDatabase(path: ":memory:")
+    try await database.execute(
+        """
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            role TEXT NOT NULL,
+            metadata TEXT
+        )
+        """
+    )
+
+    let schema = TableSchema<User>.codable(table: "users", primaryKey: "id")
+    let dao = DAO.make(database: database, schema: schema)
+
+    _ = try await dao.create(User(id: 1, name: "Ada", role: .admin, metadata: nil))
+    _ = try await dao.create(User(id: 2, name: "Grace", role: .user, metadata: nil))
+
+    try await dao.deleteAll()
+
+    let rows = try await dao.list()
+    #expect(rows.isEmpty)
+}

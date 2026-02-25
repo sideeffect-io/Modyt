@@ -160,6 +160,17 @@ actor DomainRepository<Item: DomainType, Upsert: DomainUpsert> {
         }
     }
 
+    func deleteAll() async throws {
+        let snapshot = try currentSnapshot()
+        guard snapshot.isEmpty == false else {
+            return
+        }
+
+        let dao = try requireDAO()
+        try dao.deleteAll()
+        try refreshSnapshotAndNotify()
+    }
+
     func setFavorite(_ id: String, _ isFavorite: Bool) throws {
         let dao = try requireDAO()
         let snapshot = try currentSnapshot()
