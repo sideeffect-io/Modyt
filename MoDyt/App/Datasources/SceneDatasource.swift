@@ -10,7 +10,6 @@ actor SceneDatasource {
     private let databasePath: String
     private let now: @Sendable () -> Date
     private let log: @Sendable (String) -> Void
-    private let trackMessage: @Sendable (TydomMessage) async -> Void
     private var database: SQLiteDatabase?
     private var dao: DAO<SceneRecord>?
     private var observers: [UUID: AsyncStream<[SceneRecord]>.Continuation] = [:]
@@ -18,13 +17,11 @@ actor SceneDatasource {
     init(
         databasePath: String,
         now: @escaping @Sendable () -> Date = Date.init,
-        log: @escaping @Sendable (String) -> Void = { _ in },
-        trackMessage: @escaping @Sendable (TydomMessage) async -> Void = { _ in }
+        log: @escaping @Sendable (String) -> Void = { _ in }
     ) {
         self.databasePath = databasePath
         self.now = now
         self.log = log
-        self.trackMessage = trackMessage
     }
 
     func startIfNeeded() async throws {
@@ -216,8 +213,6 @@ actor SceneDatasource {
     }
 
     func applyMessage(_ message: TydomMessage) async {
-        await trackMessage(message)
-
         switch message {
         case .scenarios(let scenarios, _):
             log("Apply scenarios message count=\(scenarios.count)")

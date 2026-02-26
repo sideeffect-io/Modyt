@@ -1,54 +1,99 @@
 import Foundation
 import Testing
-import DeltaDoreClient
 @testable import MoDyt
 
+@MainActor
 struct SunlightDescriptorTests {
     @Test
-    func sunlightDescriptorUsesPreferredKeyWithDefaultRange() {
-        let device = TestSupport.makeDevice(
-            uniqueId: "sun-1",
-            name: "Ensoleillement",
-            usage: "unknownSunSensor",
-            data: [
-                "lightPower": .number(860),
-                "battery": .number(95)
-            ]
+    func sunlightDescriptorUsesPreferredKeyWithDefaultRange() async {
+        let streamBox = BufferedStreamBox<Device?>()
+        let store = makeStore(streamBox: streamBox)
+
+        streamBox.yield(
+            makeSunlightRepositoryDevice(
+                id: "sun-1",
+                name: "Ensoleillement",
+                usage: "unknownSunSensor",
+                data: [
+                    "lightPower": .number(860),
+                    "battery": .number(95)
+                ]
+            )
         )
 
-        let descriptor = device.sunlightDescriptor()
+        let didObserve = await waitUntil {
+            store.descriptor?.key == "lightPower"
+        }
 
-        #expect(descriptor?.key == "lightPower")
-        #expect(descriptor?.value == 860)
-        #expect(descriptor?.range == 0...1400)
-        #expect(descriptor?.unitSymbol == "W/m2")
-        #expect(descriptor?.batteryStatus?.batteryLevelKey == "battery")
-        #expect(descriptor?.batteryStatus?.batteryLevel == 95)
+        #expect(didObserve)
+        #expect(store.descriptor?.key == "lightPower")
+        #expect(store.descriptor?.value == 860)
+        #expect(store.descriptor?.range == 0...1400)
+        #expect(store.descriptor?.unitSymbol == "W/m2")
+        #expect(store.descriptor?.batteryStatus?.batteryLevelKey == "battery")
+        #expect(store.descriptor?.batteryStatus?.batteryLevel == 95)
     }
 
     @Test
-    func sunlightDescriptorConvertsKilowattUnitToWattsPerSquareMeter() {
-        let device = TestSupport.makeDevice(
-            uniqueId: "sun-2",
-            name: "Roof Sensor",
-            usage: "weather",
-            data: [
-                "solarRadiation": .number(1.1)
-            ],
-            metadata: [
-                "solarRadiation": .object([
-                    "unit": .string("kW/m2"),
-                    "min": .number(0),
-                    "max": .number(1.4)
-                ])
-            ]
+    func sunlightDescriptorConvertsKilowattUnitToWattsPerSquareMeter() async {
+        let streamBox = BufferedStreamBox<Device?>()
+        let store = makeStore(streamBox: streamBox)
+
+        streamBox.yield(
+            makeSunlightRepositoryDevice(
+                id: "sun-2",
+                name: "Roof Sensor",
+                usage: "weather",
+                data: [
+                    "solarRadiation": .number(1.1)
+                ],
+                metadata: [
+                    "solarRadiation": .object([
+                        "unit": .string("kW/m2"),
+                        "min": .number(0),
+                        "max": .number(1.4)
+                    ])
+                ]
+            )
         )
 
-        let descriptor = device.sunlightDescriptor()
+        let didObserve = await waitUntil {
+            store.descriptor?.key == "solarRadiation"
+        }
 
-        #expect(descriptor?.value == 1100)
-        #expect(descriptor?.range == 0...1400)
-        #expect(descriptor?.unitSymbol == "W/m2")
+        #expect(didObserve)
+        #expect(store.descriptor?.value == 1100)
+        #expect(store.descriptor?.range == 0...1400)
+        #expect(store.descriptor?.unitSymbol == "W/m2")
+    }
+
+    private func makeStore(streamBox: BufferedStreamBox<Device?>) -> SunlightStore {
+        SunlightStore(
+            dependencies: .init(
+                observeSunlight: { streamBox.stream }
+            )
+        )
+    }
+
+    private func makeSunlightRepositoryDevice(
+        id: String,
+        name: String,
+        usage: String,
+        data: [String: JSONValue],
+        metadata: [String: JSONValue]? = nil
+    ) -> Device {
+        Device(
+            id: id,
+            endpointId: 1,
+            name: name,
+            usage: usage,
+            kind: "sensor",
+            data: data,
+            metadata: metadata,
+            isFavorite: false,
+            dashboardOrder: nil,
+            updatedAt: Date()
+        )
     }
 }
 
@@ -57,10 +102,9 @@ struct SunlightStoreTests {
     @Test
     func initUsesInitialDescriptor() {
         let store = SunlightStore(
-            uniqueId: "sun-10",
-            initialDevice: makeSunlightDevice(uniqueId: "sun-10", value: 320, batteryDefect: false),
+            initialDescriptor: makeSunlightDescriptor(value: 320, batteryDefect: false),
             dependencies: .init(
-                observeSunlight: { _ in
+                observeSunlight: {
                     AsyncStream { continuation in
                         continuation.finish()
                     }
@@ -74,17 +118,23 @@ struct SunlightStoreTests {
     }
 
     @Test
-    func observationUpdatesDescriptorFromIncomingDevice() async {
-        let streamBox = BufferedStreamBox<DeviceRecord?>()
+    func observationUpdatesDescriptorFromIncomingDescriptor() async {
+        let streamBox = BufferedStreamBox<Device?>()
         let store = SunlightStore(
-            uniqueId: "sun-11",
-            initialDevice: makeSunlightDevice(uniqueId: "sun-11", value: 250),
+            initialDescriptor: makeSunlightDescriptor(value: 250),
             dependencies: .init(
-                observeSunlight: { _ in streamBox.stream }
+                observeSunlight: { streamBox.stream }
             )
         )
 
-        streamBox.yield(makeSunlightDevice(uniqueId: "sun-11", value: 740))
+        streamBox.yield(
+            makeSunlightRepositoryDevice(
+                id: "sun-11",
+                name: "Sunlight",
+                usage: "weather",
+                data: ["lightPower": .number(740)]
+            )
+        )
         let didObserve = await waitUntil {
             store.descriptor?.value == 740
         }
@@ -95,12 +145,11 @@ struct SunlightStoreTests {
 
     @Test
     func observationClearsDescriptorWhenDeviceDisappears() async {
-        let streamBox = BufferedStreamBox<DeviceRecord?>()
+        let streamBox = BufferedStreamBox<Device?>()
         let store = SunlightStore(
-            uniqueId: "sun-12",
-            initialDevice: makeSunlightDevice(uniqueId: "sun-12", value: 180),
+            initialDescriptor: makeSunlightDescriptor(value: 180),
             dependencies: .init(
-                observeSunlight: { _ in streamBox.stream }
+                observeSunlight: { streamBox.stream }
             )
         )
 
@@ -113,26 +162,43 @@ struct SunlightStoreTests {
         #expect(store.descriptor == nil)
     }
 
-    private func makeSunlightDevice(
-        uniqueId: String,
+    private func makeSunlightRepositoryDevice(
+        id: String,
+        name: String,
+        usage: String,
+        data: [String: JSONValue],
+        metadata: [String: JSONValue]? = nil
+    ) -> Device {
+        Device(
+            id: id,
+            endpointId: 1,
+            name: name,
+            usage: usage,
+            kind: "sensor",
+            data: data,
+            metadata: metadata,
+            isFavorite: false,
+            dashboardOrder: nil,
+            updatedAt: Date()
+        )
+    }
+
+    private func makeSunlightDescriptor(
         value: Double,
         batteryDefect: Bool? = nil,
         batteryLevel: Double? = nil
-    ) -> DeviceRecord {
-        var data: [String: JSONValue] = ["lightPower": .number(value)]
-        if let batteryDefect {
-            data["battDefect"] = .bool(batteryDefect)
-        }
-        if let batteryLevel {
-            data["battery"] = .number(batteryLevel)
-        }
-
-        TestSupport.makeDevice(
-            uniqueId: uniqueId,
-            name: "Ensoleillement",
-            usage: "unknownSunSensor",
-            data: data,
-            metadata: ["lightPower": .object(["unit": .string("W/m2")])]
+    ) -> SunlightStore.Descriptor {
+        SunlightStore.Descriptor(
+            key: "lightPower",
+            value: value,
+            range: 0...1400,
+            unitSymbol: "W/m2",
+            batteryStatus: SunlightStore.Descriptor.BatteryStatus(
+                batteryDefectKey: batteryDefect == nil ? nil : "battDefect",
+                batteryDefect: batteryDefect,
+                batteryLevelKey: batteryLevel == nil ? nil : "battery",
+                batteryLevel: batteryLevel
+            )
         )
     }
 }

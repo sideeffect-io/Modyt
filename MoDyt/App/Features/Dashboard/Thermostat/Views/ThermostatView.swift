@@ -13,18 +13,18 @@ struct ThermostatView: View {
 
     @ViewBuilder
     private func thermostatContent(store: ThermostatStore) -> some View {
-        if let descriptor = store.descriptor {
+        if let state = store.state {
             VStack(spacing: 8) {
-                temperatureLabel(temperature: descriptor.temperature, unitSymbol: descriptor.unitSymbol)
+                temperatureLabel(temperature: state.temperature)
 
-                if let humidity = descriptor.humidity {
+                if let humidity = state.humidity {
                     humidityLabel(humidity: humidity)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .center)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Thermostat")
-            .accessibilityValue(accessibilityValue(for: descriptor))
+            .accessibilityValue(accessibilityValue(for: state))
         } else {
             Text("--")
                 .font(.system(size: 34, weight: .bold, design: .rounded))
@@ -35,16 +35,13 @@ struct ThermostatView: View {
     }
 
     @ViewBuilder
-    private func temperatureLabel(
-        temperature: TemperatureDescriptor?,
-        unitSymbol: String?
-    ) -> some View {
+    private func temperatureLabel(temperature: ThermostatStore.Descriptor.Temperature?) -> some View {
         if let temperature {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(temperature.value, format: .number.precision(.fractionLength(1)))
                     .font(.system(size: 34, weight: .bold, design: .rounded))
                     .monospacedDigit()
-                if let unitSymbol = unitSymbol ?? temperature.unitSymbol {
+                if let unitSymbol = temperature.unitSymbol {
                     Text(unitSymbol)
                         .font(.system(.title3, design: .rounded).weight(.semibold))
                         .foregroundStyle(.secondary)
@@ -59,7 +56,7 @@ struct ThermostatView: View {
         }
     }
 
-    private func humidityLabel(humidity: HumidityDescriptor) -> some View {
+    private func humidityLabel(humidity: ThermostatStore.Descriptor.Humidity) -> some View {
         HStack(spacing: 4) {
             Text("Humidity")
                 .font(.system(.caption2, design: .rounded).weight(.semibold))
@@ -75,19 +72,19 @@ struct ThermostatView: View {
         }
     }
 
-    private func accessibilityValue(for descriptor: ThermostatDescriptor) -> String {
+    private func accessibilityValue(for viewState: ThermostatStore.Descriptor) -> String {
         var components: [String] = []
 
-        if let temperature = descriptor.temperature {
+        if let temperature = viewState.temperature {
             let value = temperature.value.formatted(.number.precision(.fractionLength(1)))
-            if let unit = descriptor.unitSymbol ?? temperature.unitSymbol {
+            if let unit = temperature.unitSymbol {
                 components.append("Current \(value) \(unit)")
             } else {
                 components.append("Current \(value)")
             }
         }
 
-        if let humidity = descriptor.humidity {
+        if let humidity = viewState.humidity {
             let value = humidity.value.formatted(.number.precision(.fractionLength(0)))
             let unit = humidity.unitSymbol ?? "%"
             components.append("Humidity \(value)\(unit)")

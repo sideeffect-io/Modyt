@@ -3,14 +3,13 @@ import SwiftUI
 struct TemperatureStoreFactory {
     let make: @MainActor (String) -> TemperatureStore
 
-    static func live(environment: AppEnvironment) -> TemperatureStoreFactory {
-        TemperatureStoreFactory { uniqueId in
+    static func live(dependencies: DependencyBag) -> TemperatureStoreFactory {
+        let deviceRepository = dependencies.localStorageDatasources.deviceRepository
+
+        return TemperatureStoreFactory { uniqueId in
             TemperatureStore(
-                uniqueId: uniqueId,
                 dependencies: .init(
-                    observeTemperature: { uniqueId in
-                        await environment.repository.observeDevice(uniqueId: uniqueId)
-                    }
+                    observeTemperature: { await deviceRepository.observeByID(uniqueId) }
                 )
             )
         }
@@ -19,7 +18,7 @@ struct TemperatureStoreFactory {
 
 private struct TemperatureStoreFactoryKey: EnvironmentKey {
     static var defaultValue: TemperatureStoreFactory {
-        TemperatureStoreFactory.live(environment: .live())
+        TemperatureStoreFactory.live(dependencies: .live())
     }
 }
 

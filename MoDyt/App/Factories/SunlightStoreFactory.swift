@@ -3,14 +3,13 @@ import SwiftUI
 struct SunlightStoreFactory {
     let make: @MainActor (String) -> SunlightStore
 
-    static func live(environment: AppEnvironment) -> SunlightStoreFactory {
-        SunlightStoreFactory { uniqueId in
+    static func live(dependencies: DependencyBag) -> SunlightStoreFactory {
+        let deviceRepository = dependencies.localStorageDatasources.deviceRepository
+
+        return SunlightStoreFactory { uniqueId in
             SunlightStore(
-                uniqueId: uniqueId,
                 dependencies: .init(
-                    observeSunlight: { uniqueId in
-                        await environment.repository.observeDevice(uniqueId: uniqueId)
-                    }
+                    observeSunlight: { await deviceRepository.observeByID(uniqueId) }
                 )
             )
         }
@@ -19,7 +18,7 @@ struct SunlightStoreFactory {
 
 private struct SunlightStoreFactoryKey: EnvironmentKey {
     static var defaultValue: SunlightStoreFactory {
-        SunlightStoreFactory.live(environment: .live())
+        SunlightStoreFactory.live(dependencies: .live())
     }
 }
 

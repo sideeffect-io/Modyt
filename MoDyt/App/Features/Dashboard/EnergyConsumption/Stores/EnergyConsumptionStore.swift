@@ -4,27 +4,43 @@ import Observation
 @Observable
 @MainActor
 final class EnergyConsumptionStore {
+    struct Descriptor: Sendable, Equatable {
+        let key: String
+        let value: Double
+        let range: ClosedRange<Double>
+        let unitSymbol: String
+
+        var clampedValue: Double {
+            min(max(value, range.lowerBound), range.upperBound)
+        }
+
+        var normalizedValue: Double {
+            let span = range.upperBound - range.lowerBound
+            guard span > 0 else { return 0 }
+            return (clampedValue - range.lowerBound) / span
+        }
+    }
+
     struct Dependencies {
-        let observeEnergyConsumption: @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable
+        let observeEnergyConsumption: @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
 
         init(
-            observeEnergyConsumption: @escaping @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable
+            observeEnergyConsumption: @escaping @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
         ) {
             self.observeEnergyConsumption = observeEnergyConsumption
         }
     }
 
-    private(set) var descriptor: EnergyConsumptionDescriptor?
+    private(set) var descriptor: Descriptor?
 
     private let observationTask = TaskHandle()
     private let worker: Worker
 
     init(
         uniqueId: String,
-        initialDevice: DeviceRecord? = nil,
         dependencies: Dependencies
     ) {
-        self.descriptor = initialDevice?.energyConsumptionDescriptor()
+        self.descriptor = nil
         self.worker = Worker(
             uniqueId: uniqueId,
             observeEnergyConsumption: dependencies.observeEnergyConsumption
@@ -37,32 +53,29 @@ final class EnergyConsumptionStore {
         }
     }
 
-    private func applyIncomingDescriptor(_ descriptor: EnergyConsumptionDescriptor?) {
+    private func applyIncomingDescriptor(_ descriptor: Descriptor?) {
         guard self.descriptor != descriptor else { return }
         self.descriptor = descriptor
     }
 
     private actor Worker {
         private let uniqueId: String
-        private let observeEnergyConsumption: @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable
+        private let observeEnergyConsumption: @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
 
         init(
             uniqueId: String,
-            observeEnergyConsumption: @escaping @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable
+            observeEnergyConsumption: @escaping @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
         ) {
             self.uniqueId = uniqueId
             self.observeEnergyConsumption = observeEnergyConsumption
         }
 
         func observe(
-            onDescriptor: @escaping @Sendable (EnergyConsumptionDescriptor?) async -> Void
+            onDescriptor: @escaping @Sendable (Descriptor?) async -> Void
         ) async {
             let stream = await observeEnergyConsumption(uniqueId)
             for await device in stream {
                 guard !Task.isCancelled else { return }
-                if let device, device.uniqueId != uniqueId {
-                    continue
-                }
                 await onDescriptor(device?.energyConsumptionDescriptor())
             }
         }
@@ -72,11 +85,6 @@ final class EnergyConsumptionStore {
 private final class TaskHandle {
     var task: Task<Void, Never>? {
         didSet { oldValue?.cancel() }
-    }
-
-    func cancel() {
-        task?.cancel()
-        task = nil
     }
 
     deinit {

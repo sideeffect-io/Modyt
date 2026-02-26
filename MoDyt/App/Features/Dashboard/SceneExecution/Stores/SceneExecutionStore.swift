@@ -1,5 +1,13 @@
 import Observation
 
+enum SceneExecutionResult: Sendable, Equatable {
+    case acknowledged(statusCode: Int)
+    case rejected(statusCode: Int)
+    case sentWithoutAcknowledgement
+    case invalidSceneIdentifier
+    case sendFailed
+}
+
 struct SceneExecutionState: Sendable, Equatable {
     var isExecuting = false
     var feedback: SceneExecutionFeedback?

@@ -4,27 +4,60 @@ import Observation
 @Observable
 @MainActor
 final class SmokeStore {
+    struct Descriptor: Sendable, Equatable {
+        struct BatteryStatus: Sendable, Equatable {
+            let batteryDefectKey: String?
+            let batteryDefect: Bool?
+            let batteryLevelKey: String?
+            let batteryLevel: Double?
+
+            var hasBatteryIssue: Bool {
+                batteryDefect == true
+            }
+
+            var normalizedBatteryLevel: Double? {
+                guard let batteryLevel else { return nil }
+                return min(max(batteryLevel, 0), 100)
+            }
+        }
+
+        let smokeKey: String
+        let smokeDetected: Bool
+        let batteryStatus: BatteryStatus?
+
+        var batteryDefect: Bool? {
+            batteryStatus?.batteryDefect
+        }
+
+        var hasBatteryIssue: Bool {
+            batteryStatus?.hasBatteryIssue == true
+        }
+
+        var normalizedBatteryLevel: Double? {
+            batteryStatus?.normalizedBatteryLevel
+        }
+    }
+
     struct Dependencies {
-        let observeSmoke: @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable
+        let observeSmoke: @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
 
         init(
-            observeSmoke: @escaping @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable
+            observeSmoke: @escaping @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
         ) {
             self.observeSmoke = observeSmoke
         }
     }
 
-    private(set) var descriptor: SmokeDetectorDescriptor?
+    private(set) var descriptor: Descriptor?
 
     private let observationTask = TaskHandle()
     private let worker: Worker
 
     init(
         uniqueId: String,
-        initialDevice: DeviceRecord? = nil,
         dependencies: Dependencies
     ) {
-        self.descriptor = initialDevice?.smokeDetectorDescriptor()
+        self.descriptor = nil
         self.worker = Worker(
             uniqueId: uniqueId,
             observeSmoke: dependencies.observeSmoke
@@ -37,33 +70,30 @@ final class SmokeStore {
         }
     }
 
-    private func applyIncomingDescriptor(_ descriptor: SmokeDetectorDescriptor?) {
+    private func applyIncomingDescriptor(_ descriptor: Descriptor?) {
         guard self.descriptor != descriptor else { return }
         self.descriptor = descriptor
     }
 
     private actor Worker {
         private let uniqueId: String
-        private let observeSmoke: @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable
+        private let observeSmoke: @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
 
         init(
             uniqueId: String,
-            observeSmoke: @escaping @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable
+            observeSmoke: @escaping @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
         ) {
             self.uniqueId = uniqueId
             self.observeSmoke = observeSmoke
         }
 
         func observe(
-            onDescriptor: @escaping @Sendable (SmokeDetectorDescriptor?) async -> Void
+            onDescriptor: @escaping @Sendable (Descriptor?) async -> Void
         ) async {
             let stream = await observeSmoke(uniqueId)
             for await device in stream {
                 guard !Task.isCancelled else { return }
-                if let device, device.uniqueId != uniqueId {
-                    continue
-                }
-                await onDescriptor(device?.smokeDetectorDescriptor())
+                await onDescriptor(device?.smokeStoreDescriptor())
             }
         }
     }
@@ -72,11 +102,6 @@ final class SmokeStore {
 private final class TaskHandle {
     var task: Task<Void, Never>? {
         didSet { oldValue?.cancel() }
-    }
-
-    func cancel() {
-        task?.cancel()
-        task = nil
     }
 
     deinit {

@@ -13,7 +13,7 @@ struct TemperatureView: View {
     }
 
     @ViewBuilder
-    private func valueContent(descriptor: TemperatureDescriptor?) -> some View {
+    private func valueContent(descriptor: TemperatureStore.Descriptor?) -> some View {
         if let descriptor {
             let battery = BatteryPresentation(status: descriptor.batteryStatus)
             valueLabel(descriptor: descriptor)
@@ -70,7 +70,7 @@ struct TemperatureView: View {
         return colorScheme == .dark ? .orange : AppColors.ember
     }
 
-    private func valueLabel(descriptor: TemperatureDescriptor) -> some View {
+    private func valueLabel(descriptor: TemperatureStore.Descriptor) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
             Text(descriptor.value, format: .number.precision(.fractionLength(1)))
                 .font(.system(size: 40, weight: .bold, design: .rounded))
@@ -84,7 +84,7 @@ struct TemperatureView: View {
         }
     }
 
-    private func accessibilityValue(for descriptor: TemperatureDescriptor) -> String {
+    private func accessibilityValue(for descriptor: TemperatureStore.Descriptor) -> String {
         let valueText = descriptor.value.formatted(.number.precision(.fractionLength(1)))
         var parts = [valueText]
 
@@ -106,7 +106,7 @@ private struct BatteryPresentation {
     let batterySymbolName: String
     let statusSymbolName: String
 
-    init?(status: BatteryStatusDescriptor?) {
+    init?(status: TemperatureStore.Descriptor.BatteryStatus?) {
         guard let status else { return nil }
         guard let isBatteryOk = Self.isBatteryOk(status: status) else { return nil }
         isOk = isBatteryOk
@@ -115,17 +115,17 @@ private struct BatteryPresentation {
         statusSymbolName = isBatteryOk ? "checkmark" : "xmark"
     }
 
-    private static func isBatteryOk(status: BatteryStatusDescriptor) -> Bool? {
-        if status.batteryDefect == true {
+    private static func isBatteryOk(status: TemperatureStore.Descriptor.BatteryStatus) -> Bool? {
+        if status.defect == true {
             return false
         }
 
-        if let level = status.normalizedBatteryLevel {
+        if let level = status.normalizedLevel {
             return level > 20
         }
 
-        if let batteryDefect = status.batteryDefect {
-            return !batteryDefect
+        if let defect = status.defect {
+            return !defect
         }
 
         return nil

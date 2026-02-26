@@ -5,14 +5,43 @@ import DeltaDoreClient
 @Observable
 @MainActor
 final class HeatPumpStore {
+    struct Descriptor: Sendable, Equatable {
+        struct Temperature: Sendable, Equatable {
+            let value: Double
+            let unitSymbol: String?
+        }
+
+        let temperature: Temperature?
+        let setpointKey: String?
+        let setpoint: Double?
+        let setpointRange: ClosedRange<Double>
+        let setpointStep: Double
+        let unitSymbol: String?
+
+        var canAdjustSetpoint: Bool {
+            setpointKey != nil && setpoint != nil
+        }
+
+        func with(setpoint: Double) -> Descriptor {
+            Descriptor(
+                temperature: temperature,
+                setpointKey: setpointKey,
+                setpoint: setpoint,
+                setpointRange: setpointRange,
+                setpointStep: setpointStep,
+                unitSymbol: unitSymbol
+            )
+        }
+    }
+
     struct Dependencies {
-        let observeHeatPump: @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable
+        let observeHeatPump: @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
         let applyOptimisticChanges: @Sendable (String, [String: PayloadValue]) async -> Void
         let sendCommand: @Sendable (String, String, PayloadValue) async -> Void
         let now: () -> Date
 
         init(
-            observeHeatPump: @escaping @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable,
+            observeHeatPump: @escaping @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable,
             applyOptimisticChanges: @escaping @Sendable (String, [String: PayloadValue]) async -> Void,
             sendCommand: @escaping @Sendable (String, String, PayloadValue) async -> Void,
             now: @escaping () -> Date = Date.init
@@ -24,7 +53,7 @@ final class HeatPumpStore {
         }
     }
 
-    private(set) var descriptor: ThermostatDescriptor?
+    private(set) var descriptor: Descriptor?
 
     private let uniqueId: String
     private let dependencies: Dependencies
@@ -35,12 +64,10 @@ final class HeatPumpStore {
 
     init(
         uniqueId: String,
-        initialDevice: DeviceRecord? = nil,
         dependencies: Dependencies
     ) {
         self.uniqueId = uniqueId
         self.dependencies = dependencies
-        self.descriptor = initialDevice?.thermostatDescriptor()
         self.worker = Worker(
             uniqueId: uniqueId,
             observeHeatPump: dependencies.observeHeatPump,
@@ -78,15 +105,7 @@ final class HeatPumpStore {
 
         guard abs(resolved - current) > Self.setpointTolerance else { return }
 
-        descriptor = ThermostatDescriptor(
-            temperature: descriptor.temperature,
-            humidity: descriptor.humidity,
-            setpointKey: descriptor.setpointKey,
-            setpoint: resolved,
-            setpointRange: descriptor.setpointRange,
-            setpointStep: descriptor.setpointStep,
-            unitSymbol: descriptor.unitSymbol
-        )
+        descriptor = descriptor.with(setpoint: resolved)
         self.descriptor = descriptor
         registerPendingSetpoint(resolved)
 
@@ -103,13 +122,13 @@ final class HeatPumpStore {
         setSetpoint(base + direction * step)
     }
 
-    private func applyIncomingDescriptor(_ descriptor: ThermostatDescriptor?) {
+    private func applyIncomingDescriptor(_ descriptor: Descriptor?) {
         guard !shouldSuppressIncoming(descriptor) else { return }
         guard self.descriptor != descriptor else { return }
         self.descriptor = descriptor
     }
 
-    private func shouldSuppressIncoming(_ incoming: ThermostatDescriptor?) -> Bool {
+    private func shouldSuppressIncoming(_ incoming: Descriptor?) -> Bool {
         guard let pendingSetpoint else { return false }
         guard let incoming else {
             clearPendingSetpoint()
@@ -194,13 +213,13 @@ final class HeatPumpStore {
 
     private actor Worker {
         private let uniqueId: String
-        private let observeHeatPump: @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable
+        private let observeHeatPump: @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
         private let applyOptimisticChanges: @Sendable (String, [String: PayloadValue]) async -> Void
         private let sendCommand: @Sendable (String, String, PayloadValue) async -> Void
 
         init(
             uniqueId: String,
-            observeHeatPump: @escaping @Sendable (String) async -> any AsyncSequence<DeviceRecord?, Never> & Sendable,
+            observeHeatPump: @escaping @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable,
             applyOptimisticChanges: @escaping @Sendable (String, [String: PayloadValue]) async -> Void,
             sendCommand: @escaping @Sendable (String, String, PayloadValue) async -> Void
         ) {
@@ -211,15 +230,12 @@ final class HeatPumpStore {
         }
 
         func observe(
-            onDescriptor: @escaping @Sendable (ThermostatDescriptor?) async -> Void
+            onDescriptor: @escaping @Sendable (Descriptor?) async -> Void
         ) async {
             let stream = await observeHeatPump(uniqueId)
             for await device in stream {
                 guard !Task.isCancelled else { return }
-                if let device, device.uniqueId != uniqueId {
-                    continue
-                }
-                await onDescriptor(device?.thermostatDescriptor())
+                await onDescriptor(device?.heatPumpDescriptor())
             }
         }
 
@@ -233,11 +249,6 @@ final class HeatPumpStore {
 private final class TaskHandle {
     var task: Task<Void, Never>? {
         didSet { oldValue?.cancel() }
-    }
-
-    func cancel() {
-        task?.cancel()
-        task = nil
     }
 
     deinit {

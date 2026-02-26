@@ -6,6 +6,11 @@ actor ACKRepository {
         case timeout(transactionId: String)
     }
 
+    struct ACKMessage: Sendable, Equatable {
+        let ack: TydomAck
+        let metadata: TydomMessageMetadata
+    }
+
     struct Configuration: Sendable {
         var waitTimeout: Duration = .seconds(30)
         var retention: Duration = .seconds(300)
@@ -25,13 +30,12 @@ actor ACKRepository {
     }
 
     private struct StoredACK: Sendable, Equatable {
-        let ack: TydomAck
-        let metadata: TydomMessageMetadata
+        let message: ACKMessage
         let createdAt: Date
     }
 
     private struct PendingWaiter {
-        let continuation: CheckedContinuation<Void, Swift.Error>
+        let continuation: CheckedContinuation<ACKMessage, Swift.Error>
         let timeoutTask: Task<Void, Never>
     }
 
@@ -84,26 +88,33 @@ actor ACKRepository {
             return
         }
 
+        let message = ACKMessage(ack: ack, metadata: metadata)
         let createdAt = await dependencies.now()
-        if resumeWaiter(for: transactionId) == false {
+        if resumeWaiter(for: transactionId, message: message) == false {
             acksByTransactionId[transactionId] = StoredACK(
-                ack: ack,
-                metadata: metadata,
+                message: message,
                 createdAt: createdAt
             )
         }
     }
 
     func waitForACK(transactionId: String) async throws {
-        if acksByTransactionId.removeValue(forKey: transactionId) != nil {
-            return
+        _ = try await waitForACKMessage(transactionId: transactionId)
+    }
+
+    func waitForACKMessage(
+        transactionId: String,
+        timeout: Duration? = nil
+    ) async throws -> ACKMessage {
+        if let storedACK = acksByTransactionId.removeValue(forKey: transactionId) {
+            return storedACK.message
         }
 
-        let timeout = configuration.waitTimeout
+        let waitTimeout = timeout ?? configuration.waitTimeout
         let sleep = dependencies.sleep
 
-        try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Swift.Error>) in
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<ACKMessage, Swift.Error>) in
                 guard pendingWaitersByTransactionId[transactionId] == nil else {
                     dependencies.log("ACKRepository already has a waiter for transaction id '\(transactionId)'")
                     continuation.resume(throwing: CancellationError())
@@ -112,7 +123,7 @@ actor ACKRepository {
 
                 let timeoutTask = Task { [weak self] in
                     do {
-                        try await sleep(timeout)
+                        try await sleep(waitTimeout)
                     } catch {
                         return
                     }
@@ -159,13 +170,13 @@ actor ACKRepository {
         waiter.continuation.resume(throwing: CancellationError())
     }
 
-    private func resumeWaiter(for transactionId: String) -> Bool {
+    private func resumeWaiter(for transactionId: String, message: ACKMessage) -> Bool {
         guard let waiter = pendingWaitersByTransactionId.removeValue(forKey: transactionId) else {
             return false
         }
 
         waiter.timeoutTask.cancel()
-        waiter.continuation.resume()
+        waiter.continuation.resume(returning: message)
         return true
     }
 

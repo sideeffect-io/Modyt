@@ -3,14 +3,14 @@ import SwiftUI
 struct EnergyConsumptionStoreFactory {
     let make: @MainActor (String) -> EnergyConsumptionStore
 
-    static func live(environment: AppEnvironment) -> EnergyConsumptionStoreFactory {
-        EnergyConsumptionStoreFactory { uniqueId in
+    static func live(dependencies: DependencyBag) -> EnergyConsumptionStoreFactory {
+        let deviceRepository = dependencies.localStorageDatasources.deviceRepository
+
+        return EnergyConsumptionStoreFactory { uniqueId in
             EnergyConsumptionStore(
                 uniqueId: uniqueId,
                 dependencies: .init(
-                    observeEnergyConsumption: { uniqueId in
-                        await environment.repository.observeDevice(uniqueId: uniqueId)
-                    }
+                    observeEnergyConsumption: { await deviceRepository.observeByID($0) }
                 )
             )
         }
@@ -19,7 +19,7 @@ struct EnergyConsumptionStoreFactory {
 
 private struct EnergyConsumptionStoreFactoryKey: EnvironmentKey {
     static var defaultValue: EnergyConsumptionStoreFactory {
-        EnergyConsumptionStoreFactory.live(environment: .live())
+        EnergyConsumptionStoreFactory.live(dependencies: .live())
     }
 }
 

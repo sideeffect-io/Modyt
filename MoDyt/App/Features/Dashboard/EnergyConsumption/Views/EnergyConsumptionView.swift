@@ -11,7 +11,7 @@ struct EnergyConsumptionView: View {
         }
     }
 
-    private func energyContent(descriptor: EnergyConsumptionDescriptor?) -> some View {
+    private func energyContent(descriptor: EnergyConsumptionStore.Descriptor?) -> some View {
         let normalizedValue = descriptor?.normalizedValue ?? 0
         let valueLabel = descriptor.map { formattedValue($0.value) } ?? "--"
         let unitLabel = descriptor?.unitSymbol ?? "kWh"
@@ -45,7 +45,7 @@ struct EnergyConsumptionView: View {
         return value.formatted(.number.precision(.fractionLength(1)))
     }
 
-    private func accessibilityValue(descriptor: EnergyConsumptionDescriptor?) -> String {
+    private func accessibilityValue(descriptor: EnergyConsumptionStore.Descriptor?) -> String {
         guard let descriptor else { return "Unavailable" }
         let valueLabel = descriptor.value.formatted(.number.precision(.fractionLength(0...1)))
         return "\(valueLabel) \(descriptor.unitSymbol)"

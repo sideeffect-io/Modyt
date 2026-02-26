@@ -12,7 +12,7 @@ struct SunlightView: View {
         }
     }
 
-    private func sunlightContent(descriptor: SunlightDescriptor?) -> some View {
+    private func sunlightContent(descriptor: SunlightStore.Descriptor?) -> some View {
         let normalizedValue = descriptor?.normalizedValue ?? 0
         let valueLabel = descriptor.map { Int($0.value.rounded()).formatted() } ?? "--"
         let unitLabel = descriptor?.unitSymbol ?? "W/m2"
@@ -81,7 +81,7 @@ struct SunlightView: View {
         return colorScheme == .dark ? .orange : AppColors.ember
     }
 
-    private func accessibilityValue(descriptor: SunlightDescriptor?) -> String {
+    private func accessibilityValue(descriptor: SunlightStore.Descriptor?) -> String {
         guard let descriptor else { return "Unavailable" }
         let valueLabel = descriptor.value.formatted(.number.precision(.fractionLength(0)))
         var parts = ["\(valueLabel) \(descriptor.unitSymbol)"]
@@ -98,7 +98,7 @@ private struct BatteryPresentation {
     let batterySymbolName: String
     let statusSymbolName: String
 
-    init?(status: BatteryStatusDescriptor?) {
+    init?(status: SunlightStore.Descriptor.BatteryStatus?) {
         guard let status else { return nil }
         guard let isBatteryOk = Self.isBatteryOk(status: status) else { return nil }
         isOk = isBatteryOk
@@ -107,7 +107,7 @@ private struct BatteryPresentation {
         statusSymbolName = isBatteryOk ? "checkmark" : "xmark"
     }
 
-    private static func isBatteryOk(status: BatteryStatusDescriptor) -> Bool? {
+    private static func isBatteryOk(status: SunlightStore.Descriptor.BatteryStatus) -> Bool? {
         if status.batteryDefect == true {
             return false
         }

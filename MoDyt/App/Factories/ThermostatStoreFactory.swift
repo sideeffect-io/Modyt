@@ -3,14 +3,14 @@ import SwiftUI
 struct ThermostatStoreFactory {
     let make: @MainActor (String) -> ThermostatStore
 
-    static func live(environment: AppEnvironment) -> ThermostatStoreFactory {
-        ThermostatStoreFactory { uniqueId in
+    static func live(dependencies: DependencyBag) -> ThermostatStoreFactory {
+        let deviceRepository = dependencies.localStorageDatasources.deviceRepository
+
+        return ThermostatStoreFactory { uniqueId in
             ThermostatStore(
                 uniqueId: uniqueId,
                 dependencies: .init(
-                    observeThermostat: { uniqueId in
-                        await environment.repository.observeDevice(uniqueId: uniqueId)
-                    }
+                    observeThermostat: { await deviceRepository.observeByID($0).removeDuplicates() }
                 )
             )
         }
@@ -19,7 +19,7 @@ struct ThermostatStoreFactory {
 
 private struct ThermostatStoreFactoryKey: EnvironmentKey {
     static var defaultValue: ThermostatStoreFactory {
-        ThermostatStoreFactory.live(environment: .live())
+        ThermostatStoreFactory.live(dependencies: .live())
     }
 }
 

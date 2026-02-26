@@ -45,7 +45,7 @@ struct HeatPumpView: View {
     }
 
     @ViewBuilder
-    private func readOnlyContent(for descriptor: ThermostatDescriptor) -> some View {
+    private func readOnlyContent(for descriptor: HeatPumpStore.Descriptor) -> some View {
         if let temperature = descriptor.temperature {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(temperature.value, format: .number.precision(.fractionLength(1)))
@@ -75,7 +75,7 @@ private struct HeatPumpSetpointControl: View {
     let range: ClosedRange<Double>
     let step: Double
     let unitSymbol: String?
-    let ambientTemperature: TemperatureDescriptor?
+    let ambientTemperature: HeatPumpStore.Descriptor.Temperature?
     let onCommit: (Double) -> Void
     let onIncrement: () -> Void
     let onDecrement: () -> Void

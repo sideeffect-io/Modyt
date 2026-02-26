@@ -12,7 +12,7 @@ struct SmokeView: View {
         }
     }
 
-    private func smokeContent(descriptor: SmokeDetectorDescriptor?) -> some View {
+    private func smokeContent(descriptor: SmokeStore.Descriptor?) -> some View {
         let state = SmokeState(descriptor: descriptor)
         let battery = BatteryPresentation(descriptor: descriptor)
 
@@ -87,7 +87,7 @@ struct SmokeView: View {
         return colorScheme == .dark ? .orange : AppColors.ember
     }
 
-    private func accessibilityValue(descriptor: SmokeDetectorDescriptor?) -> String {
+    private func accessibilityValue(descriptor: SmokeStore.Descriptor?) -> String {
         let state = SmokeState(descriptor: descriptor)
         var parts: [String] = [state.title, state.detail]
         if let battery = BatteryPresentation(descriptor: descriptor) {
@@ -103,7 +103,7 @@ private struct SmokeState {
     let symbolName: String
     let tint: Color
 
-    init(descriptor: SmokeDetectorDescriptor?) {
+    init(descriptor: SmokeStore.Descriptor?) {
         guard let descriptor else {
             title = "--"
             detail = "Status unavailable"
@@ -141,7 +141,7 @@ private struct BatteryPresentation {
     let batterySymbolName: String
     let statusSymbolName: String
 
-    init?(descriptor: SmokeDetectorDescriptor?) {
+    init?(descriptor: SmokeStore.Descriptor?) {
         guard let descriptor else { return nil }
         guard let isBatteryOk = Self.isBatteryOk(descriptor: descriptor) else { return nil }
         isOk = isBatteryOk
@@ -150,7 +150,7 @@ private struct BatteryPresentation {
         statusSymbolName = isBatteryOk ? "checkmark" : "xmark"
     }
 
-    private static func isBatteryOk(descriptor: SmokeDetectorDescriptor) -> Bool? {
+    private static func isBatteryOk(descriptor: SmokeStore.Descriptor) -> Bool? {
         if descriptor.batteryDefect == true {
             return false
         }

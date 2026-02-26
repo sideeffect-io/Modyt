@@ -1,27 +1,11 @@
 import Foundation
 import DeltaDoreClient
 
-enum SceneExecutionResult: Sendable, Equatable {
-    case acknowledged(statusCode: Int)
-    case rejected(statusCode: Int)
-    case sentWithoutAcknowledgement
-    case invalidSceneIdentifier
-    case sendFailed
-}
-
 struct AppEnvironment: Sendable {
-    let dependencyBag: DependencyBag
-    let client: DeltaDoreClient
     let repository: DeviceDatasource
-    let sceneRepository: SceneDatasource
     let groupRepository: GroupDatasource
-    let dashboardRepository: DashboardRepository
     let newShutterRepository: ShutterRepository
-    let requestRefreshAll: @Sendable () async -> Void
     let sendDeviceCommand: @Sendable (String, String, PayloadValue) async -> Void
-    let executeScene: @Sendable (String) async -> SceneExecutionResult
-    let requestDisconnect: @Sendable () async -> Void
-    let now: @Sendable () -> Date
     let log: @Sendable (String) -> Void
 
     static func live() -> AppEnvironment {
@@ -38,24 +22,11 @@ struct AppEnvironment: Sendable {
             log: log
         )
         let client = dependencyBag.client
-        let sceneExecutionStatusStore = SceneExecutionStatusStore()
         let repository = DeviceDatasource(databasePath: databaseURL.path, log: log)
-        let sceneRepository = SceneDatasource(
-            databasePath: databaseURL.path,
-            log: log,
-            trackMessage: { message in
-                await sceneExecutionStatusStore.track(message)
-            }
-        )
         let groupRepository = GroupDatasource(
             databasePath: databaseURL.path,
             deviceRepository: repository,
             log: log
-        )
-        let dashboardRepository = DashboardRepository(
-            deviceRepository: repository,
-            sceneRepository: sceneRepository,
-            groupRepository: groupRepository
         )
         let newShutterRepository = ShutterRepository(
             databasePath: databaseURL.path,
@@ -63,14 +34,6 @@ struct AppEnvironment: Sendable {
             log: log
         )
         let commandTransactionIdGenerator = CommandTransactionIdGenerator(now: now)
-
-        let requestRefreshAll: @Sendable () async -> Void = {
-            do {
-                try await client.send(text: TydomCommand.refreshAll().request)
-            } catch {
-                log("AppEnvironment refresh failed error=\(error)")
-            }
-        }
 
         let sendDeviceCommand: @Sendable (String, String, PayloadValue) async -> Void = { uniqueId, key, value in
             if GroupRecord.isGroupUniqueId(uniqueId) {
@@ -147,150 +110,13 @@ struct AppEnvironment: Sendable {
             }
         }
 
-        let executeScene: @Sendable (String) async -> SceneExecutionResult = { uniqueId in
-            let sceneId = Int(uniqueId) ?? SceneRecord.sceneId(from: uniqueId)
-            guard let sceneId else {
-                return .invalidSceneIdentifier
-            }
-
-            let transactionId = TydomCommand.defaultTransactionId(now: now)
-            let command = TydomCommand.activateScenario(
-                String(sceneId),
-                transactionId: transactionId
-            )
-
-            do {
-                try await client.send(text: command.request)
-            } catch {
-                log("AppEnvironment scene execution send failed uniqueId=\(uniqueId) tx=\(transactionId) error=\(error)")
-                return .sendFailed
-            }
-
-            let status = await sceneExecutionStatusStore.awaitScenarioExecutionStatus(
-                for: transactionId,
-                timeout: .seconds(3)
-            )
-
-            switch status {
-            case .success(let statusCode):
-                return .acknowledged(statusCode: statusCode)
-            case .failure(let statusCode):
-                return .rejected(statusCode: statusCode)
-            case .timedOut:
-                return .sentWithoutAcknowledgement
-            }
-        }
-
-        let requestDisconnect: @Sendable () async -> Void = {
-            await client.disconnectCurrentConnection()
-            await client.clearStoredData()
-        }
-
         return AppEnvironment(
-            dependencyBag: dependencyBag,
-            client: client,
             repository: repository,
-            sceneRepository: sceneRepository,
             groupRepository: groupRepository,
-            dashboardRepository: dashboardRepository,
             newShutterRepository: newShutterRepository,
-            requestRefreshAll: requestRefreshAll,
             sendDeviceCommand: sendDeviceCommand,
-            executeScene: executeScene,
-            requestDisconnect: requestDisconnect,
-            now: now,
             log: log
         )
-    }
-}
-
-private enum SceneExecutionGatewayStatus: Sendable, Equatable {
-    case success(Int)
-    case failure(Int)
-    case timedOut
-}
-
-private actor SceneExecutionStatusStore {
-    private struct PendingReply {
-        let continuation: CheckedContinuation<SceneExecutionGatewayStatus, Never>
-        let timeoutTask: Task<Void, Never>
-    }
-
-    private var pendingReplies: [String: PendingReply] = [:]
-    private var bufferedReplies: [String: SceneExecutionGatewayStatus] = [:]
-    private var bufferedOrder: [String] = []
-    private let maxBufferedReplies = 32
-
-    func track(_ message: TydomMessage) {
-        guard case .ack(let ack, let metadata) = message else { return }
-        guard let uriOrigin = metadata.uriOrigin,
-              uriOrigin.hasPrefix("/scenarios/"),
-              uriOrigin != "/scenarios/file" else { return }
-        guard let transactionId = metadata.transactionId else { return }
-
-        let status: SceneExecutionGatewayStatus = if (200..<300).contains(ack.statusCode) {
-            .success(ack.statusCode)
-        } else {
-            .failure(ack.statusCode)
-        }
-
-        resolve(transactionId: transactionId, status: status)
-    }
-
-    func awaitScenarioExecutionStatus(
-        for transactionId: String,
-        timeout: Duration
-    ) async -> SceneExecutionGatewayStatus {
-        if let buffered = bufferedReplies.removeValue(forKey: transactionId) {
-            bufferedOrder.removeAll { $0 == transactionId }
-            return buffered
-        }
-
-        return await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                let timeoutTask = Task { [transactionId, timeout] in
-                    do {
-                        try await Task.sleep(for: timeout)
-                    } catch {
-                        return
-                    }
-                    self.resolveIfPending(transactionId: transactionId, status: .timedOut)
-                }
-                pendingReplies[transactionId] = PendingReply(
-                    continuation: continuation,
-                    timeoutTask: timeoutTask
-                )
-            }
-        } onCancel: {
-            Task { [transactionId] in
-                await self.resolveIfPending(transactionId: transactionId, status: .timedOut)
-            }
-        }
-    }
-
-    private func resolveIfPending(transactionId: String, status: SceneExecutionGatewayStatus) {
-        guard pendingReplies[transactionId] != nil else { return }
-        resolve(transactionId: transactionId, status: status)
-    }
-
-    private func resolve(transactionId: String, status: SceneExecutionGatewayStatus) {
-        if let pending = pendingReplies.removeValue(forKey: transactionId) {
-            pending.timeoutTask.cancel()
-            pending.continuation.resume(returning: status)
-            return
-        }
-
-        bufferedReplies[transactionId] = status
-        bufferedOrder.removeAll { $0 == transactionId }
-        bufferedOrder.append(transactionId)
-        trimBufferedRepliesIfNeeded()
-    }
-
-    private func trimBufferedRepliesIfNeeded() {
-        while bufferedOrder.count > maxBufferedReplies {
-            let oldest = bufferedOrder.removeFirst()
-            bufferedReplies.removeValue(forKey: oldest)
-        }
     }
 }
 
@@ -324,28 +150,6 @@ private func deviceCommandValue(from value: PayloadValue) -> TydomCommand.Device
         return .string(text)
     case .null, .object, .array:
         return .null
-    }
-}
-
-private extension JSONValue {
-    var traceString: String {
-        switch self {
-        case .string(let text):
-            return "\"\(text)\""
-        case .number(let number):
-            if number.rounded(.towardZero) == number {
-                return String(Int(number))
-            }
-            return String(number)
-        case .bool(let flag):
-            return flag ? "true" : "false"
-        case .null:
-            return "null"
-        case .object(let value):
-            return "object(keys:\(value.keys.sorted()))"
-        case .array(let value):
-            return "array(count:\(value.count))"
-        }
     }
 }
 
