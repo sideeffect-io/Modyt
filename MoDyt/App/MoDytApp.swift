@@ -37,8 +37,8 @@ struct MoDytApp: App {
         
         
         
-        dashboardStoreFactory = .live(environment: environment)
-        dashboardDeviceCardStoreFactory = .live(environment: environment)
+        dashboardStoreFactory = .live(dependencies: dependencyBag)
+        dashboardDeviceCardStoreFactory = .live(dependencies: dependencyBag)
         sceneExecutionStoreFactory = .live(environment: environment)
         shutterStoreFactory = .live(environment: environment)
         lightStoreFactory = .live(environment: environment)

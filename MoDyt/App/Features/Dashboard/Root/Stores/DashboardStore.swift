@@ -3,22 +3,22 @@ import Observation
 import DeltaDoreClient
 
 struct DashboardState: Sendable, Equatable {
-    var favoriteDevices: [DashboardDeviceDescription]
+    var favorites: [FavoriteItem]
 
-    static let initial = DashboardState(favoriteDevices: [])
+    static let initial = DashboardState(favorites: [])
 }
 
 enum DashboardEvent: Sendable {
     case onAppear
-    case favoritesUpdated([DashboardDeviceDescription])
+    case favoritesUpdated([FavoriteItem])
     case refreshRequested
-    case reorderFavorite(String, String)
+    case reorderFavorite(FavoriteType, FavoriteType)
 }
 
 enum DashboardEffect: Sendable, Equatable {
     case startObservingFavorites
     case refreshAll
-    case reorderFavorite(String, String)
+    case reorderFavorite(FavoriteType, FavoriteType)
 }
 
 enum DashboardReducer {
@@ -30,14 +30,14 @@ enum DashboardReducer {
         case .onAppear:
             effects = [.startObservingFavorites]
 
-        case .favoritesUpdated(let favoriteDevices):
-            state.favoriteDevices = favoriteDevices
+        case .favoritesUpdated(let favorites):
+            state.favorites = favorites
 
         case .refreshRequested:
             effects = [.refreshAll]
 
-        case .reorderFavorite(let sourceId, let targetId):
-            effects = [.reorderFavorite(sourceId, targetId)]
+        case .reorderFavorite(let source, let target):
+            effects = [.reorderFavorite(source, target)]
         }
 
         return (state, effects)
@@ -48,8 +48,8 @@ enum DashboardReducer {
 @MainActor
 final class DashboardStore {
     struct Dependencies {
-        let observeFavorites: @Sendable () async -> any AsyncSequence<[DashboardDeviceDescription], Never> & Sendable
-        let reorderFavorite: @Sendable (String, String) async -> Void
+        let observeFavorites: @Sendable () async -> any AsyncSequence<[FavoriteItem], Never> & Sendable
+        let reorderFavorite: @Sendable (FavoriteType, FavoriteType) async -> Void
         let refreshAll: @Sendable () async -> Void
     }
 
@@ -90,8 +90,8 @@ final class DashboardStore {
                         taskHandle?.task = nil
                     }
                 }
-                await worker.observeFavorites { [weak self] favoriteDevices in
-                    await self?.send(.favoritesUpdated(favoriteDevices))
+                await worker.observeFavorites { [weak self] favorites in
+                    await self?.send(.favoritesUpdated(favorites))
                 }
             }
 
@@ -100,21 +100,21 @@ final class DashboardStore {
                 await worker.refreshAll()
             }
 
-        case .reorderFavorite(let sourceId, let targetId):
+        case .reorderFavorite(let source, let target):
             Task { [worker] in
-                await worker.reorderFavorite(sourceId: sourceId, targetId: targetId)
+                await worker.reorderFavorite(source: source, target: target)
             }
         }
     }
 
     private actor Worker {
-        private let observeFavoritesSource: @Sendable () async -> any AsyncSequence<[DashboardDeviceDescription], Never> & Sendable
-        private let reorderFavoriteAction: @Sendable (String, String) async -> Void
+        private let observeFavoritesSource: @Sendable () async -> any AsyncSequence<[FavoriteItem], Never> & Sendable
+        private let reorderFavoriteAction: @Sendable (FavoriteType, FavoriteType) async -> Void
         private let refreshAllAction: @Sendable () async -> Void
 
         init(
-            observeFavorites: @escaping @Sendable () async -> any AsyncSequence<[DashboardDeviceDescription], Never> & Sendable,
-            reorderFavorite: @escaping @Sendable (String, String) async -> Void,
+            observeFavorites: @escaping @Sendable () async -> any AsyncSequence<[FavoriteItem], Never> & Sendable,
+            reorderFavorite: @escaping @Sendable (FavoriteType, FavoriteType) async -> Void,
             refreshAll: @escaping @Sendable () async -> Void
         ) {
             self.observeFavoritesSource = observeFavorites
@@ -123,12 +123,12 @@ final class DashboardStore {
         }
 
         func observeFavorites(
-            onUpdate: @escaping @Sendable ([DashboardDeviceDescription]) async -> Void
+            onUpdate: @escaping @Sendable ([FavoriteItem]) async -> Void
         ) async {
             let stream = await observeFavoritesSource()
-            for await favoriteDevices in stream {
+            for await favorites in stream {
                 guard !Task.isCancelled else { return }
-                await onUpdate(favoriteDevices)
+                await onUpdate(favorites)
             }
         }
 
@@ -136,8 +136,8 @@ final class DashboardStore {
             await refreshAllAction()
         }
 
-        func reorderFavorite(sourceId: String, targetId: String) async {
-            await reorderFavoriteAction(sourceId, targetId)
+        func reorderFavorite(source: FavoriteType, target: FavoriteType) async {
+            await reorderFavoriteAction(source, target)
         }
     }
 }

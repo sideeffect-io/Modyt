@@ -8,35 +8,35 @@ enum DashboardDeviceCardEvent: Sendable {
 @MainActor
 final class DashboardDeviceCardStore {
     struct Dependencies {
-        let toggleFavorite: @Sendable (String) async -> Void
+        let toggleFavorite: @Sendable (FavoriteType) async -> Void
     }
 
-    private let uniqueId: String
+    private let favoriteType: FavoriteType
     private let worker: Worker
 
-    init(uniqueId: String, dependencies: Dependencies) {
-        self.uniqueId = uniqueId
+    init(favoriteType: FavoriteType, dependencies: Dependencies) {
+        self.favoriteType = favoriteType
         self.worker = Worker(toggleFavorite: dependencies.toggleFavorite)
     }
 
     func send(_ event: DashboardDeviceCardEvent) {
         switch event {
         case .favoriteTapped:
-            Task { [worker, uniqueId] in
-                await worker.toggleFavorite(uniqueId)
+            Task { [worker, favoriteType] in
+                await worker.toggleFavorite(favoriteType)
             }
         }
     }
 
     private actor Worker {
-        private let toggleFavoriteAction: @Sendable (String) async -> Void
+        private let toggleFavoriteAction: @Sendable (FavoriteType) async -> Void
 
-        init(toggleFavorite: @escaping @Sendable (String) async -> Void) {
+        init(toggleFavorite: @escaping @Sendable (FavoriteType) async -> Void) {
             self.toggleFavoriteAction = toggleFavorite
         }
 
-        func toggleFavorite(_ uniqueId: String) async {
-            await toggleFavoriteAction(uniqueId)
+        func toggleFavorite(_ favoriteType: FavoriteType) async {
+            await toggleFavoriteAction(favoriteType)
         }
     }
 }

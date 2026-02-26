@@ -1,24 +1,19 @@
 import SwiftUI
+import DeltaDoreClient
 
 struct DashboardStoreFactory {
     let make: @MainActor () -> DashboardStore
 
-    static func live(environment: AppEnvironment) -> DashboardStoreFactory {
-        DashboardStoreFactory {
+    static func live(dependencies: DependencyBag) -> DashboardStoreFactory {
+        let favoritesRepository = dependencies.localStorageDatasources.favoritesRepository
+        let gatewayClient = dependencies.gatewayClient
+
+        return DashboardStoreFactory {
             DashboardStore(
                 dependencies: .init(
-                    observeFavorites: {
-                        await environment.dashboardRepository.observeFavorites()
-                    },
-                    reorderFavorite: { sourceId, targetId in
-                        await environment.dashboardRepository.reorderFavorite(
-                            from: sourceId,
-                            to: targetId
-                        )
-                    },
-                    refreshAll: {
-                        await environment.requestRefreshAll()
-                    }
+                    observeFavorites: { await favoritesRepository.observeAll() },
+                    reorderFavorite: { source, target in try? await favoritesRepository.reorder(source, target) },
+                    refreshAll: { try? await gatewayClient.send(text: TydomCommand.refreshAll().request) }
                 )
             )
         }
@@ -27,7 +22,7 @@ struct DashboardStoreFactory {
 
 private struct DashboardStoreFactoryKey: EnvironmentKey {
     static var defaultValue: DashboardStoreFactory {
-        DashboardStoreFactory.live(environment: .live())
+        DashboardStoreFactory.live(dependencies: .live())
     }
 }
 

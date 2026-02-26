@@ -1,23 +1,16 @@
 import SwiftUI
-import DeltaDoreClient
 
 struct DashboardDeviceCardStoreFactory {
-    let make: @MainActor (String) -> DashboardDeviceCardStore
+    let make: @MainActor (FavoriteType) -> DashboardDeviceCardStore
 
-    static func live(environment: AppEnvironment) -> DashboardDeviceCardStoreFactory {
-        DashboardDeviceCardStoreFactory { uniqueId in
+    static func live(dependencies: DependencyBag) -> DashboardDeviceCardStoreFactory {
+        let favoritesRepository = dependencies.localStorageDatasources.favoritesRepository
+
+        return DashboardDeviceCardStoreFactory { favoriteType in
             DashboardDeviceCardStore(
-                uniqueId: uniqueId,
+                favoriteType: favoriteType,
                 dependencies: .init(
-                    toggleFavorite: { uniqueId in
-                        if SceneRecord.isSceneUniqueId(uniqueId) {
-                            await environment.sceneRepository.toggleFavorite(uniqueId: uniqueId)
-                        } else if GroupRecord.isGroupUniqueId(uniqueId) {
-                            await environment.groupRepository.toggleFavorite(uniqueId: uniqueId)
-                        } else {
-                            await environment.repository.toggleFavorite(uniqueId: uniqueId)
-                        }
-                    }
+                    toggleFavorite: { favoriteType in try? await favoritesRepository.toggleFavorite(favoriteType) }
                 )
             )
         }
@@ -26,7 +19,7 @@ struct DashboardDeviceCardStoreFactory {
 
 private struct DashboardDeviceCardStoreFactoryKey: EnvironmentKey {
     static var defaultValue: DashboardDeviceCardStoreFactory {
-        DashboardDeviceCardStoreFactory.live(environment: .live())
+        DashboardDeviceCardStoreFactory.live(dependencies: .live())
     }
 }
 

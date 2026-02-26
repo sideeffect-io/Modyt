@@ -4,14 +4,14 @@ import UIKit
 struct DashboardDeviceCardView: View {
     @Environment(\.dashboardDeviceCardStoreFactory) private var dashboardDeviceCardStoreFactory
 
-    let device: DashboardDeviceDescription
+    let favorite: FavoriteItem
 
     private let dashboardCardHeight: CGFloat = 194
 
     var body: some View {
-        WithStoreView(factory: { dashboardDeviceCardStoreFactory.make(device.uniqueId) }) { store in
+        WithStoreView(factory: { dashboardDeviceCardStoreFactory.make(favorite.type) }) { store in
             cardContent(
-                for: device,
+                for: favorite,
                 onFavoriteTapped: { store.send(.favoriteTapped) }
             )
         }
@@ -19,30 +19,30 @@ struct DashboardDeviceCardView: View {
 
     @ViewBuilder
     private func cardContent(
-        for device: DashboardDeviceDescription,
+        for favorite: FavoriteItem,
         onFavoriteTapped: @escaping () -> Void
     ) -> some View {
-        if device.isScene {
-            sceneCardContent(for: device, onFavoriteTapped: onFavoriteTapped)
+        if favorite.isScene {
+            sceneCardContent(for: favorite, onFavoriteTapped: onFavoriteTapped)
         } else {
-            deviceCardContent(for: device, onFavoriteTapped: onFavoriteTapped)
+            deviceCardContent(for: favorite, onFavoriteTapped: onFavoriteTapped)
         }
     }
 
     private func sceneCardContent(
-        for device: DashboardDeviceDescription,
+        for favorite: FavoriteItem,
         onFavoriteTapped: @escaping () -> Void
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             cardHeader(
-                for: device,
+                for: favorite,
                 titleLineLimit: 2,
                 onFavoriteTapped: onFavoriteTapped
             )
 
             Spacer(minLength: 0)
 
-            SceneExecutionView(uniqueId: device.uniqueId)
+            SceneExecutionView(uniqueId: favorite.sceneExecutionUniqueId)
                 .frame(maxWidth: .infinity, alignment: .center)
         }
         .padding(16)
@@ -51,23 +51,23 @@ struct DashboardDeviceCardView: View {
     }
 
     private func deviceCardContent(
-        for device: DashboardDeviceDescription,
+        for favorite: FavoriteItem,
         onFavoriteTapped: @escaping () -> Void
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             cardHeader(
-                for: device,
+                for: favorite,
                 titleLineLimit: 1,
                 onFavoriteTapped: onFavoriteTapped
             )
 
-            if let passiveLabel = passiveBodyLabel(for: device) {
+            if let passiveLabel = passiveBodyLabel(for: favorite) {
                 Text(passiveLabel)
                     .font(.system(.caption, design: .rounded))
                     .foregroundStyle(.secondary)
             }
 
-            controlContent(for: device)
+            controlContent(for: favorite)
         }
         .padding(16)
         .frame(height: dashboardCardHeight, alignment: .top)
@@ -75,16 +75,16 @@ struct DashboardDeviceCardView: View {
     }
 
     private func cardHeader(
-        for device: DashboardDeviceDescription,
+        for favorite: FavoriteItem,
         titleLineLimit: Int,
         onFavoriteTapped: @escaping () -> Void
     ) -> some View {
         HStack(alignment: .center, spacing: 10) {
-            Image(systemName: iconSystemName(for: device))
+            Image(systemName: iconSystemName(for: favorite))
                 .font(.system(size: 22, weight: .semibold))
                 .frame(width: 36, height: 36)
 
-            Text(device.name)
+            Text(favorite.name)
                 .font(.system(.headline, design: .rounded))
                 .lineLimit(titleLineLimit)
                 .minimumScaleFactor(0.9)
@@ -98,58 +98,58 @@ struct DashboardDeviceCardView: View {
         }
     }
 
-    private func iconSystemName(for device: DashboardDeviceDescription) -> String {
-        if device.isScene {
-            return sceneSymbolName(picto: device.scenePicto, type: device.sceneType)
+    private func iconSystemName(for favorite: FavoriteItem) -> String {
+        if favorite.isScene {
+            return sceneSymbolName(picto: nil, type: nil)
         }
 
-        switch device.group {
+        switch favorite.group {
         case .boiler:
-            return isHeatPumpDevice(device) ? "heat.waves" : "thermometer"
+            return isHeatPumpDevice(favorite) ? "heat.waves" : "thermometer"
         case .weather:
             return "sun.max.fill"
         case .smoke:
             return smokeSymbolName()
         default:
-            return device.group.symbolName
+            return favorite.group.symbolName
         }
     }
 
     @ViewBuilder
-    private func controlContent(for device: DashboardDeviceDescription) -> some View {
-        if supportsActiveControls(for: device) {
-            switch device.group {
+    private func controlContent(for favorite: FavoriteItem) -> some View {
+        if supportsActiveControls(for: favorite) {
+            switch favorite.group {
             case .shutter:
-                if device.shutterUniqueIds.isEmpty {
+                if favorite.shutterUniqueIds.isEmpty {
                     Text("Shutters unavailable")
                         .font(.system(.caption, design: .rounded))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 } else {
                     ShutterView(
-                        shutterUniqueIds: device.shutterUniqueIds,
+                        shutterUniqueIds: favorite.shutterUniqueIds,
                         layout: .regular
                     )
                 }
             case .light:
-                LightView(uniqueId: device.uniqueId)
+                LightView(uniqueId: favorite.controlUniqueId)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             case .thermo:
-                TemperatureView(uniqueId: device.uniqueId)
+                TemperatureView(uniqueId: favorite.controlUniqueId)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             case .boiler:
-                if isHeatPumpDevice(device) {
-                    HeatPumpView(uniqueId: device.uniqueId)
+                if isHeatPumpDevice(favorite) {
+                    HeatPumpView(uniqueId: favorite.controlUniqueId)
                 } else {
-                    ThermostatView(uniqueId: device.uniqueId)
+                    ThermostatView(uniqueId: favorite.controlUniqueId)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 }
             case .weather:
-                SunlightView(uniqueId: device.uniqueId)
+                SunlightView(uniqueId: favorite.controlUniqueId)
             case .energy:
-                EnergyConsumptionView(uniqueId: device.uniqueId)
+                EnergyConsumptionView(uniqueId: favorite.controlUniqueId)
             case .smoke:
-                SmokeView(uniqueId: device.uniqueId)
+                SmokeView(uniqueId: favorite.controlUniqueId)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             default:
                 EmptyView()
@@ -159,12 +159,12 @@ struct DashboardDeviceCardView: View {
         }
     }
 
-    private func supportsActiveControls(for device: DashboardDeviceDescription) -> Bool {
-        if device.source == .group {
-            return device.usage == "light" || device.usage == "shutter"
+    private func supportsActiveControls(for favorite: FavoriteItem) -> Bool {
+        if favorite.isGroup {
+            return favorite.usage == .light || favorite.usage == .shutter
         }
 
-        switch device.group {
+        switch favorite.group {
         case .shutter, .light, .thermo, .boiler, .weather, .energy, .smoke:
             return true
         default:
@@ -172,12 +172,12 @@ struct DashboardDeviceCardView: View {
         }
     }
 
-    private func passiveBodyLabel(for device: DashboardDeviceDescription) -> String? {
-        guard !supportsActiveControls(for: device) else { return nil }
-        if device.source == .group {
-            return device.usage.capitalized
+    private func passiveBodyLabel(for favorite: FavoriteItem) -> String? {
+        guard !supportsActiveControls(for: favorite) else { return nil }
+        if favorite.isGroup {
+            return favorite.usage.rawValue.capitalized
         }
-        return device.group.title
+        return favorite.group.title
     }
 
     private func smokeSymbolName() -> String {
@@ -194,13 +194,13 @@ struct DashboardDeviceCardView: View {
         return "exclamationmark.triangle.fill"
     }
 
-    private func isHeatPumpDevice(_ device: DashboardDeviceDescription) -> Bool {
-        let usage = device.usage.lowercased()
+    private func isHeatPumpDevice(_ favorite: FavoriteItem) -> Bool {
+        let usage = favorite.usage.rawValue.lowercased()
         if usage == "sh_hvac" || usage == "aeraulic" || usage.contains("hvac") {
             return true
         }
 
-        let name = device.name.lowercased()
+        let name = favorite.name.lowercased()
         return name.localizedStandardContains("pompe")
             || name.localizedStandardContains("heat pump")
     }

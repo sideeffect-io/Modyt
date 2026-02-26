@@ -9,15 +9,17 @@ struct LightStoreFactory {
                 uniqueId: uniqueId,
                 dependencies: .init(
                     observeLight: { uniqueId in
-                        if GroupRecord.isGroupUniqueId(uniqueId) {
-                            return await environment.groupRepository.observeGroupControlDevice(uniqueId: uniqueId)
+                        if isGroupIdentifier(uniqueId) {
+                            let groupUniqueId = makeGroupUniqueId(from: uniqueId)
+                            return await environment.groupRepository.observeGroupControlDevice(uniqueId: groupUniqueId)
                         }
                         return await environment.repository.observeDevice(uniqueId: uniqueId)
                     },
                     applyOptimisticChanges: { uniqueId, changes in
-                        if GroupRecord.isGroupUniqueId(uniqueId) {
+                        if isGroupIdentifier(uniqueId) {
+                            let groupUniqueId = makeGroupUniqueId(from: uniqueId)
                             await environment.groupRepository.applyOptimisticControlChanges(
-                                uniqueId: uniqueId,
+                                uniqueId: groupUniqueId,
                                 changes: changes
                             )
                         } else {
@@ -28,11 +30,30 @@ struct LightStoreFactory {
                         }
                     },
                     sendCommand: { uniqueId, key, value in
-                        await environment.sendDeviceCommand(uniqueId, key, value)
+                        let commandUniqueID = isGroupIdentifier(uniqueId)
+                            ? makeGroupUniqueId(from: uniqueId)
+                            : uniqueId
+                        await environment.sendDeviceCommand(commandUniqueID, key, value)
                     }
                 )
             )
         }
+    }
+
+    private static func isGroupIdentifier(_ uniqueId: String) -> Bool {
+        GroupRecord.isGroupUniqueId(uniqueId) || Int(uniqueId) != nil
+    }
+
+    private static func makeGroupUniqueId(from uniqueId: String) -> String {
+        if GroupRecord.isGroupUniqueId(uniqueId) {
+            return uniqueId
+        }
+
+        guard let groupID = Int(uniqueId) else {
+            return uniqueId
+        }
+
+        return GroupRecord.uniqueId(for: groupID)
     }
 }
 

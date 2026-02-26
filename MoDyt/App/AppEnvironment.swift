@@ -148,7 +148,8 @@ struct AppEnvironment: Sendable {
         }
 
         let executeScene: @Sendable (String) async -> SceneExecutionResult = { uniqueId in
-            guard let sceneId = SceneRecord.sceneId(from: uniqueId) else {
+            let sceneId = Int(uniqueId) ?? SceneRecord.sceneId(from: uniqueId)
+            guard let sceneId else {
                 return .invalidSceneIdentifier
             }
 
