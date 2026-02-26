@@ -171,7 +171,7 @@ actor DomainRepository<Item: DomainType, Upsert: DomainUpsert> {
         try refreshSnapshotAndNotify()
     }
 
-    func setFavorite(_ id: String, _ isFavorite: Bool) throws {
+    func toggleFavorite(_ id: String) throws {
         let dao = try requireDAO()
         let snapshot = try currentSnapshot()
 
@@ -179,19 +179,12 @@ actor DomainRepository<Item: DomainType, Upsert: DomainUpsert> {
             return
         }
 
-        let alreadyFavorite = item.isFavorite
-        if alreadyFavorite == isFavorite {
-            if isFavorite, item.dashboardOrder == nil {
-                item.dashboardOrder = nextFavoriteDashboardOrder(from: snapshot)
-            } else {
-                return
-            }
-        } else if isFavorite {
-            item.isFavorite = true
-            item.dashboardOrder = nextFavoriteDashboardOrder(from: snapshot)
-        } else {
+        if item.isFavorite {
             item.isFavorite = false
             item.dashboardOrder = nil
+        } else {
+            item.isFavorite = true
+            item.dashboardOrder = nextFavoriteDashboardOrder(from: snapshot)
         }
 
         item.updatedAt = now()

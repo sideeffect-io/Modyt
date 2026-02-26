@@ -1,22 +1,15 @@
 import Foundation
 import Observation
 
-struct DeviceGroupSection: Sendable, Equatable, Identifiable {
-    let group: DeviceGroup
-    let devices: [DeviceRecord]
-
-    var id: DeviceGroup { group }
-}
-
 struct DevicesState: Sendable, Equatable {
-    var groupedDevices: [DeviceGroupSection]
+    var groupedDevices: [RepositoryDeviceTypeSection]
 
     static let initial = DevicesState(groupedDevices: [])
 }
 
 enum DevicesEvent: Sendable {
     case onAppear
-    case devicesUpdated([DeviceGroupSection])
+    case devicesUpdated([RepositoryDeviceTypeSection])
     case refreshRequested
     case toggleFavorite(String)
 }
@@ -54,7 +47,7 @@ enum DevicesReducer {
 @MainActor
 final class DevicesStore {
     struct Dependencies {
-        let observeDevices: @Sendable () async -> AsyncStream<[DeviceRecord]>
+        let observeDevices: @Sendable () async -> any AsyncSequence<[RepositoryDeviceTypeSection], Never> & Sendable
         let toggleFavorite: @Sendable (String) async -> Void
         let refreshAll: @Sendable () async -> Void
     }
@@ -114,12 +107,12 @@ final class DevicesStore {
     }
 
     private actor Worker {
-        private let observeDevicesSource: @Sendable () async -> AsyncStream<[DeviceRecord]>
+        private let observeDevicesSource: @Sendable () async -> any AsyncSequence<[RepositoryDeviceTypeSection], Never> & Sendable
         private let toggleFavoriteAction: @Sendable (String) async -> Void
         private let refreshAllAction: @Sendable () async -> Void
 
         init(
-            observeDevices: @escaping @Sendable () async -> AsyncStream<[DeviceRecord]>,
+            observeDevices: @escaping @Sendable () async -> any AsyncSequence<[RepositoryDeviceTypeSection], Never> & Sendable,
             toggleFavorite: @escaping @Sendable (String) async -> Void,
             refreshAll: @escaping @Sendable () async -> Void
         ) {
@@ -129,12 +122,12 @@ final class DevicesStore {
         }
 
         func observeDevices(
-            onUpdate: @escaping @Sendable ([DeviceGroupSection]) async -> Void
+            onUpdate: @escaping @Sendable ([RepositoryDeviceTypeSection]) async -> Void
         ) async {
             let stream = await observeDevicesSource()
-            for await devices in stream {
+            for await groupedDevices in stream {
                 guard !Task.isCancelled else { return }
-                await onUpdate(deriveGroupedDevices(from: devices))
+                await onUpdate(groupedDevices)
             }
         }
 
@@ -160,14 +153,5 @@ private final class TaskHandle {
 
     deinit {
         task?.cancel()
-    }
-}
-
-private func deriveGroupedDevices(from devices: [DeviceRecord]) -> [DeviceGroupSection] {
-    let grouped = Dictionary(grouping: devices, by: { $0.group })
-    return DeviceGroup.allCases.compactMap { group -> DeviceGroupSection? in
-        guard let sectionDevices = grouped[group] else { return nil }
-        let sorted = sectionDevices.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        return DeviceGroupSection(group: group, devices: sorted)
     }
 }

@@ -2,14 +2,14 @@ import Foundation
 import Observation
 
 struct GroupsState: Sendable, Equatable {
-    var groups: [GroupRecord]
+    var groups: [Group]
 
     static let initial = GroupsState(groups: [])
 }
 
 enum GroupsEvent: Sendable {
     case onAppear
-    case groupsUpdated([GroupRecord])
+    case groupsUpdated([Group])
     case refreshRequested
     case toggleFavorite(String)
 }
@@ -47,7 +47,7 @@ enum GroupsReducer {
 @MainActor
 final class GroupsStore {
     struct Dependencies {
-        let observeGroups: @Sendable () async -> AsyncStream<[GroupRecord]>
+        let observeGroups: @Sendable () async -> any AsyncSequence<[Group], Never> & Sendable
         let toggleFavorite: @Sendable (String) async -> Void
         let refreshAll: @Sendable () async -> Void
     }
@@ -107,12 +107,12 @@ final class GroupsStore {
     }
 
     private actor Worker {
-        private let observeGroupsSource: @Sendable () async -> AsyncStream<[GroupRecord]>
+        private let observeGroupsSource: @Sendable () async -> any AsyncSequence<[Group], Never> & Sendable
         private let toggleFavoriteAction: @Sendable (String) async -> Void
         private let refreshAllAction: @Sendable () async -> Void
 
         init(
-            observeGroups: @escaping @Sendable () async -> AsyncStream<[GroupRecord]>,
+            observeGroups: @escaping @Sendable () async -> any AsyncSequence<[Group], Never> & Sendable,
             toggleFavorite: @escaping @Sendable (String) async -> Void,
             refreshAll: @escaping @Sendable () async -> Void
         ) {
@@ -122,7 +122,7 @@ final class GroupsStore {
         }
 
         func observeGroups(
-            onUpdate: @escaping @Sendable ([GroupRecord]) async -> Void
+            onUpdate: @escaping @Sendable ([Group]) async -> Void
         ) async {
             let stream = await observeGroupsSource()
             for await groups in stream {

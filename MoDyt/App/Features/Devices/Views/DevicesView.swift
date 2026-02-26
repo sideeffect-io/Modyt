@@ -10,15 +10,15 @@ struct DevicesView: View {
                     listHeader
                         .padding(.horizontal, 2)
 
-                    ForEach(store.state.groupedDevices) { section in
+                    ForEach(store.state.groupedDevices, id: \.usage.rawValue) { section in
                         VStack(alignment: .leading, spacing: 12) {
                             sectionHeader(section)
 
                             LazyVStack(spacing: 10) {
-                                ForEach(section.devices) { device in
+                                ForEach(section.items, id: \.id) { device in
                                     DeviceRow(
                                         device: device,
-                                        onToggleFavorite: { store.send(.toggleFavorite(device.uniqueId)) }
+                                        onToggleFavorite: { store.send(.toggleFavorite(device.id)) }
                                     )
                                 }
                             }
@@ -69,21 +69,21 @@ struct DevicesView: View {
         .glassCard(cornerRadius: 24, interactive: false)
     }
 
-    private func sectionHeader(_ section: DeviceGroupSection) -> some View {
-        let favoritesInSection = section.devices.filter(\.isFavorite).count
+    private func sectionHeader(_ section: RepositoryDeviceTypeSection) -> some View {
+        let favoritesInSection = section.items.filter(\.isFavorite).count
 
         return HStack(spacing: 8) {
             Label {
-                Text(section.group.title)
+                Text(section.usage.title)
                     .font(.system(.headline, design: .rounded).weight(.semibold))
             } icon: {
-                Image(systemName: section.group.symbolName)
+                Image(systemName: section.usage.symbolName)
                     .font(.system(size: 15, weight: .bold))
             }
 
             Spacer()
 
-            Text("\(section.devices.count)")
+            Text("\(section.items.count)")
                 .font(.system(.caption, design: .rounded).weight(.semibold))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 10)
@@ -98,6 +98,48 @@ struct DevicesView: View {
                     .padding(.vertical, 5)
                     .background(Color.yellow.opacity(0.15), in: Capsule())
             }
+        }
+    }
+}
+
+private extension Usage {
+    var title: String {
+        switch self {
+        case .shutter: return "Shutters"
+        case .window: return "Windows"
+        case .door: return "Doors"
+        case .garage: return "Garage"
+        case .gate: return "Gates"
+        case .light: return "Lights"
+        case .energy: return "Energy"
+        case .smoke: return "Smoke"
+        case .boiler: return "Boilers"
+        case .alarm: return "Alarm"
+        case .weather: return "Weather"
+        case .water: return "Water"
+        case .thermo: return "Thermo"
+        case .scene: return "Scenes"
+        case .other: return "Other"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .shutter: return "window.horizontal"
+        case .window: return "rectangle.portrait"
+        case .door: return "door.left.hand.open"
+        case .garage: return "car"
+        case .gate: return "square.split.2x2"
+        case .light: return "lightbulb"
+        case .energy: return "bolt"
+        case .smoke: return "smoke"
+        case .boiler: return "thermometer"
+        case .alarm: return "shield.lefthalf.filled"
+        case .weather: return "cloud.sun"
+        case .water: return "drop"
+        case .thermo: return "thermometer.medium"
+        case .scene: return "play.rectangle"
+        case .other: return "square.dashed"
         }
     }
 }

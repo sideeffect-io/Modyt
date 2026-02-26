@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SceneRow: View {
-    let scene: SceneRecord
+    let scene: Scene
     let onToggleFavorite: () -> Void
 
     var body: some View {

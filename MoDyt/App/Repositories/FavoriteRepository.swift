@@ -74,19 +74,35 @@ actor FavoriteRepository {
         try await sceneRepository.applyDashboardOrders(sceneOrders)
     }
 
-    func setFavorite(_ favoriteType: FavoriteType, _ isFavorite: Bool) async throws {
+    func toggleFavorite(_ favoriteType: FavoriteType) async throws {
         switch favoriteType {
         case .device(let deviceID):
-            try await deviceRepository.setFavorite(deviceID, isFavorite)
+            try await deviceRepository.toggleFavorite(deviceID)
         case .group(let groupID, _):
-            try await groupRepository.setFavorite(groupID, isFavorite)
+            try await groupRepository.toggleFavorite(groupID)
         case .scene(let sceneID):
-            try await sceneRepository.setFavorite(sceneID, isFavorite)
+            try await sceneRepository.toggleFavorite(sceneID)
         }
     }
 
     func removeFavorite(_ favoriteType: FavoriteType) async throws {
-        try await setFavorite(favoriteType, false)
+        switch favoriteType {
+        case .device(let deviceID):
+            guard let device = try await deviceRepository.get(deviceID), device.isFavorite else {
+                return
+            }
+            try await deviceRepository.toggleFavorite(deviceID)
+        case .group(let groupID, _):
+            guard let group = try await groupRepository.get(groupID), group.isFavorite else {
+                return
+            }
+            try await groupRepository.toggleFavorite(groupID)
+        case .scene(let sceneID):
+            guard let scene = try await sceneRepository.get(sceneID), scene.isFavorite else {
+                return
+            }
+            try await sceneRepository.toggleFavorite(sceneID)
+        }
     }
     
     static func mergeFavorites(

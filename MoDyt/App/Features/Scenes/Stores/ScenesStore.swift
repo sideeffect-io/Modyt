@@ -2,14 +2,14 @@ import Foundation
 import Observation
 
 struct ScenesState: Sendable, Equatable {
-    var scenes: [SceneRecord]
+    var scenes: [Scene]
 
     static let initial = ScenesState(scenes: [])
 }
 
 enum ScenesEvent: Sendable {
     case onAppear
-    case scenesUpdated([SceneRecord])
+    case scenesUpdated([Scene])
     case refreshRequested
     case toggleFavorite(String)
 }
@@ -47,7 +47,7 @@ enum ScenesReducer {
 @MainActor
 final class ScenesStore {
     struct Dependencies {
-        let observeScenes: @Sendable () async -> AsyncStream<[SceneRecord]>
+        let observeScenes: @Sendable () async -> any AsyncSequence<[Scene], Never> & Sendable
         let toggleFavorite: @Sendable (String) async -> Void
         let refreshAll: @Sendable () async -> Void
     }
@@ -107,12 +107,12 @@ final class ScenesStore {
     }
 
     private actor Worker {
-        private let observeScenesSource: @Sendable () async -> AsyncStream<[SceneRecord]>
+        private let observeScenesSource: @Sendable () async -> any AsyncSequence<[Scene], Never> & Sendable
         private let toggleFavoriteAction: @Sendable (String) async -> Void
         private let refreshAllAction: @Sendable () async -> Void
 
         init(
-            observeScenes: @escaping @Sendable () async -> AsyncStream<[SceneRecord]>,
+            observeScenes: @escaping @Sendable () async -> any AsyncSequence<[Scene], Never> & Sendable,
             toggleFavorite: @escaping @Sendable (String) async -> Void,
             refreshAll: @escaping @Sendable () async -> Void
         ) {
@@ -122,7 +122,7 @@ final class ScenesStore {
         }
 
         func observeScenes(
-            onUpdate: @escaping @Sendable ([SceneRecord]) async -> Void
+            onUpdate: @escaping @Sendable ([Scene]) async -> Void
         ) async {
             let stream = await observeScenesSource()
             for await scenes in stream {

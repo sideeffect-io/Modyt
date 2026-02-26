@@ -1,15 +1,17 @@
 import SwiftUI
+import DeltaDoreClient
 
 struct SettingsStoreFactory {
     let make: @MainActor () -> SettingsStore
 
-    static func live(environment: AppEnvironment) -> SettingsStoreFactory {
+    static func live(dependencies: DependencyBag) -> SettingsStoreFactory {
         SettingsStoreFactory {
             SettingsStore(
                 dependencies: .init(
                     requestDisconnect: {
-                        await environment.requestDisconnect()
-                        return .success(())
+                        await dependencies.gatewayClient.disconnectCurrentConnection()
+                        await dependencies.gatewayClient.clearStoredData()
+                        await dependencies.localStorageDatasources.tydomMessageRepositoryRouter.clearRepositories()
                     }
                 )
             )
@@ -18,7 +20,7 @@ struct SettingsStoreFactory {
 }
 
 private struct SettingsStoreFactoryKey: EnvironmentKey {
-    static var defaultValue: SettingsStoreFactory { .live(environment: .live()) }
+    static var defaultValue: SettingsStoreFactory { .live(dependencies: .live()) }
 }
 
 extension EnvironmentValues {

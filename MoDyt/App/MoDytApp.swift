@@ -8,8 +8,11 @@ struct MoDytApp: App {
     private let appCoordinatorStoreFactory: AppRootStoreFactory
     private let authenticationStoreFactory: AuthenticationStoreFactory
     private let mainStoreFactory: MainStoreFactory
-    // to migrate
-    private let rootTabStoreFactory: RootTabStoreFactory // to remove
+    private let devicesStoreFactory: DevicesStoreFactory
+    private let scenesStoreFactory: ScenesStoreFactory
+    private let groupsStoreFactory: GroupsStoreFactory
+    private let settingsStoreFactory: SettingsStoreFactory
+    
     private let dashboardStoreFactory: DashboardStoreFactory
     private let dashboardDeviceCardStoreFactory: DashboardDeviceCardStoreFactory
     private let sceneExecutionStoreFactory: SceneExecutionStoreFactory
@@ -21,17 +24,19 @@ struct MoDytApp: App {
     private let temperatureStoreFactory: TemperatureStoreFactory
     private let heatPumpStoreFactory: HeatPumpStoreFactory
     private let thermostatStoreFactory: ThermostatStoreFactory
-    private let devicesStoreFactory: DevicesStoreFactory
-    private let scenesStoreFactory: ScenesStoreFactory
-    private let groupsStoreFactory: GroupsStoreFactory
-    private let settingsStoreFactory: SettingsStoreFactory
+
 
     init() {
         appCoordinatorStoreFactory = .live
         authenticationStoreFactory = .live(dependencies: dependencyBag)
         mainStoreFactory = .live(dependencies: dependencyBag)
-        // to migrate
-        rootTabStoreFactory = .live(environment: environment) // to remove
+        devicesStoreFactory = .live(dependencies: dependencyBag)
+        scenesStoreFactory = .live(dependencies: dependencyBag)
+        groupsStoreFactory = .live(dependencies: dependencyBag)
+        settingsStoreFactory = .live(dependencies: dependencyBag)
+        
+        
+        
         dashboardStoreFactory = .live(environment: environment)
         dashboardDeviceCardStoreFactory = .live(environment: environment)
         sceneExecutionStoreFactory = .live(environment: environment)
@@ -43,10 +48,7 @@ struct MoDytApp: App {
         temperatureStoreFactory = .live(environment: environment)
         heatPumpStoreFactory = .live(environment: environment)
         thermostatStoreFactory = .live(environment: environment)
-        devicesStoreFactory = .live(environment: environment)
-        scenesStoreFactory = .live(environment: environment)
-        groupsStoreFactory = .live(environment: environment)
-        settingsStoreFactory = .live(environment: environment)
+
     }
 
     var body: some SwiftUI.Scene {
@@ -55,7 +57,6 @@ struct MoDytApp: App {
                 .environment(\.appCoordinatorStoreFactory, appCoordinatorStoreFactory)
                 .environment(\.authenticationStoreFactory, authenticationStoreFactory)
                 .environment(\.mainStoreFactory, mainStoreFactory)
-                .environment(\.rootTabStoreFactory, rootTabStoreFactory)
                 .environment(\.dashboardStoreFactory, dashboardStoreFactory)
                 .environment(\.dashboardDeviceCardStoreFactory, dashboardDeviceCardStoreFactory)
                 .environment(\.sceneExecutionStoreFactory, sceneExecutionStoreFactory)

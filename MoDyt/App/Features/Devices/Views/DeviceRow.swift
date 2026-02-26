@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct DeviceRow: View {
-    let device: DeviceRecord
+    let device: Device
     let onToggleFavorite: () -> Void
 
     var body: some View {

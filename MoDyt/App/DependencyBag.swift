@@ -32,5 +32,5 @@ let databaseURL: URL = {
     if !fileManager.fileExists(atPath: directory.path) {
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
     }
-    return directory.appendingPathComponent("tydom.sqlite")
+    return directory.appendingPathComponent("tydom.sqlite.v2")
 }()

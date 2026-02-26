@@ -9,6 +9,15 @@ extension TydomConnection {
         logger: @escaping @Sendable (String) -> Void,
         rawFrameHandler: @escaping @Sendable (TydomRawMessage) -> Void = { _ in }
     ) -> AsyncStream<TydomMessage> {
+        let hydrator = TydomMessageHydrator.live(log: logger)
+        let effectExecutor = TydomMessageEffectExecutor.live(
+            sendCommand: { [weak self] command in
+                guard let self else { return }
+                try await self.send(command)
+            },
+            log: logger
+        )
+
         return AsyncStream { continuation in
             let task = Task { [weak self] in
                 guard let self else {
@@ -36,7 +45,11 @@ extension TydomConnection {
                             ?? String(decoding: raw.payload.prefix(200), as: UTF8.self)
                         logger("Decode parse error=\(parseError) bytes=\(raw.payload.count) snippet=\(snippet)")
                     }
-                    continuation.yield(.raw(TydomMessageMetadata(raw: raw)))
+
+                    let decoded = TydomMessageDecoder.decode(raw)
+                    let hydrated = await hydrator.hydrate(decoded)
+                    await effectExecutor.enqueue(hydrated.effects)
+                    continuation.yield(hydrated.message)
                 }
                 continuation.finish()
             }

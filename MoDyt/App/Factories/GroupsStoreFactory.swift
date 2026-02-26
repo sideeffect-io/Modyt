@@ -1,21 +1,18 @@
 import SwiftUI
+import DeltaDoreClient
 
 struct GroupsStoreFactory {
     let make: @MainActor () -> GroupsStore
 
-    static func live(environment: AppEnvironment) -> GroupsStoreFactory {
+    static func live(dependencies: DependencyBag) -> GroupsStoreFactory {
         GroupsStoreFactory {
-            GroupsStore(
+            let groupRepository = dependencies.localStorageDatasources.groupRepository
+
+            return GroupsStore(
                 dependencies: .init(
-                    observeGroups: {
-                        await environment.groupRepository.observeGroups()
-                    },
-                    toggleFavorite: { uniqueId in
-                        await environment.groupRepository.toggleFavorite(uniqueId: uniqueId)
-                    },
-                    refreshAll: {
-                        await environment.requestRefreshAll()
-                    }
+                    observeGroups: { await groupRepository.observeAll() },
+                    toggleFavorite: { groupID in try? await groupRepository.toggleFavorite(groupID) },
+                    refreshAll: { try? await dependencies.gatewayClient.send(text: TydomCommand.refreshAll().request) }
                 )
             )
         }
@@ -24,7 +21,7 @@ struct GroupsStoreFactory {
 
 private struct GroupsStoreFactoryKey: EnvironmentKey {
     static var defaultValue: GroupsStoreFactory {
-        GroupsStoreFactory.live(environment: .live())
+        .live(dependencies: .live())
     }
 }
 

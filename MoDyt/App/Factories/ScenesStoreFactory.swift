@@ -1,21 +1,19 @@
 import SwiftUI
+import DeltaDoreClient
 
 struct ScenesStoreFactory {
     let make: @MainActor () -> ScenesStore
 
-    static func live(environment: AppEnvironment) -> ScenesStoreFactory {
-        ScenesStoreFactory {
+    static func live(dependencies: DependencyBag) -> ScenesStoreFactory {
+        let sceneRepository = dependencies.localStorageDatasources.sceneRepository
+        let gatewayClient = dependencies.gatewayClient
+
+        return ScenesStoreFactory {
             ScenesStore(
                 dependencies: .init(
-                    observeScenes: {
-                        await environment.sceneRepository.observeScenes()
-                    },
-                    toggleFavorite: { uniqueId in
-                        await environment.sceneRepository.toggleFavorite(uniqueId: uniqueId)
-                    },
-                    refreshAll: {
-                        await environment.requestRefreshAll()
-                    }
+                    observeScenes: { await sceneRepository.observeAll() },
+                    toggleFavorite: { sceneID in try? await sceneRepository.toggleFavorite(sceneID) },
+                    refreshAll: { try? await gatewayClient.send(text: TydomCommand.refreshAll().request) }
                 )
             )
         }
@@ -24,7 +22,7 @@ struct ScenesStoreFactory {
 
 private struct ScenesStoreFactoryKey: EnvironmentKey {
     static var defaultValue: ScenesStoreFactory {
-        ScenesStoreFactory.live(environment: .live())
+        ScenesStoreFactory.live(dependencies: .live())
     }
 }
 

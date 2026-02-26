@@ -19,10 +19,10 @@ struct GroupsView: View {
                         .padding(.vertical, 24)
                     } else {
                         LazyVStack(spacing: 10) {
-                            ForEach(store.state.groups) { group in
+                            ForEach(store.state.groups, id: \.id) { group in
                                 GroupRow(
                                     group: group,
-                                    onToggleFavorite: { store.send(.toggleFavorite(group.uniqueId)) }
+                                    onToggleFavorite: { store.send(.toggleFavorite(group.id)) }
                                 )
                             }
                         }

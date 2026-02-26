@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct GroupRow: View {
-    let group: GroupRecord
+    let group: Group
     let onToggleFavorite: () -> Void
 
     var body: some View {

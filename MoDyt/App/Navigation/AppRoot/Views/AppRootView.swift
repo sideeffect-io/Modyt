@@ -22,8 +22,8 @@ struct AppRootView: View {
             })
 
         case .runtime:
-            RootTabView(
-                onDidDisconnect: {
+            MainView(
+                onDisconnected: {
                     store.send(.didDisconnect)
                 }
             )

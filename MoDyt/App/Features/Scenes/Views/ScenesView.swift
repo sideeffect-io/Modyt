@@ -19,10 +19,10 @@ struct ScenesView: View {
                         .padding(.vertical, 24)
                     } else {
                         LazyVStack(spacing: 10) {
-                            ForEach(store.state.scenes) { scene in
+                            ForEach(store.state.scenes, id: \.id) { scene in
                                 SceneRow(
                                     scene: scene,
-                                    onToggleFavorite: { store.send(.toggleFavorite(scene.uniqueId)) }
+                                    onToggleFavorite: { store.send(.toggleFavorite(scene.id)) }
                                 )
                             }
                         }

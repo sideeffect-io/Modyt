@@ -1,21 +1,19 @@
 import SwiftUI
+import DeltaDoreClient
 
 struct DevicesStoreFactory {
     let make: @MainActor () -> DevicesStore
 
-    static func live(environment: AppEnvironment) -> DevicesStoreFactory {
-        DevicesStoreFactory {
+    static func live(dependencies: DependencyBag) -> DevicesStoreFactory {
+        let deviceRepository = dependencies.localStorageDatasources.deviceRepository
+        let gatewayClient = dependencies.gatewayClient
+
+        return DevicesStoreFactory {
             DevicesStore(
                 dependencies: .init(
-                    observeDevices: {
-                        await environment.repository.observeDevices()
-                    },
-                    toggleFavorite: { uniqueId in
-                        await environment.repository.toggleFavorite(uniqueId: uniqueId)
-                    },
-                    refreshAll: {
-                        await environment.requestRefreshAll()
-                    }
+                    observeDevices: { await deviceRepository.observeGroupedByType() },
+                    toggleFavorite: { deviceID in try? await deviceRepository.toggleFavorite(deviceID) },
+                    refreshAll: { try? await gatewayClient.send(text: TydomCommand.refreshAll().request) }
                 )
             )
         }
@@ -24,7 +22,7 @@ struct DevicesStoreFactory {
 
 private struct DevicesStoreFactoryKey: EnvironmentKey {
     static var defaultValue: DevicesStoreFactory {
-        DevicesStoreFactory.live(environment: .live())
+        DevicesStoreFactory.live(dependencies: .live())
     }
 }
 
