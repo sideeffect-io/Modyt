@@ -103,10 +103,14 @@ struct DashboardDeviceCardView: View {
             return sceneSymbolName(picto: nil, type: nil)
         }
 
-        switch favorite.group {
-        case .boiler:
-            return isHeatPumpDevice(favorite) ? "heat.waves" : "thermometer"
-        case .weather:
+        switch favorite.controlKind {
+        case .heatPump:
+            return "heat.waves"
+        case .thermostat:
+            return "thermometer"
+        case .temperature:
+            return "thermometer.medium"
+        case .sunlight:
             return "sun.max.fill"
         case .smoke:
             return smokeSymbolName()
@@ -118,7 +122,7 @@ struct DashboardDeviceCardView: View {
     @ViewBuilder
     private func controlContent(for favorite: FavoriteItem) -> some View {
         if supportsActiveControls(for: favorite) {
-            switch favorite.group {
+            switch favorite.controlKind {
             case .shutter:
                 if favorite.shutterUniqueIds.isEmpty {
                     Text("Shutters unavailable")
@@ -134,20 +138,20 @@ struct DashboardDeviceCardView: View {
             case .light:
                 LightView(uniqueId: favorite.controlUniqueId)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            case .thermo:
+            case .temperature:
                 TemperatureView(uniqueId: favorite.controlUniqueId)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            case .boiler:
-                if isHeatPumpDevice(favorite) {
-                    HeatPumpView(uniqueId: favorite.controlUniqueId)
-                } else {
-                    ThermostatView(uniqueId: favorite.controlUniqueId)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                }
-            case .weather:
+            case .thermostat:
+                ThermostatView(uniqueId: favorite.controlUniqueId)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            case .heatPump:
+                HeatPumpView(uniqueId: favorite.controlUniqueId)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            case .sunlight:
                 SunlightView(uniqueId: favorite.controlUniqueId)
-            case .energy:
+            case .energyConsumption:
                 EnergyConsumptionView(uniqueId: favorite.controlUniqueId)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             case .smoke:
                 SmokeView(uniqueId: favorite.controlUniqueId)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -161,11 +165,11 @@ struct DashboardDeviceCardView: View {
 
     private func supportsActiveControls(for favorite: FavoriteItem) -> Bool {
         if favorite.isGroup {
-            return favorite.usage == .light || favorite.usage == .shutter
+            return favorite.controlKind == .light || favorite.controlKind == .shutter
         }
 
-        switch favorite.group {
-        case .shutter, .light, .thermo, .boiler, .weather, .energy, .smoke:
+        switch favorite.controlKind {
+        case .shutter, .light, .temperature, .thermostat, .heatPump, .sunlight, .energyConsumption, .smoke:
             return true
         default:
             return false
@@ -192,16 +196,5 @@ struct DashboardDeviceCardView: View {
         }
 
         return "exclamationmark.triangle.fill"
-    }
-
-    private func isHeatPumpDevice(_ favorite: FavoriteItem) -> Bool {
-        let usage = favorite.usage.rawValue.lowercased()
-        if usage == "sh_hvac" || usage == "aeraulic" || usage.contains("hvac") {
-            return true
-        }
-
-        let name = favorite.name.lowercased()
-        return name.localizedStandardContains("pompe")
-            || name.localizedStandardContains("heat pump")
     }
 }

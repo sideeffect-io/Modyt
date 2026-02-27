@@ -15,7 +15,10 @@ struct ThermostatView: View {
     private func thermostatContent(store: ThermostatStore) -> some View {
         if let state = store.state {
             VStack(spacing: 8) {
-                temperatureLabel(temperature: state.temperature)
+                temperatureLabel(
+                    temperature: state.temperature,
+                    setpoint: state.setpoint
+                )
 
                 if let humidity = state.humidity {
                     humidityLabel(humidity: humidity)
@@ -35,13 +38,31 @@ struct ThermostatView: View {
     }
 
     @ViewBuilder
-    private func temperatureLabel(temperature: ThermostatStore.Descriptor.Temperature?) -> some View {
+    private func temperatureLabel(
+        temperature: ThermostatStore.Descriptor.Temperature?,
+        setpoint: ThermostatStore.Descriptor.Temperature?
+    ) -> some View {
         if let temperature {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(temperature.value, format: .number.precision(.fractionLength(1)))
                     .font(.system(size: 34, weight: .bold, design: .rounded))
                     .monospacedDigit()
                 if let unitSymbol = temperature.unitSymbol {
+                    Text(unitSymbol)
+                        .font(.system(.title3, design: .rounded).weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+        } else if let setpoint {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text("Set")
+                    .font(.system(.caption, design: .rounded).weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(setpoint.value, format: .number.precision(.fractionLength(1)))
+                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                if let unitSymbol = setpoint.unitSymbol {
                     Text(unitSymbol)
                         .font(.system(.title3, design: .rounded).weight(.semibold))
                         .foregroundStyle(.secondary)
@@ -81,6 +102,15 @@ struct ThermostatView: View {
                 components.append("Current \(value) \(unit)")
             } else {
                 components.append("Current \(value)")
+            }
+        }
+
+        if let setpoint = viewState.setpoint {
+            let value = setpoint.value.formatted(.number.precision(.fractionLength(1)))
+            if let unit = setpoint.unitSymbol {
+                components.append("Setpoint \(value) \(unit)")
+            } else {
+                components.append("Setpoint \(value)")
             }
         }
 

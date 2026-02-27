@@ -16,6 +16,7 @@ final class ThermostatStore {
         }
 
         let temperature: Temperature?
+        let setpoint: Temperature?
         let humidity: Humidity?
     }
 
@@ -44,15 +45,40 @@ final class ThermostatStore {
         )
 
         observationTask.task = Task { [weak self, worker] in
-            await worker.observe { [weak self] state in
-                await self?.applyIncomingState(state)
+            await worker.observe { [weak self] device, state in
+                await self?.applyIncomingObservation(device: device, state: state)
             }
         }
+    }
+
+    private func applyIncomingObservation(device: Device?, state: Descriptor?) {
+        guard let device else {
+            applyIncomingState(nil)
+            return
+        }
+
+        guard let state else {
+            if Self.isClimateCandidate(device) == false {
+                applyIncomingState(nil)
+            }
+            return
+        }
+
+        applyIncomingState(state)
     }
 
     private func applyIncomingState(_ state: Descriptor?) {
         guard self.state != state else { return }
         self.state = state
+    }
+
+    private static func isClimateCandidate(_ device: Device) -> Bool {
+        switch device.controlKind {
+        case .thermostat, .heatPump, .temperature:
+            return true
+        default:
+            return device.hasLikelyClimatePayload
+        }
     }
 
     private actor Worker {
@@ -68,12 +94,12 @@ final class ThermostatStore {
         }
 
         func observe(
-            onState: @escaping @Sendable (Descriptor?) async -> Void
+            onState: @escaping @Sendable (Device?, Descriptor?) async -> Void
         ) async {
             let stream = await observeThermostat(uniqueId)
             for await device in stream {
                 guard !Task.isCancelled else { return }
-                await onState(device?.thermostatDescriptor())
+                await onState(device, device?.thermostatDescriptor())
             }
         }
     }

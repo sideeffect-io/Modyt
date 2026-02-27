@@ -115,7 +115,9 @@ actor FavoriteRepository {
                 name: $0.name,
                 usage: $0.resolvedUsage,
                 type: .device(deviceId: $0.id),
-                order: $0.dashboardOrder ?? 0
+                order: $0.dashboardOrder ?? 0,
+                controlKind: $0.controlKind,
+                rawUsage: $0.usage
             )
         }
         
@@ -124,7 +126,9 @@ actor FavoriteRepository {
                 name: $0.name,
                 usage: $0.resolvedUsage,
                 type: .group(groupId: $0.id, memberUniqueIds: $0.memberUniqueIds),
-                order: $0.dashboardOrder ?? 0
+                order: $0.dashboardOrder ?? 0,
+                controlKind: FavoriteControlKind.from(usage: $0.resolvedUsage),
+                rawUsage: $0.usage
             )
         }
         
@@ -133,7 +137,9 @@ actor FavoriteRepository {
                 name: $0.name,
                 usage: .scene,
                 type: .scene(sceneId: $0.id),
-                order: $0.dashboardOrder ?? 0
+                order: $0.dashboardOrder ?? 0,
+                controlKind: .scene,
+                rawUsage: "scene"
             )
         }
         

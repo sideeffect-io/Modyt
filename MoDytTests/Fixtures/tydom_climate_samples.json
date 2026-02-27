@@ -1,0 +1,39 @@
+{
+  "boilerMultiEndpoint": [
+    {
+      "usage": "boiler",
+      "name": "Boiler A",
+      "data": {
+        "authorization": "STOP",
+        "temperature": null,
+        "hvacMode": "NORMAL"
+      }
+    },
+    {
+      "usage": "boiler",
+      "name": "Boiler B",
+      "data": {
+        "authorization": "HEATING",
+        "setpoint": 21.0,
+        "temperature": 20.5,
+        "hygroIn": 61
+      },
+      "metadata": {
+        "temperature": { "unit": "degC" },
+        "hygroIn": { "unit": "percent" }
+      }
+    }
+  ],
+  "shHvacSample": {
+    "usage": "sh_hvac",
+    "name": "Heat Pump",
+    "data": {
+      "regTemperature": 19.9,
+      "currentSetpoint": 20.5,
+      "waterFlowReq": true
+    },
+    "metadata": {
+      "regTemperature": { "unit": "celsius" }
+    }
+  }
+}

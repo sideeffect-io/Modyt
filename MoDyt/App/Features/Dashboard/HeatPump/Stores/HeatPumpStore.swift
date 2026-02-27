@@ -1,247 +1,299 @@
 import Foundation
 import Observation
 import DeltaDoreClient
+import Regulate
+
+struct HeatPumpValues: Sendable, Equatable {
+    let temperature: Double
+    let setPoint: Double
+    let unitSymbol: String
+
+    init(
+        temperature: Double,
+        setPoint: Double,
+        unitSymbol: String = "°C"
+    ) {
+        self.temperature = temperature
+        self.setPoint = setPoint
+        self.unitSymbol = unitSymbol
+    }
+}
+
+enum HeatPumpState: Sendable, Equatable {
+    case featureIsIdle(HeatPumpValues)
+    case featureIsStarted(HeatPumpValues)
+    case setPointIsBeingSet(HeatPumpValues)
+
+    var values: HeatPumpValues {
+        switch self {
+        case .featureIsIdle(let values),
+             .featureIsStarted(let values),
+             .setPointIsBeingSet(let values):
+            values
+        }
+    }
+}
+
+enum HeatPumpEvent: Sendable, Equatable {
+    case valuesWereReceivedFromGateway(temperature: Double, setPoint: Double)
+    case setPointWasConfirmed
+    case newSetPointWasReceived(Double)
+}
+
+enum HeatPumpEffect: Sendable, Equatable {
+    case updateSetPoint(Double)
+}
+
+struct HeatPumpGatewayCommand: Sendable, Equatable {
+    let request: String
+    let transactionId: String
+}
+
+enum HeatPumpReducer {
+    static func reduce(
+        state: HeatPumpState,
+        event: HeatPumpEvent
+    ) -> (HeatPumpState, [HeatPumpEffect]) {
+        switch (state, event) {
+        case (.featureIsIdle(let values), .valuesWereReceivedFromGateway(let temperature, let setPoint)):
+            let nextValues = HeatPumpValues(
+                temperature: temperature,
+                setPoint: setPoint,
+                unitSymbol: values.unitSymbol
+            )
+            return (.featureIsStarted(nextValues), [])
+
+        case (.featureIsStarted(let values), .valuesWereReceivedFromGateway(let temperature, let setPoint)):
+            let nextValues = HeatPumpValues(
+                temperature: temperature,
+                setPoint: setPoint,
+                unitSymbol: values.unitSymbol
+            )
+            return (.featureIsStarted(nextValues), [])
+
+        case (.featureIsStarted(let values), .newSetPointWasReceived(let newSetPoint)):
+            let nextValues = HeatPumpValues(
+                temperature: values.temperature,
+                setPoint: newSetPoint,
+                unitSymbol: values.unitSymbol
+            )
+            return (
+                .setPointIsBeingSet(nextValues),
+                [.updateSetPoint(newSetPoint)]
+            )
+
+        case (.setPointIsBeingSet(let values), .valuesWereReceivedFromGateway(let temperature, let setPoint)):
+            let nextValues = HeatPumpValues(
+                temperature: temperature,
+                setPoint: setPoint,
+                unitSymbol: values.unitSymbol
+            )
+            return (.setPointIsBeingSet(nextValues), [])
+
+        case (.setPointIsBeingSet(let values), .newSetPointWasReceived(let newSetPoint)):
+            let nextValues = HeatPumpValues(
+                temperature: values.temperature,
+                setPoint: newSetPoint,
+                unitSymbol: values.unitSymbol
+            )
+            return (
+                .setPointIsBeingSet(nextValues),
+                [.updateSetPoint(newSetPoint)]
+            )
+
+        case (.setPointIsBeingSet(let values), .setPointWasConfirmed):
+            return (.featureIsStarted(values), [])
+
+        default:
+            return (state, [])
+        }
+    }
+}
 
 @Observable
 @MainActor
 final class HeatPumpStore {
-    struct Descriptor: Sendable, Equatable {
-        struct Temperature: Sendable, Equatable {
-            let value: Double
-            let unitSymbol: String?
-        }
-
-        let temperature: Temperature?
-        let setpointKey: String?
-        let setpoint: Double?
-        let setpointRange: ClosedRange<Double>
-        let setpointStep: Double
-        let unitSymbol: String?
-
-        var canAdjustSetpoint: Bool {
-            setpointKey != nil && setpoint != nil
-        }
-
-        func with(setpoint: Double) -> Descriptor {
-            Descriptor(
-                temperature: temperature,
-                setpointKey: setpointKey,
-                setpoint: setpoint,
-                setpointRange: setpointRange,
-                setpointStep: setpointStep,
-                unitSymbol: unitSymbol
-            )
-        }
+    private struct CommandContext: Sendable, Equatable {
+        let deviceID: Int
+        let endpointID: Int
+        let setPointName: String
     }
 
     struct Dependencies {
         let observeHeatPump: @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
-        let applyOptimisticChanges: @Sendable (String, [String: PayloadValue]) async -> Void
-        let sendCommand: @Sendable (String, String, PayloadValue) async -> Void
-        let now: () -> Date
+        let executeSetPointCommand: @Sendable (HeatPumpGatewayCommand) async -> Void
+        let makeTransactionID: @Sendable () async -> String
+        let setPointDebounceInterval: DispatchTimeInterval
 
         init(
             observeHeatPump: @escaping @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable,
-            applyOptimisticChanges: @escaping @Sendable (String, [String: PayloadValue]) async -> Void,
-            sendCommand: @escaping @Sendable (String, String, PayloadValue) async -> Void,
-            now: @escaping () -> Date = Date.init
+            executeSetPointCommand: @escaping @Sendable (HeatPumpGatewayCommand) async -> Void,
+            makeTransactionID: @escaping @Sendable () async -> String = {
+                TydomCommand.defaultTransactionId(now: Date.init)
+            },
+            setPointDebounceInterval: DispatchTimeInterval = .seconds(1)
         ) {
             self.observeHeatPump = observeHeatPump
-            self.applyOptimisticChanges = applyOptimisticChanges
-            self.sendCommand = sendCommand
-            self.now = now
+            self.executeSetPointCommand = executeSetPointCommand
+            self.makeTransactionID = makeTransactionID
+            self.setPointDebounceInterval = setPointDebounceInterval
         }
     }
 
-    private(set) var descriptor: Descriptor?
+    private(set) var state: HeatPumpState
 
-    private let uniqueId: String
     private let dependencies: Dependencies
     private let observationTask = TaskHandle()
     private let worker: Worker
-    private var pendingSetpoint: Double?
-    private var pendingSetpointExpiresAt: Date?
+    private let setPointThrottler: Throttler<Double>
+    private var commandContext: CommandContext?
+
+    var temperature: Double {
+        state.values.temperature
+    }
+
+    var setPoint: Double {
+        state.values.setPoint
+    }
+
+    var unitSymbol: String {
+        state.values.unitSymbol
+    }
+
+    var isSetPointBeingSet: Bool {
+        if case .setPointIsBeingSet = state {
+            return true
+        }
+        return false
+    }
 
     init(
         uniqueId: String,
         dependencies: Dependencies
     ) {
-        self.uniqueId = uniqueId
+        self.state = .featureIsIdle(HeatPumpValues(temperature: 0.0, setPoint: 0.0))
         self.dependencies = dependencies
+        self.setPointThrottler = Throttler(dueTime: dependencies.setPointDebounceInterval)
         self.worker = Worker(
-            uniqueId: uniqueId,
             observeHeatPump: dependencies.observeHeatPump,
-            applyOptimisticChanges: dependencies.applyOptimisticChanges,
-            sendCommand: dependencies.sendCommand
+            executeSetPointCommand: dependencies.executeSetPointCommand
         )
+        self.setPointThrottler.output = { [weak self] value in
+            guard let self else { return }
+            await self.executeDebouncedSetPoint(value)
+        }
 
-        observationTask.task = Task { [weak self, worker] in
-            await worker.observe { [weak self] descriptor in
-                await self?.applyIncomingDescriptor(descriptor)
+        observationTask.task = Task { [weak self, worker, uniqueId] in
+            await worker.observeHeatPump(uniqueId: uniqueId) { [weak self] observation in
+                self?.commandContext = observation.commandContext
+                self?.send(
+                    .valuesWereReceivedFromGateway(
+                        temperature: observation.temperature,
+                        setPoint: observation.setPoint
+                    )
+                )
             }
         }
     }
 
-    func incrementSetpoint() {
-        adjustSetpoint(by: +1)
+    func send(_ event: HeatPumpEvent) {
+        let (nextState, effects) = HeatPumpReducer.reduce(state: state, event: event)
+        state = nextState
+        handle(effects)
     }
 
-    func decrementSetpoint() {
-        adjustSetpoint(by: -1)
+    private func handle(_ effects: [HeatPumpEffect]) {
+        for effect in effects {
+            handle(effect)
+        }
     }
 
-    func setSetpoint(_ target: Double) {
-        guard var descriptor else { return }
-        guard descriptor.canAdjustSetpoint else { return }
-        guard let setpointKey = descriptor.setpointKey else { return }
-        guard let current = descriptor.setpoint else { return }
+    private func handle(_ effect: HeatPumpEffect) {
+        switch effect {
+        case .updateSetPoint(let setPoint):
+            setPointThrottler.push(setPoint)
+        }
+    }
 
-        let step = max(descriptor.setpointStep, Self.defaultSetpointStep)
-        let resolved = Self.resolveSetpoint(
-            target,
-            in: descriptor.setpointRange,
-            step: step
+    private func executeDebouncedSetPoint(_ setPoint: Double) async {
+        guard let command = await buildGatewayCommand(setPoint: setPoint) else {
+            send(.setPointWasConfirmed)
+            return
+        }
+        await worker.executeSetPointCommand(command)
+        send(.setPointWasConfirmed)
+    }
+
+    private func buildGatewayCommand(setPoint: Double) async -> HeatPumpGatewayCommand? {
+        guard let commandContext else { return nil }
+        let transactionId = await dependencies.makeTransactionID()
+        let command = TydomCommand.putDevicesData(
+            deviceId: String(commandContext.deviceID),
+            endpointId: String(commandContext.endpointID),
+            name: commandContext.setPointName,
+            value: .string(Self.formattedSetPoint(setPoint)),
+            transactionId: transactionId
         )
-
-        guard abs(resolved - current) > Self.setpointTolerance else { return }
-
-        descriptor = descriptor.with(setpoint: resolved)
-        self.descriptor = descriptor
-        registerPendingSetpoint(resolved)
-
-        let commandValue = Self.commandValue(for: resolved, step: step)
-        Task { [worker, setpointKey] in
-            await worker.sendSetpoint(setpointKey, value: commandValue)
-        }
+        return HeatPumpGatewayCommand(
+            request: command.request,
+            transactionId: transactionId
+        )
     }
 
-    private func adjustSetpoint(by direction: Double) {
-        guard let descriptor else { return }
-        let base = descriptor.setpoint ?? descriptor.setpointRange.lowerBound
-        let step = max(descriptor.setpointStep, Self.defaultSetpointStep)
-        setSetpoint(base + direction * step)
-    }
-
-    private func applyIncomingDescriptor(_ descriptor: Descriptor?) {
-        guard !shouldSuppressIncoming(descriptor) else { return }
-        guard self.descriptor != descriptor else { return }
-        self.descriptor = descriptor
-    }
-
-    private func shouldSuppressIncoming(_ incoming: Descriptor?) -> Bool {
-        guard let pendingSetpoint else { return false }
-        guard let incoming else {
-            clearPendingSetpoint()
-            return false
-        }
-        guard let incomingSetpoint = incoming.setpoint else {
-            clearPendingSetpoint()
-            return false
-        }
-
-        if abs(incomingSetpoint - pendingSetpoint) <= Self.setpointTolerance {
-            clearPendingSetpoint()
-            return false
-        }
-
-        if let pendingSetpointExpiresAt, dependencies.now() < pendingSetpointExpiresAt {
-            return true
-        }
-
-        clearPendingSetpoint()
-        return false
-    }
-
-    private func registerPendingSetpoint(_ value: Double) {
-        pendingSetpoint = value
-        pendingSetpointExpiresAt = dependencies.now().addingTimeInterval(Self.pendingEchoSuppressionWindow)
-    }
-
-    private func clearPendingSetpoint() {
-        pendingSetpoint = nil
-        pendingSetpointExpiresAt = nil
-    }
-
-    private static func resolveSetpoint(
-        _ value: Double,
-        in range: ClosedRange<Double>,
-        step: Double
-    ) -> Double {
-        guard range.upperBound > range.lowerBound else { return range.lowerBound }
-        let clamped = min(max(value, range.lowerBound), range.upperBound)
-        guard step > 0 else { return clamped }
-
-        let stepsFromLowerBound = ((clamped - range.lowerBound) / step).rounded()
-        let snapped = range.lowerBound + stepsFromLowerBound * step
-        let bounded = min(max(snapped, range.lowerBound), range.upperBound)
-
-        let digits = max(2, fractionDigits(for: step))
-        let factor = pow(10.0, Double(digits))
-        return (bounded * factor).rounded() / factor
-    }
-
-    private static func commandValue(for value: Double, step: Double) -> PayloadValue {
-        let digits = fractionDigits(for: step)
-        let commandText = formattedSetpoint(value, digits: digits)
-        return .string(commandText)
-    }
-
-    private static func fractionDigits(for step: Double) -> Int {
-        guard step > 0 else { return 1 }
-        var digits = 0
-        var scaled = step
-        while digits < 4 && abs(scaled.rounded() - scaled) > 0.000_001 {
-            scaled *= 10
-            digits += 1
-        }
-        return digits
-    }
-
-    private static func formattedSetpoint(_ value: Double, digits: Int) -> String {
+    private static func formattedSetPoint(_ value: Double) -> String {
         let formatter = NumberFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.numberStyle = .decimal
-        formatter.minimumFractionDigits = 0
-        formatter.maximumFractionDigits = max(digits, 1)
+        formatter.minimumFractionDigits = 1
+        formatter.maximumFractionDigits = 1
         formatter.usesGroupingSeparator = false
         return formatter.string(from: NSNumber(value: value)) ?? String(value)
     }
 
-    private static let defaultSetpointStep = 0.5
-    private static let setpointTolerance = 0.000_5
-    private static let pendingEchoSuppressionWindow: TimeInterval = 0.9
-
     private actor Worker {
-        private let uniqueId: String
-        private let observeHeatPump: @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
-        private let applyOptimisticChanges: @Sendable (String, [String: PayloadValue]) async -> Void
-        private let sendCommand: @Sendable (String, String, PayloadValue) async -> Void
-
-        init(
-            uniqueId: String,
-            observeHeatPump: @escaping @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable,
-            applyOptimisticChanges: @escaping @Sendable (String, [String: PayloadValue]) async -> Void,
-            sendCommand: @escaping @Sendable (String, String, PayloadValue) async -> Void
-        ) {
-            self.uniqueId = uniqueId
-            self.observeHeatPump = observeHeatPump
-            self.applyOptimisticChanges = applyOptimisticChanges
-            self.sendCommand = sendCommand
+        struct Observation: Sendable {
+            let temperature: Double
+            let setPoint: Double
+            let commandContext: CommandContext
         }
 
-        func observe(
-            onDescriptor: @escaping @Sendable (Descriptor?) async -> Void
+        private let observeHeatPumpSource: @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
+        private let executeSetPointCommandAction: @Sendable (HeatPumpGatewayCommand) async -> Void
+
+        init(
+            observeHeatPump: @escaping @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable,
+            executeSetPointCommand: @escaping @Sendable (HeatPumpGatewayCommand) async -> Void
+        ) {
+            self.observeHeatPumpSource = observeHeatPump
+            self.executeSetPointCommandAction = executeSetPointCommand
+        }
+
+        func observeHeatPump(
+            uniqueId: String,
+            onObservation: @escaping @MainActor @Sendable (Observation) -> Void
         ) async {
-            let stream = await observeHeatPump(uniqueId)
+            let stream = await observeHeatPumpSource(uniqueId)
             for await device in stream {
                 guard !Task.isCancelled else { return }
-                await onDescriptor(device?.heatPumpDescriptor())
+                guard let device else { continue }
+                guard let values = device.heatPumpGatewayValues() else { continue }
+                guard let setPointName = device.heatPumpSetpointKey() else { continue }
+                await onObservation(
+                    Observation(
+                        temperature: values.temperature,
+                        setPoint: values.setPoint,
+                        commandContext: CommandContext(
+                            deviceID: device.deviceID,
+                            endpointID: device.endpointId,
+                            setPointName: setPointName
+                        )
+                    )
+                )
             }
         }
 
-        func sendSetpoint(_ key: String, value: PayloadValue) async {
-            await applyOptimisticChanges(uniqueId, [key: value])
-            await sendCommand(uniqueId, key, value)
+        func executeSetPointCommand(_ command: HeatPumpGatewayCommand) async {
+            await executeSetPointCommandAction(command)
         }
     }
 }

@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		1A50E6E72F2D1A170072A200 /* DeltaDoreClient in Frameworks */ = {isa = PBXBuildFile; productRef = 1A50E6E62F2D1A170072A200 /* DeltaDoreClient */; };
+		1A8FDEB230A1234500BEEF01 /* Regulate in Frameworks */ = {isa = PBXBuildFile; productRef = 1A8FDEB430A1234500BEEF01 /* Regulate */; };
 		1AC7E9642F2E2AFE000E94E9 /* Persistence in Frameworks */ = {isa = PBXBuildFile; productRef = 1AC7E9632F2E2AFE000E94E9 /* Persistence */; };
 /* End PBXBuildFile section */
 
@@ -59,6 +60,7 @@
 			files = (
 				1AC7E9642F2E2AFE000E94E9 /* Persistence in Frameworks */,
 				1A50E6E72F2D1A170072A200 /* DeltaDoreClient in Frameworks */,
+				1A8FDEB230A1234500BEEF01 /* Regulate in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -113,6 +115,7 @@
 			packageProductDependencies = (
 				1A50E6E62F2D1A170072A200 /* DeltaDoreClient */,
 				1AC7E9632F2E2AFE000E94E9 /* Persistence */,
+				1A8FDEB430A1234500BEEF01 /* Regulate */,
 			);
 			productName = MoDyt;
 			productReference = 1A50E6B82F2D19640072A200 /* MoDyt.app */;
@@ -169,6 +172,7 @@
 			packageReferences = (
 				1A50E6E52F2D1A170072A200 /* XCLocalSwiftPackageReference "Packages/DeltaDoreClient" */,
 				1AC7E9622F2E2AFE000E94E9 /* XCLocalSwiftPackageReference "Packages/Persistence" */,
+				1A8FDEB330A1234500BEEF01 /* XCLocalSwiftPackageReference "Packages/Regulate" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 1A50E6B92F2D19640072A200 /* Products */;
@@ -563,6 +567,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/DeltaDoreClient;
 		};
+		1A8FDEB330A1234500BEEF01 /* XCLocalSwiftPackageReference "Packages/Regulate" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Regulate;
+		};
 		1AC7E9622F2E2AFE000E94E9 /* XCLocalSwiftPackageReference "Packages/Persistence" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/Persistence;
@@ -573,6 +581,10 @@
 		1A50E6E62F2D1A170072A200 /* DeltaDoreClient */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = DeltaDoreClient;
+		};
+		1A8FDEB430A1234500BEEF01 /* Regulate */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Regulate;
 		};
 		1AC7E9632F2E2AFE000E94E9 /* Persistence */ = {
 			isa = XCSwiftPackageProductDependency;

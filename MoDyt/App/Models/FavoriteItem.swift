@@ -33,13 +33,31 @@ struct FavoriteItem: Sendable, Equatable {
     let usage: Usage
     let type: FavoriteType
     let order: Int
+    let controlKind: FavoriteControlKind
+    let rawUsage: String
+
+    init(
+        name: String,
+        usage: Usage,
+        type: FavoriteType,
+        order: Int,
+        controlKind: FavoriteControlKind? = nil,
+        rawUsage: String? = nil
+    ) {
+        self.name = name
+        self.usage = usage
+        self.type = type
+        self.order = order
+        self.controlKind = controlKind ?? FavoriteControlKind.from(usage: usage)
+        self.rawUsage = rawUsage ?? usage.rawValue
+    }
     
     var id: String {
         type.id
     }
     
     var group: DeviceGroup {
-        DeviceGroup.from(usage: usage.rawValue)
+        DeviceGroup.from(usage: rawUsage)
     }
 
     var isScene: Bool {
