@@ -42,10 +42,7 @@ private actor SceneExecutionRuntime {
         }
 
         let transactionID = TydomCommand.defaultTransactionId(now: Date.init)
-        let command = TydomCommand.activateScenario(
-            sceneID,
-            transactionId: transactionID
-        )
+        let command = TydomCommand.activateScenario(sceneID, transactionId: transactionID)
 
         do {
             try await gatewayClient.send(text: command.request)

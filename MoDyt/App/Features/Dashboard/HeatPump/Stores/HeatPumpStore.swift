@@ -131,7 +131,7 @@ final class HeatPumpStore {
             makeTransactionID: @escaping @Sendable () async -> String = {
                 TydomCommand.defaultTransactionId(now: Date.init)
             },
-            setPointDebounceInterval: DispatchTimeInterval = .seconds(1)
+            setPointDebounceInterval: DispatchTimeInterval = .seconds(2)
         ) {
             self.observeHeatPump = observeHeatPump
             self.executeSetPointCommand = executeSetPointCommand
