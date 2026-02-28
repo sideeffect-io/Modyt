@@ -80,6 +80,7 @@ extension DomainRepository where Item == Device, Upsert == DeviceUpsert {
             metadata: existing?.metadata.mergedDictionary(incoming: upsert.metadata),
             isFavorite: existing?.isFavorite ?? false,
             dashboardOrder: existing?.dashboardOrder,
+            shutterTargetPosition: existing?.shutterTargetPosition,
             updatedAt: timestamp
         )
     }
@@ -97,6 +98,7 @@ extension DomainRepository where Item == Device, Upsert == DeviceUpsert {
         metadata TEXT,
         isFavorite INTEGER NOT NULL,
         dashboardOrder INTEGER,
+        shutterTargetPosition INTEGER,
         updatedAt REAL NOT NULL
     );
     """

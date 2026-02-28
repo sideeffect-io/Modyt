@@ -10,6 +10,7 @@ struct Device: DomainType {
     var metadata: [String: JSONValue]?
     var isFavorite: Bool
     var dashboardOrder: Int?
+    var shutterTargetPosition: Int? = nil
     var updatedAt: Date
 
     var resolvedUsage: Usage {
