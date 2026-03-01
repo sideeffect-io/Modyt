@@ -1,15 +1,15 @@
 import SwiftUI
 
 struct SunlightStoreFactory {
-    let make: @MainActor (String) -> SunlightStore
+    let make: @MainActor (DeviceIdentifier) -> SunlightStore
 
     static func live(dependencies: DependencyBag) -> SunlightStoreFactory {
         let deviceRepository = dependencies.localStorageDatasources.deviceRepository
 
-        return SunlightStoreFactory { uniqueId in
+        return SunlightStoreFactory { identifier in
             SunlightStore(
                 dependencies: .init(
-                    observeSunlight: { await deviceRepository.observeByID(uniqueId) }
+                    observeSunlight: { await deviceRepository.observeByID(identifier) }
                 )
             )
         }

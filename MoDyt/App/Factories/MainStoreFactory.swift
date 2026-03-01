@@ -58,7 +58,6 @@ struct MainGatewayDataRequestPipeline: Sendable {
 private actor MainRuntime {
     private let gatewayClient: DeltaDoreClient
     private let router: TydomMessageRepositoryRouter
-    private let transactionIDGenerator = TransactionIDGenerator()
     private let log: @Sendable (String) -> Void
 
     private var messageStreamTask: Task<Void, Never>?
@@ -135,7 +134,7 @@ private actor MainRuntime {
         let pipeline = MainGatewayDataRequestPipeline(
             requests: MainGatewayDataRequestPipeline.defaultRequests,
             makeTransactionID: {
-                await self.transactionIDGenerator.next()
+                TydomCommand.defaultTransactionId()
             },
             sendText: { text in
                 try await self.gatewayClient.send(text: text)
@@ -166,21 +165,6 @@ private actor MainRuntime {
         messageStreamTask = nil
     }
 
-}
-
-private actor TransactionIDGenerator {
-    private var lastIssued: UInt64 = 0
-
-    func next() -> String {
-        let milliseconds = UInt64(Date().timeIntervalSince1970 * 1000)
-        let candidate = milliseconds * 1_000
-        if candidate <= lastIssued {
-            lastIssued += 1
-        } else {
-            lastIssued = candidate
-        }
-        return String(lastIssued)
-    }
 }
 
 private struct MainStoreFactoryKey: EnvironmentKey {

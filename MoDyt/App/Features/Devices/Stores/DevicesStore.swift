@@ -11,13 +11,13 @@ enum DevicesEvent: Sendable {
     case onAppear
     case devicesUpdated([RepositoryDeviceTypeSection])
     case refreshRequested
-    case toggleFavorite(String)
+    case toggleFavorite(DeviceIdentifier)
 }
 
 enum DevicesEffect: Sendable, Equatable {
     case startObservingDevices
     case refreshAll
-    case toggleFavorite(String)
+    case toggleFavorite(DeviceIdentifier)
 }
 
 enum DevicesReducer {
@@ -48,7 +48,7 @@ enum DevicesReducer {
 final class DevicesStore {
     struct Dependencies {
         let observeDevices: @Sendable () async -> any AsyncSequence<[RepositoryDeviceTypeSection], Never> & Sendable
-        let toggleFavorite: @Sendable (String) async -> Void
+        let toggleFavorite: @Sendable (DeviceIdentifier) async -> Void
         let refreshAll: @Sendable () async -> Void
     }
 
@@ -108,12 +108,12 @@ final class DevicesStore {
 
     private actor Worker {
         private let observeDevicesSource: @Sendable () async -> any AsyncSequence<[RepositoryDeviceTypeSection], Never> & Sendable
-        private let toggleFavoriteAction: @Sendable (String) async -> Void
+        private let toggleFavoriteAction: @Sendable (DeviceIdentifier) async -> Void
         private let refreshAllAction: @Sendable () async -> Void
 
         init(
             observeDevices: @escaping @Sendable () async -> any AsyncSequence<[RepositoryDeviceTypeSection], Never> & Sendable,
-            toggleFavorite: @escaping @Sendable (String) async -> Void,
+            toggleFavorite: @escaping @Sendable (DeviceIdentifier) async -> Void,
             refreshAll: @escaping @Sendable () async -> Void
         ) {
             self.observeDevicesSource = observeDevices
@@ -131,8 +131,8 @@ final class DevicesStore {
             }
         }
 
-        func toggleFavorite(_ uniqueId: String) async {
-            await toggleFavoriteAction(uniqueId)
+        func toggleFavorite(_ identifier: DeviceIdentifier) async {
+            await toggleFavoriteAction(identifier)
         }
 
         func refreshAll() async {

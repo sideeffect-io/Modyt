@@ -54,14 +54,14 @@ actor FavoriteRepository {
             return
         }
 
-        var deviceOrders: [String: Int] = [:]
+        var deviceOrders: [DeviceIdentifier: Int] = [:]
         var groupOrders: [String: Int] = [:]
         var sceneOrders: [String: Int] = [:]
 
         for (index, item) in reordered.enumerated() {
             switch item.type {
-            case .device(let id):
-                deviceOrders[id] = index
+            case .device(let identifier):
+                deviceOrders[identifier] = index
             case .group(let id, _):
                 groupOrders[id] = index
             case .scene(let id):
@@ -76,8 +76,8 @@ actor FavoriteRepository {
 
     func toggleFavorite(_ favoriteType: FavoriteType) async throws {
         switch favoriteType {
-        case .device(let deviceID):
-            try await deviceRepository.toggleFavorite(deviceID)
+        case .device(let identifier):
+            try await deviceRepository.toggleFavorite(identifier)
         case .group(let groupID, _):
             try await groupRepository.toggleFavorite(groupID)
         case .scene(let sceneID):
@@ -87,11 +87,11 @@ actor FavoriteRepository {
 
     func removeFavorite(_ favoriteType: FavoriteType) async throws {
         switch favoriteType {
-        case .device(let deviceID):
-            guard let device = try await deviceRepository.get(deviceID), device.isFavorite else {
+        case .device(let identifier):
+            guard let device = try await deviceRepository.get(identifier), device.isFavorite else {
                 return
             }
-            try await deviceRepository.toggleFavorite(deviceID)
+            try await deviceRepository.toggleFavorite(identifier)
         case .group(let groupID, _):
             guard let group = try await groupRepository.get(groupID), group.isFavorite else {
                 return
@@ -114,7 +114,7 @@ actor FavoriteRepository {
             FavoriteItem(
                 name: $0.name,
                 usage: $0.resolvedUsage,
-                type: .device(deviceId: $0.id),
+                type: .device(identifier: $0.id),
                 order: $0.dashboardOrder ?? 0,
                 controlKind: $0.controlKind,
                 rawUsage: $0.usage
@@ -125,7 +125,7 @@ actor FavoriteRepository {
             FavoriteItem(
                 name: $0.name,
                 usage: $0.resolvedUsage,
-                type: .group(groupId: $0.id, memberUniqueIds: $0.memberUniqueIds),
+                type: .group(groupId: $0.id, memberIdentifiers: $0.memberIdentifiers),
                 order: $0.dashboardOrder ?? 0,
                 controlKind: FavoriteControlKind.from(usage: $0.resolvedUsage),
                 rawUsage: $0.usage

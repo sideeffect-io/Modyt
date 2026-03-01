@@ -3,10 +3,10 @@ import SwiftUI
 struct EnergyConsumptionView: View {
     @Environment(\.energyConsumptionStoreFactory) private var energyConsumptionStoreFactory
 
-    let uniqueId: String
+    let identifier: DeviceIdentifier
 
     var body: some View {
-        WithStoreView(factory: { energyConsumptionStoreFactory.make(uniqueId) }) { store in
+        WithStoreView(factory: { energyConsumptionStoreFactory.make(identifier) }) { store in
             energyContent(descriptor: store.descriptor)
         }
     }
@@ -59,8 +59,6 @@ private struct EnergyConsumptionGauge: View {
 
     var body: some View {
         let progress = CGFloat(min(max(normalizedValue, 0), 1))
-        let angle = Self.startAngle + Self.sweepAngle * Double(progress)
-        let radius = Self.diameter * 0.5 - Self.lineWidth * 0.5
 
         ZStack {
             EnergyArc(progress: 1)
@@ -68,17 +66,6 @@ private struct EnergyConsumptionGauge: View {
 
             EnergyArc(progress: progress)
                 .stroke(Self.gaugeGradient, style: StrokeStyle(lineWidth: Self.lineWidth, lineCap: .round))
-
-            Circle()
-                .fill(.white)
-                .overlay {
-                    Circle()
-                        .strokeBorder(AppColors.midnight.opacity(0.2), lineWidth: 1)
-                }
-                .frame(width: Self.handleSize, height: Self.handleSize)
-                .offset(x: radius)
-                .rotationEffect(.degrees(angle))
-                .shadow(color: .black.opacity(0.2), radius: 3, x: 0, y: 1)
         }
         .frame(width: Self.diameter, height: Self.diameter)
         .rotationEffect(.degrees(-90))
@@ -90,7 +77,6 @@ private struct EnergyConsumptionGauge: View {
 
     private static let diameter: CGFloat = 60
     private static let lineWidth: CGFloat = 8
-    private static let handleSize: CGFloat = 12
     private static let startAngle: Double = -150
     private static let sweepAngle: Double = 300
 

@@ -4,10 +4,10 @@ struct SmokeView: View {
     @Environment(\.smokeStoreFactory) private var smokeStoreFactory
     @Environment(\.colorScheme) private var colorScheme
 
-    let uniqueId: String
+    let identifier: DeviceIdentifier
 
     var body: some View {
-        WithStoreView(factory: { smokeStoreFactory.make(uniqueId) }) { store in
+        WithStoreView(factory: { smokeStoreFactory.make(identifier) }) { store in
             smokeContent(descriptor: store.descriptor)
         }
     }

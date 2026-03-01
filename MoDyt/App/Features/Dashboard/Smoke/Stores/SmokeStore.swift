@@ -39,10 +39,10 @@ final class SmokeStore {
     }
 
     struct Dependencies {
-        let observeSmoke: @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
+        let observeSmoke: @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
 
         init(
-            observeSmoke: @escaping @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
+            observeSmoke: @escaping @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
         ) {
             self.observeSmoke = observeSmoke
         }
@@ -54,12 +54,12 @@ final class SmokeStore {
     private let worker: Worker
 
     init(
-        uniqueId: String,
+        identifier: DeviceIdentifier,
         dependencies: Dependencies
     ) {
         self.descriptor = nil
         self.worker = Worker(
-            uniqueId: uniqueId,
+            identifier: identifier,
             observeSmoke: dependencies.observeSmoke
         )
 
@@ -76,21 +76,21 @@ final class SmokeStore {
     }
 
     private actor Worker {
-        private let uniqueId: String
-        private let observeSmoke: @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
+        private let identifier: DeviceIdentifier
+        private let observeSmoke: @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
 
         init(
-            uniqueId: String,
-            observeSmoke: @escaping @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
+            identifier: DeviceIdentifier,
+            observeSmoke: @escaping @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
         ) {
-            self.uniqueId = uniqueId
+            self.identifier = identifier
             self.observeSmoke = observeSmoke
         }
 
         func observe(
             onDescriptor: @escaping @Sendable (Descriptor?) async -> Void
         ) async {
-            let stream = await observeSmoke(uniqueId)
+            let stream = await observeSmoke(identifier)
             for await device in stream {
                 guard !Task.isCancelled else { return }
                 await onDescriptor(device?.smokeStoreDescriptor())

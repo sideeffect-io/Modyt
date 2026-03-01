@@ -1,18 +1,18 @@
 import Foundation
 
 struct TydomDeviceCacheEntry: Sendable, Equatable {
-    let uniqueId: String
+    let identifier: TydomDeviceIdentifier
     var name: String?
     var usage: String?
     var metadata: [String: PayloadValue]?
 
     init(
-        uniqueId: String,
+        identifier: TydomDeviceIdentifier,
         name: String? = nil,
         usage: String? = nil,
         metadata: [String: PayloadValue]? = nil
     ) {
-        self.uniqueId = uniqueId
+        self.identifier = identifier
         self.name = name
         self.usage = usage
         self.metadata = metadata
@@ -102,7 +102,7 @@ enum TydomMessageDecoder {
                 )
                 let positionUpdates = updates.compactMap { update -> String? in
                     guard let value = tracePositionValue(in: update.data) else { return nil }
-                    return "\(update.uniqueId):\(value)"
+                    return "\(update.endpointId)/\(update.deviceId):\(value)"
                 }
                 if positionUpdates.isEmpty == false {
                     DeltaDoreDebugLog.log(
@@ -188,12 +188,10 @@ enum TydomMessageDecoder {
         var updates: [TydomDeviceUpdate] = []
         for device in payload {
             for endpoint in device.endpoints {
-                let uniqueId = "\(endpoint.id)_\(device.id)"
                 let extraction = extractDataValues(from: endpoint)
                 updates.append(TydomDeviceUpdate(
-                    id: device.id,
+                    deviceId: device.id,
                     endpointId: endpoint.id,
-                    uniqueId: uniqueId,
                     data: extraction.values,
                     entries: extraction.entries,
                     metadata: nil,
@@ -263,9 +261,8 @@ enum TydomMessageDecoder {
         )
         let extraction = extractDataValues(from: endpoint)
         let update = TydomDeviceUpdate(
-            id: ids.deviceId,
+            deviceId: ids.deviceId,
             endpointId: ids.endpointId,
-            uniqueId: "\(ids.endpointId)_\(ids.deviceId)",
             data: extraction.values,
             entries: extraction.entries,
             metadata: nil,
@@ -282,16 +279,14 @@ enum TydomMessageDecoder {
         for device in payload {
             for endpoint in device.endpoints {
                 guard endpoint.error == nil || endpoint.error == 0 else { continue }
-                let uniqueId = "\(endpoint.id)_\(device.id)"
                 let values = extractCDataValues(from: endpoint)
                 let entries = endpoint.cdata ?? []
                 let entryPayloads = entries.map { PayloadValue.object($0.payload) }
                 guard entryPayloads.isEmpty == false || values.isEmpty == false else { continue }
 
                 updates.append(TydomDeviceUpdate(
-                    id: device.id,
+                    deviceId: device.id,
                     endpointId: endpoint.id,
-                    uniqueId: uniqueId,
                     data: values,
                     metadata: nil,
                     cdataEntries: entryPayloads.isEmpty ? nil : entryPayloads,
@@ -389,10 +384,10 @@ enum TydomMessageDecoder {
 
         var mutations: [TydomCacheMutation] = []
         for endpoint in payload.endpoints {
-            let uniqueId = "\(endpoint.idEndpoint)_\(endpoint.idDevice)"
+            let identifier = TydomDeviceIdentifier(deviceId: endpoint.idDevice, endpointId: endpoint.idEndpoint)
             let usage = endpoint.lastUsage ?? "unknown"
             let name = usage == "alarm" ? "Tyxal Alarm" : endpoint.name
-            let entry = TydomDeviceCacheEntry(uniqueId: uniqueId, name: name, usage: usage, metadata: nil)
+            let entry = TydomDeviceCacheEntry(identifier: identifier, name: name, usage: usage, metadata: nil)
             mutations.append(.deviceEntry(entry))
         }
 
@@ -435,11 +430,11 @@ enum TydomMessageDecoder {
         var mutations: [TydomCacheMutation] = []
         for device in payload {
             for endpoint in device.endpoints {
-                let uniqueId = "\(endpoint.id)_\(device.id)"
+                let identifier = TydomDeviceIdentifier(deviceId: device.id, endpointId: endpoint.id)
                 let metadata = (endpoint.metadata ?? []).reduce(into: [String: PayloadValue]()) { acc, entry in
                     acc[entry.name] = .object(entry.attributes)
                 }
-                let entry = TydomDeviceCacheEntry(uniqueId: uniqueId, name: nil, usage: nil, metadata: metadata)
+                let entry = TydomDeviceCacheEntry(identifier: identifier, name: nil, usage: nil, metadata: metadata)
                 mutations.append(.deviceEntry(entry))
             }
         }
@@ -456,7 +451,7 @@ enum TydomMessageDecoder {
         let consoNames = Set(["energyIndex", "energyInstant", "energyDistrib", "energyHisto"])
         for device in payload {
             for endpoint in device.endpoints {
-                let uniqueId = "\(endpoint.id)_\(device.id)"
+                let identifier = TydomDeviceIdentifier(deviceId: device.id, endpointId: endpoint.id)
                 let cmetadataEntries = endpoint.cmetadata ?? []
 
                 if cmetadataEntries.isEmpty == false {
@@ -466,7 +461,7 @@ enum TydomMessageDecoder {
                         )
                     ]
                     let entry = TydomDeviceCacheEntry(
-                        uniqueId: uniqueId,
+                        identifier: identifier,
                         name: nil,
                         usage: nil,
                         metadata: metadata
@@ -476,7 +471,7 @@ enum TydomMessageDecoder {
 
                 for entry in cmetadataEntries {
                     if consoNames.contains(entry.name) {
-                        let entry = TydomDeviceCacheEntry(uniqueId: uniqueId, name: "Tywatt", usage: "conso", metadata: nil)
+                        let entry = TydomDeviceCacheEntry(identifier: identifier, name: "Tywatt", usage: "conso", metadata: nil)
                         mutations.append(.deviceEntry(entry))
                     }
                     switch entry.name {

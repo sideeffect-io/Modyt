@@ -5,8 +5,8 @@ struct DashboardStoreReducerTests {
     @Test
     func favoriteTypeIDsAreScopedBySource() {
         let scene = FavoriteType.scene(sceneId: "1")
-        let group = FavoriteType.group(groupId: "1", memberUniqueIds: [])
-        let device = FavoriteType.device(deviceId: "1")
+        let group = FavoriteType.group(groupId: "1", memberIdentifiers: [])
+        let device = FavoriteType.device(identifier: .init(deviceId: 1, endpointId: 1))
 
         #expect(scene.id != group.id)
         #expect(group.id != device.id)
@@ -44,7 +44,10 @@ struct DashboardStoreReducerTests {
         let initialState = DashboardState.initial
 
         let source = FavoriteType.scene(sceneId: "12")
-        let target = FavoriteType.group(groupId: "42", memberUniqueIds: ["1_4"])
+        let target = FavoriteType.group(
+            groupId: "42",
+            memberIdentifiers: [.init(deviceId: 4, endpointId: 1)]
+        )
 
         let (nextState, effects) = DashboardReducer.reduce(
             state: initialState,
@@ -62,7 +65,7 @@ struct DashboardStoreReducerTests {
             FavoriteItem(
                 name: "Kitchen Light",
                 usage: .light,
-                type: .device(deviceId: "1_42"),
+                type: .device(identifier: .init(deviceId: 42, endpointId: 1)),
                 order: 0
             ),
             FavoriteItem(

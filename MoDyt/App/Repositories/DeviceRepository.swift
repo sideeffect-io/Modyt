@@ -2,8 +2,7 @@ import Foundation
 import Persistence
 
 struct DeviceUpsert: DomainUpsert, Equatable {
-    let id: String
-    let endpointId: Int
+    let id: DeviceIdentifier
     let name: String
     let usage: String
     let kind: String
@@ -23,7 +22,8 @@ extension DomainRepository where Item == Device, Upsert == DeviceUpsert {
             configuration: .init(
                 resolveUpsert: { existing, upsert, timestamp in
                         .upsert(makeDevice(existing: existing, upsert: upsert, timestamp: timestamp))
-                    }
+                    },
+                idValue: sqliteValue
             ),
             createDAO: createDAO,
             now: now,
@@ -44,7 +44,8 @@ extension DomainRepository where Item == Device, Upsert == DeviceUpsert {
 
                 let schema = TableSchema<Device>.codable(
                     table: tableName,
-                    primaryKey: "id"
+                    primaryKey: "id",
+                    options: sqliteCodingOptions
                 )
 
                 return DAO.make(database: database, schema: schema)
@@ -64,6 +65,26 @@ extension DomainRepository where Item == Device, Upsert == DeviceUpsert {
             }
         }
     }
+
+    func observeByDeviceID(_ deviceId: Int) -> some AsyncSequence<[Device], Never> & Sendable {
+        observeAll()
+            .map { devices in
+                devices.filter { $0.deviceId == deviceId }
+            }
+            .removeDuplicates()
+    }
+
+    func setShutterTargetPosition(
+        deviceIds: [DeviceIdentifier],
+        target: Int?
+    ) throws {
+        try mutateByIDs(deviceIds) { device in
+            guard device.resolvedUsage == .shutter else {
+                return
+            }
+            device.shutterTargetPosition = target
+        }
+    }
     
     private static func makeDevice(
         existing: Device?,
@@ -72,12 +93,13 @@ extension DomainRepository where Item == Device, Upsert == DeviceUpsert {
     ) -> Device {
         Device(
             id: upsert.id,
-            endpointId: upsert.endpointId,
+            deviceId: upsert.id.deviceId,
+            endpointId: upsert.id.endpointId,
             name: upsert.name,
             usage: upsert.usage,
             kind: upsert.kind,
-            data: existing?.data.mergedDictionary(incoming: upsert.data) ?? [:],
-            metadata: existing?.metadata.mergedDictionary(incoming: upsert.metadata),
+            data: existing?.data.mergedDictionary(incoming: upsert.data) ?? upsert.data,
+            metadata: existing?.metadata.mergedDictionary(incoming: upsert.metadata) ?? upsert.metadata,
             isFavorite: existing?.isFavorite ?? false,
             dashboardOrder: existing?.dashboardOrder,
             shutterTargetPosition: existing?.shutterTargetPosition,
@@ -90,6 +112,7 @@ extension DomainRepository where Item == Device, Upsert == DeviceUpsert {
     private static let createTableSQL = """
     CREATE TABLE IF NOT EXISTS \(tableName) (
         id TEXT PRIMARY KEY,
+        deviceId INTEGER NOT NULL,
         endpointId INTEGER NOT NULL,
         name TEXT NOT NULL,
         usage TEXT NOT NULL,
@@ -107,4 +130,26 @@ extension DomainRepository where Item == Device, Upsert == DeviceUpsert {
     CREATE INDEX IF NOT EXISTS devices_favorites_order_idx
     ON \(tableName) (isFavorite, dashboardOrder);
     """
+
+    private static let sqliteCodingOptions = SQLiteCodingOptions(
+        jsonEncoder: {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            return encoder
+        },
+        jsonDecoder: {
+            JSONDecoder()
+        }
+    )
+
+    private static func sqliteValue(for id: DeviceIdentifier) -> SQLiteValue {
+        let encoder = sqliteCodingOptions.jsonEncoder()
+        if let data = try? encoder.encode(id),
+           let text = String(data: data, encoding: .utf8) {
+            return .text(text)
+        }
+
+        // Fallback keeps lookups stable even if encoding fails unexpectedly.
+        return .text("{\"deviceId\":\(id.deviceId),\"endpointId\":\(id.endpointId)}")
+    }
 }

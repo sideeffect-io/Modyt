@@ -1,221 +1,213 @@
 import Foundation
 import Observation
 
-enum ShutterStep: Int, CaseIterable, Identifiable, Sendable {
+enum ShutterPreset: Int, CaseIterable, Identifiable, Sendable {
     case open = 100
-    case threeQuarter = 75
+    case quarter = 75
     case half = 50
-    case quarter = 25
+    case threeQuarter = 25
     case closed = 0
 
     var id: Int { rawValue }
 
     var accessibilityLabel: String {
         switch self {
-        case .open: return "Open"
-        case .threeQuarter: return "Three quarters open"
-        case .half: return "Half open"
-        case .quarter: return "Quarter open"
-        case .closed: return "Closed"
+        case .open:
+            return "Open"
+        case .quarter:
+            return "Quarter"
+        case .half:
+            return "Half"
+        case .threeQuarter:
+            return "Three quarters"
+        case .closed:
+            return "Closed"
         }
     }
 }
 
-enum TargetTrust: Sendable, Equatable {
-    case trusted
-    case acknowledged(staleStreamTarget: Int)
-}
+enum ShutterState: Sendable, Equatable {
+    case featureIsIdle(deviceIds: [DeviceIdentifier], position: Int, target: Int?)
+    case featureIsStarted(deviceIds: [DeviceIdentifier], position: Int, target: Int?)
+    case shutterIsMovingInApp(deviceIds: [DeviceIdentifier], position: Int, target: Int, hasTargetBeenACKed: Bool = false)
 
-struct Positions: Sendable, Equatable {
-    let actual: Int
-    let target: Int
-    let targetTrust: TargetTrust
-}
-
-enum ShuttersState: Sendable, Equatable {
-    case idle(Positions)
-    case moving(Positions)
-
-    var positions: Positions {
+    var deviceIds: [DeviceIdentifier] {
         switch self {
-        case .idle(let positions), .moving(let positions):
-            return positions
+        case .featureIsIdle(let deviceIds, _, _),
+             .featureIsStarted(let deviceIds, _, _),
+             .shutterIsMovingInApp(let deviceIds, _, _, _):
+            return deviceIds
         }
+    }
+
+    var position: Int {
+        switch self {
+        case .featureIsIdle(_, let position, _),
+             .featureIsStarted(_, let position, _),
+             .shutterIsMovingInApp(_, let position, _, _):
+            return position
+        }
+    }
+
+    var gaugePosition: Int {
+        ShutterPositionMapper.gaugePosition(from: position)
+    }
+
+    var target: Int? {
+        switch self {
+        case .featureIsIdle(_, _, let target),
+             .featureIsStarted(_, _, let target):
+            return target
+        case .shutterIsMovingInApp(_, _, let target, _):
+            return target
+        }
+    }
+
+    var movingTarget: Int? {
+        if case .shutterIsMovingInApp(_, _, let target, _) = self {
+            return target
+        }
+        return nil
     }
 }
 
-enum ShuttersEvent: Sendable, Equatable {
-    case receivedValuesFromStream(actual: Int, target: Int)
-    case setTarget(value: Int)
-    case failedToComplete
+enum ShutterEvent: Sendable, Equatable {
+    case valueWasReceived(position: Int, target: Int?)
+    case targetWasSetInApp(target: Int)
+    case timeoutHasExpired
 }
 
-enum ShuttersEffect: Sendable, Equatable {
-    case startCompletionTimer
-    case cancelCompletionTimer
-    case handleTarget(value: Int)
-    case syncTargetCache(value: Int)
+enum ShutterEffect: Sendable, Equatable {
+    case sendCommand(deviceIds: [DeviceIdentifier], position: Int)
+    case startTimeout
+    case setTarget(deviceIds: [DeviceIdentifier], target: Int?)
 }
 
-enum ShuttersReducer {
+enum ShutterReducer {
     static func reduce(
-        state: ShuttersState,
-        event: ShuttersEvent
-    ) -> (ShuttersState, [ShuttersEffect]) {
+        state: ShutterState,
+        event: ShutterEvent
+    ) -> (ShutterState, [ShutterEffect]) {
+        print("--->>> new event received: state=\(state), event=\(event)")
         switch (state, event) {
-        case let (.idle(current), .receivedValuesFromStream(actual, target)):
-            if actual == target {
-                let nextPositions = Positions(
-                    actual: actual,
-                    target: target,
-                    targetTrust: .trusted
-                )
-                return (.idle(nextPositions), [])
-            }
-
-            let isStreamTargetChanged = target != current.target
-            let nextTarget = if isStreamTargetChanged {
-                target
-            } else {
-                actual
-            }
-            let trust: TargetTrust = if isStreamTargetChanged {
-                .trusted
-            } else {
-                .acknowledged(staleStreamTarget: target)
-            }
-            let nextPositions = Positions(
-                actual: isStreamTargetChanged ? actual : current.actual,
-                target: nextTarget,
-                targetTrust: trust
-            )
-            return (.moving(nextPositions), [.startCompletionTimer])
-
-        case let (.idle(current), .setTarget(value)):
-            guard value != current.target else {
-                return (state, [])
-            }
-            let nextPositions = Positions(
-                actual: current.actual,
-                target: value,
-                targetTrust: .trusted
-            )
+        case let (.featureIsIdle(deviceIds, _, _), .valueWasReceived(position, target)):
             return (
-                .moving(nextPositions),
-                [.handleTarget(value: value), .startCompletionTimer]
-            )
-
-        case (.idle, .failedToComplete):
-            return (state, [])
-
-        case let (.moving(current), .receivedValuesFromStream(actual, target)):
-            if case .acknowledged(let staleTarget) = current.targetTrust {
-                if target == staleTarget {
-                    if actual == current.target {
-                        let nextPositions = Positions(
-                            actual: actual,
-                            target: current.target,
-                            targetTrust: .trusted
-                        )
-                        return (
-                            .idle(nextPositions),
-                            [
-                                .cancelCompletionTimer,
-                                .syncTargetCache(value: current.target),
-                            ]
-                        )
-                    }
-
-                    let nextPositions = Positions(
-                        actual: actual,
-                        target: current.target,
-                        targetTrust: current.targetTrust
-                    )
-                    let effects: [ShuttersEffect] = if actual == current.actual {
-                        []
-                    } else {
-                        [.cancelCompletionTimer, .startCompletionTimer]
-                    }
-                    return (
-                        .moving(nextPositions),
-                        effects
-                    )
-                }
-            }
-
-            if actual == target {
-                let nextPositions = Positions(
-                    actual: actual,
-                    target: target,
-                    targetTrust: .trusted
-                )
-                return (
-                    .idle(nextPositions),
-                    [.cancelCompletionTimer]
-                )
-            }
-
-            if target == current.target {
-                let trust: TargetTrust = if case .acknowledged = current.targetTrust {
-                    .trusted
-                } else {
-                    current.targetTrust
-                }
-                let nextPositions = Positions(
-                    actual: actual,
-                    target: current.target,
-                    targetTrust: trust
-                )
-                let effects: [ShuttersEffect] = if actual == current.actual {
-                    []
-                } else {
-                    [.cancelCompletionTimer, .startCompletionTimer]
-                }
-                return (
-                    .moving(nextPositions),
-                    effects
-                )
-            }
-
-            let nextPositions = Positions(
-                actual: actual,
-                target: target,
-                targetTrust: .trusted
-            )
-            return (
-                .moving(nextPositions),
-                [.cancelCompletionTimer, .startCompletionTimer]
-            )
-
-        case let (.moving(current), .setTarget(value)):
-            guard value != current.target else {
-                return (state, [])
-            }
-            let nextPositions = Positions(
-                actual: current.actual,
-                target: value,
-                targetTrust: .trusted
-            )
-            return (
-                .moving(nextPositions),
-                [.handleTarget(value: value), .cancelCompletionTimer, .startCompletionTimer]
-            )
-
-        case let (.moving(current), .failedToComplete):
-            let target = if case .acknowledged = current.targetTrust {
-                current.actual
-            } else {
-                current.target
-            }
-            let nextPositions = Positions(
-                actual: current.actual,
-                target: target,
-                targetTrust: .trusted
-            )
-            return (
-                .idle(nextPositions),
+                .featureIsStarted(
+                    deviceIds: deviceIds,
+                    position: position,
+                    target: target
+                ),
                 []
             )
+
+        case let (.featureIsStarted(deviceIds, oldPosition, oldTarget), .valueWasReceived(nextPosition, nextTarget)):
+            
+            guard oldPosition != nextPosition && oldTarget != nextTarget else {
+                return (.featureIsStarted(deviceIds: deviceIds, position: oldPosition, target: oldTarget), [])
+            }
+            
+            guard let nextTarget else {
+                return (
+                    .featureIsStarted(
+                        deviceIds: deviceIds,
+                        position: nextPosition,
+                        target: nil
+                    ),
+                    []
+                )
+            }
+
+            return (
+                .shutterIsMovingInApp(
+                    deviceIds: deviceIds,
+                    position: nextPosition,
+                    target: nextTarget
+                ),
+                [
+                    .startTimeout
+                ]
+            )
+
+        case let (.featureIsStarted(deviceIds, position, _), .targetWasSetInApp(target)):
+            let nextTarget = target
+            return (
+                .shutterIsMovingInApp(
+                    deviceIds: deviceIds,
+                    position: position,
+                    target: nextTarget
+                ),
+                [
+                    .sendCommand(deviceIds: deviceIds, position: nextTarget),
+                    .startTimeout,
+                    .setTarget(deviceIds: deviceIds, target: nextTarget),
+                ]
+            )
+
+        case let (
+            .shutterIsMovingInApp(deviceIds, oldPosition, oldTarget, hasTargetBeenACKed),
+            .valueWasReceived(newPosition, newTarget)
+        ):
+            
+            if !hasTargetBeenACKed, newPosition == oldTarget {
+                // frame is probably an ack for the target
+                return
+                    (
+                        .shutterIsMovingInApp(
+                            deviceIds: deviceIds,
+                            position: oldPosition,
+                            target: oldTarget,
+                            hasTargetBeenACKed: true),
+                        []
+                    )
+            }
+            
+            if newTarget == oldTarget, newPosition.isAlmostEqual(to: oldTarget) {
+                return (
+                    .featureIsStarted(
+                        deviceIds: deviceIds,
+                        position: newPosition,
+                        target: nil
+                    ),
+                    [.setTarget(deviceIds: deviceIds, target: nil)]
+                )
+            }
+            
+            if newTarget != oldTarget {
+                if let newTarget {
+                    return (
+                        .shutterIsMovingInApp(
+                            deviceIds: deviceIds,
+                            position: newPosition,
+                            target: newTarget,
+                            hasTargetBeenACKed: hasTargetBeenACKed
+                        ),
+                        [.startTimeout]
+                    )
+                }
+            }
+
+            return (
+                .shutterIsMovingInApp(
+                    deviceIds: deviceIds,
+                    position: newPosition,
+                    target: oldTarget,
+                    hasTargetBeenACKed: hasTargetBeenACKed
+                ),
+                []
+            )
+
+        case let (.shutterIsMovingInApp(deviceIds, position, _, _), .timeoutHasExpired):
+            return (
+                .featureIsStarted(
+                    deviceIds: deviceIds,
+                    position: position,
+                    target: nil
+                ),
+                [.setTarget(deviceIds: deviceIds, target: nil)]
+            )
+
+        default:
+            return (state, [])
         }
     }
 }
@@ -224,238 +216,200 @@ enum ShuttersReducer {
 @MainActor
 final class ShutterStore {
     struct Dependencies {
-        let observePositions: @Sendable ([String]) async -> any AsyncSequence<(actual: Int, target: Int), Never> & Sendable
-        let sendTargetPosition: @Sendable ([String], Int) async -> Void
-        let syncTargetCache: @Sendable ([String], Int) async -> Void
-        let startCompletionTimer: @Sendable (@escaping @MainActor @Sendable () -> Void) -> Task<Void, Never>
-        let log: @Sendable (String) -> Void
+        let observeDevices: @Sendable ([DeviceIdentifier]) async -> any AsyncSequence<[Device], Never> & Sendable
+        let sendCommand: @Sendable ([DeviceIdentifier], Int) async -> Void
+        let sleep: @Sendable () async throws -> Void
+        let setTarget: @Sendable ([DeviceIdentifier], Int?) async -> Void
 
         init(
-            observePositions: @escaping @Sendable ([String]) async -> any AsyncSequence<(actual: Int, target: Int), Never> & Sendable,
-            sendTargetPosition: @escaping @Sendable ([String], Int) async -> Void,
-            syncTargetCache: @escaping @Sendable ([String], Int) async -> Void = { _, _ in },
-            startCompletionTimer: @escaping @Sendable (@escaping @MainActor @Sendable () -> Void) -> Task<Void, Never>,
-            log: @escaping @Sendable (String) -> Void = { _ in }
+            observeDevices: @escaping @Sendable ([DeviceIdentifier]) async -> any AsyncSequence<[Device], Never> & Sendable,
+            sendCommand: @escaping @Sendable ([DeviceIdentifier], Int) async -> Void,
+            sleep: @escaping @Sendable () async throws -> Void,
+            setTarget: @escaping @Sendable ([DeviceIdentifier], Int?) async -> Void
         ) {
-            self.observePositions = observePositions
-            self.sendTargetPosition = sendTargetPosition
-            self.syncTargetCache = syncTargetCache
-            self.startCompletionTimer = startCompletionTimer
-            self.log = log
+            self.observeDevices = observeDevices
+            self.sendCommand = sendCommand
+            self.sleep = sleep
+            self.setTarget = setTarget
         }
     }
 
-    private(set) var state: ShuttersState
+    private(set) var state: ShutterState
 
-    private let shutterUniqueIds: [String]
     private let dependencies: Dependencies
     private let observationTask = TaskHandle()
-    private var completionTimerTask: Task<Void, Never>?
+    private var timeoutTask: Task<Void, Never>?
     private let worker: Worker
-    private var streamUpdateSequence: UInt64 = 0
 
-    var actualPosition: Int {
-        state.positions.actual
+    var position: Int {
+        state.position
     }
 
-    var targetPosition: Int {
-        state.positions.target
+    var gaugePosition: Int {
+        state.gaugePosition
     }
 
-    var isTargetReliable: Bool {
-        switch state.positions.targetTrust {
-        case .trusted, .acknowledged:
-            return true
-        }
+    var target: Int? {
+        state.target
     }
 
-    var isMoving: Bool {
-        if case .moving = state {
-            return true
-        }
-        return false
+    var movingTarget: Int? {
+        state.movingTarget
     }
 
     init(
-        shutterUniqueIds: [String],
+        deviceIds: [DeviceIdentifier],
         dependencies: Dependencies
     ) {
-        self.state = .idle(Positions(actual: 100, target: 100, targetTrust: .trusted))
-        self.shutterUniqueIds = shutterUniqueIds
+        let orderedDeviceIds = deviceIds.uniquePreservingOrder()
+        self.state = .featureIsIdle(
+            deviceIds: orderedDeviceIds,
+            position: 0,
+            target: nil
+        )
         self.dependencies = dependencies
         self.worker = Worker(
-            observePositions: dependencies.observePositions,
-            sendTargetPosition: dependencies.sendTargetPosition,
-            syncTargetCache: dependencies.syncTargetCache
+            observeDevices: dependencies.observeDevices,
+            sendCommand: dependencies.sendCommand,
+            setTarget: dependencies.setTarget
         )
-        let ids = shutterUniqueIds.joined(separator: ",")
-        dependencies.log("ShutterTrace store init ids=\(ids)")
 
-        observationTask.task = Task { [weak self, worker, shutterUniqueIds] in
-            await worker.observePositions(shutterUniqueIds: shutterUniqueIds) { [weak self] actual, target in
-                self?.send(.receivedValuesFromStream(actual: actual, target: target))
+        observationTask.task = Task { [weak self, worker, orderedDeviceIds] in
+            await worker.observe(deviceIds: orderedDeviceIds) { [weak self] positions in
+                await self?.handleIncomingDevices(positions)
             }
         }
     }
 
-    deinit {
-        let ids = shutterUniqueIds.joined(separator: ",")
-        dependencies.log("ShutterTrace store deinit ids=\(ids)")
-    }
-
-    func send(_ event: ShuttersEvent) {
-        let traceToken = nextTraceToken(for: event)
+    func send(_ event: ShutterEvent) {
         let previousState = state
-        let (nextState, effects) = ShuttersReducer.reduce(state: state, event: event)
+        let (nextState, effects) = ShutterReducer.reduce(state: state, event: event)
         state = nextState
-        let ids = shutterUniqueIds.joined(separator: ",")
-        let effectSummary = effects.map(Self.describeEffect).joined(separator: ",")
-        dependencies.log(
-            "ShutterStore transition ids=\(ids) trace=\(traceToken) event=\(Self.describeEvent(event)) actual=\(previousState.positions.actual)->\(nextState.positions.actual) target=\(previousState.positions.target)->\(nextState.positions.target) trust=\(previousState.positions.targetTrust)->\(nextState.positions.targetTrust) moving=\(Self.isMoving(previousState))->\(Self.isMoving(nextState)) effects=[\(effectSummary)]"
-        )
+
+        if Self.isMoving(previousState) && Self.isMoving(nextState) == false {
+            timeoutTask?.cancel()
+            timeoutTask = nil
+        }
+
         handle(effects)
     }
 
-    private func nextTraceToken(for event: ShuttersEvent) -> String {
-        switch event {
-        case .receivedValuesFromStream:
-            streamUpdateSequence += 1
-            return "stream-\(streamUpdateSequence)"
-        case .setTarget:
-            return "target-\(streamUpdateSequence)"
-        case .failedToComplete:
-            return "timer-\(streamUpdateSequence)"
-        }
+    private func handleIncomingDevices(_ positions: (position: Int, target: Int?)) {
+        send(
+            .valueWasReceived(
+                position: positions.position,
+                target: positions.target
+            )
+        )
     }
 
-    private func handle(_ effects: [ShuttersEffect]) {
+    private func handle(_ effects: [ShutterEffect]) {
+        print("--->>> new effects received: effects=\(effects)")
+
         for effect in effects {
-            handle(effect)
-        }
-    }
-
-    private func handle(_ effect: ShuttersEffect) {
-        switch effect {
-        case .startCompletionTimer:
-            completionTimerTask?.cancel()
-            completionTimerTask = dependencies.startCompletionTimer { [weak self] in
-                guard let self else { return }
-                self.completionTimerTask = nil
-                self.send(.failedToComplete)
-            }
-
-        case .cancelCompletionTimer:
-            completionTimerTask?.cancel()
-            completionTimerTask = nil
-
-        case .handleTarget(let value):
-            let shutterUniqueIds = self.shutterUniqueIds
-            Task { [worker] in
-                await worker.sendTargetPosition(
-                    shutterUniqueIds: shutterUniqueIds,
-                    target: value
-                )
-            }
-
-        case .syncTargetCache(let value):
-            guard shutterUniqueIds.count == 1 else {
-                let ids = shutterUniqueIds.joined(separator: ",")
-                dependencies.log(
-                    "Shutter target sync skipped ids=\(ids) reason=multi-id-store inferredTarget=\(value)"
-                )
-                return
-            }
-            let shutterUniqueIds = self.shutterUniqueIds
-            Task { [worker] in
-                await worker.syncTargetCache(
-                    shutterUniqueIds: shutterUniqueIds,
-                    target: value
-                )
+            switch effect {
+            case .sendCommand(let deviceIds, let position):
+                Task { [worker] in
+                    await worker.sendCommand(deviceIds: deviceIds, position: position)
+                }
+            case .startTimeout:
+                timeoutTask?.cancel()
+                timeoutTask = Task { [weak self] in
+                    do {
+                        try await self?.dependencies.sleep()
+                        self?.send(.timeoutHasExpired)
+                    } catch {
+                        
+                    }
+                }
+            case .setTarget(let deviceIds, let target):
+                timeoutTask?.cancel()
+                Task { [worker] in
+                    await worker.setTarget(deviceIds: deviceIds, target: target)
+                }
             }
         }
     }
 
     private actor Worker {
-        private let observePositionsSource: @Sendable ([String]) async -> any AsyncSequence<(actual: Int, target: Int), Never> & Sendable
-        private let sendTargetPositionAction: @Sendable ([String], Int) async -> Void
-        private let syncTargetCacheAction: @Sendable ([String], Int) async -> Void
+        private let observeDevicesSource: @Sendable ([DeviceIdentifier]) async -> any AsyncSequence<[Device], Never>
+        private let sendCommandAction: @Sendable ([DeviceIdentifier], Int) async -> Void
+        private let setTargetAction: @Sendable ([DeviceIdentifier], Int?) async -> Void
 
         init(
-            observePositions: @escaping @Sendable ([String]) async -> any AsyncSequence<(actual: Int, target: Int), Never> & Sendable,
-            sendTargetPosition: @escaping @Sendable ([String], Int) async -> Void,
-            syncTargetCache: @escaping @Sendable ([String], Int) async -> Void
+            observeDevices: @escaping @Sendable ([DeviceIdentifier]) async -> any AsyncSequence<[Device], Never>,
+            sendCommand: @escaping @Sendable ([DeviceIdentifier], Int) async -> Void,
+            setTarget: @escaping @Sendable ([DeviceIdentifier], Int?) async -> Void
         ) {
-            self.observePositionsSource = observePositions
-            self.sendTargetPositionAction = sendTargetPosition
-            self.syncTargetCacheAction = syncTargetCache
+            self.observeDevicesSource = observeDevices
+            self.sendCommandAction = sendCommand
+            self.setTargetAction = setTarget
         }
 
-        func observePositions(
-            shutterUniqueIds: [String],
-            onUpdate: @escaping @MainActor @Sendable (Int, Int) -> Void
+        func observe(
+            deviceIds: [DeviceIdentifier],
+            onValues: @escaping @Sendable ((position: Int, target: Int?)) async -> Void
         ) async {
-            let stream = await observePositionsSource(shutterUniqueIds)
+            let stream = await observeDevicesSource(deviceIds)
+            
+            var previousValues: (position: Int, target: Int?)? = nil
+            
             for await values in stream {
                 guard !Task.isCancelled else { return }
-                await onUpdate(values.actual, values.target)
+                let averageValues = Self.averageValues(devices: values)
+                if let truePreviousValues = previousValues {
+                    if truePreviousValues.position != averageValues.position || truePreviousValues.target != averageValues.target {
+                        await onValues(averageValues)
+                    }
+                    previousValues = averageValues
+                } else {
+                    await onValues(averageValues)
+                    previousValues = averageValues
+                }
             }
         }
 
-        func sendTargetPosition(
-            shutterUniqueIds: [String],
-            target: Int
-        ) async {
-            await sendTargetPositionAction(shutterUniqueIds, target)
+        func sendCommand(deviceIds: [DeviceIdentifier], position: Int) async {
+            await sendCommandAction(deviceIds, position)
         }
 
-        func syncTargetCache(
-            shutterUniqueIds: [String],
-            target: Int
-        ) async {
-            await syncTargetCacheAction(shutterUniqueIds, target)
+        func setTarget(deviceIds: [DeviceIdentifier], target: Int?) async {
+            await setTargetAction(deviceIds, target)
+        }
+        
+        private static func averageValues(devices: [Device]) -> (position: Int, target: Int?) {
+            let positions = devices.compactMap(rawPosition(from:))
+            let position = average(of: positions) ?? 0
+
+            let targets = devices.compactMap(\.shutterTargetPosition)
+            let target = average(of: targets)
+
+            return (position, target)
+        }
+        
+        private static func average(of values: [Int]) -> Int? {
+            guard values.isEmpty == false else { return nil }
+            let sum = values.reduce(0, +)
+            let average = Double(sum) / Double(values.count)
+            return Int(average.rounded())
+        }
+        
+        private static func rawPosition(from device: Device) -> Int? {
+            device.shutterPosition
         }
     }
 
-    private static func isMoving(_ state: ShuttersState) -> Bool {
-        if case .moving = state {
+    private static func isMoving(_ state: ShutterState) -> Bool {
+        if case .shutterIsMovingInApp = state {
             return true
         }
         return false
-    }
-
-    private static func describeEvent(_ event: ShuttersEvent) -> String {
-        switch event {
-        case .receivedValuesFromStream(let actual, let target):
-            return "receivedValuesFromStream(actual:\(actual),target:\(target))"
-        case .setTarget(let value):
-            return "setTarget(value:\(value))"
-        case .failedToComplete:
-            return "failedToComplete"
-        }
-    }
-
-    private static func describeEffect(_ effect: ShuttersEffect) -> String {
-        switch effect {
-        case .startCompletionTimer:
-            return "startCompletionTimer"
-        case .cancelCompletionTimer:
-            return "cancelCompletionTimer"
-        case .handleTarget(let value):
-            return "handleTarget(value:\(value))"
-        case .syncTargetCache(let value):
-            return "syncTargetCache(value:\(value))"
-        }
     }
 }
 
 private final class TaskHandle {
     var task: Task<Void, Never>? {
         didSet { oldValue?.cancel() }
-    }
-
-    func cancel() {
-        task?.cancel()
-        task = nil
     }
 
     deinit {

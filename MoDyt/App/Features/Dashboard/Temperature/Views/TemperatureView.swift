@@ -4,10 +4,10 @@ struct TemperatureView: View {
     @Environment(\.temperatureStoreFactory) private var temperatureStoreFactory
     @Environment(\.colorScheme) private var colorScheme
 
-    let uniqueId: String
+    let identifier: DeviceIdentifier
 
     var body: some View {
-        WithStoreView(factory: { temperatureStoreFactory.make(uniqueId) }) { store in
+        WithStoreView(factory: { temperatureStoreFactory.make(identifier) }) { store in
             valueContent(descriptor: store.descriptor)
         }
     }

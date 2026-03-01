@@ -15,7 +15,7 @@ actor GroupDatasource {
     }
 
     private struct MemberEndpoint {
-        let uniqueId: String
+        let identifier: DeviceIdentifier
         let deviceId: Int
         let endpointId: Int
         let device: DeviceRecord?
@@ -33,8 +33,8 @@ actor GroupDatasource {
     private var controlObservers: [UUID: (uniqueId: String, continuation: AsyncStream<DeviceRecord?>.Continuation)] = [:]
 
     private var metadataByGroupId: [Int: TydomGroupMetadata] = [:]
-    private var membershipByGroupId: [Int: [String]] = [:]
-    private var devicesByUniqueId: [String: DeviceRecord] = [:]
+    private var membershipByGroupId: [Int: [DeviceIdentifier]] = [:]
+    private var devicesByIdentifier: [DeviceIdentifier: DeviceRecord] = [:]
     private var deviceObservationTask: Task<Void, Never>?
 
     private var optimisticLightDataByUniqueId: [String: [String: PayloadValue]] = [:]
@@ -56,13 +56,14 @@ actor GroupDatasource {
         if dao != nil { return }
 
         let db = try await SQLiteDatabase(path: databasePath)
+        try? await db.execute(Self.renameLegacyMemberUniqueIdsColumnSQL)
         try await db.execute(Self.createGroupsTableSQL)
         let schema = TableSchema<GroupRecord>.codable(table: "groups", primaryKey: "uniqueId")
         let groupDAO = DAO.make(database: db, schema: schema)
 
         let existing = (try? await groupDAO.list()) ?? []
         groupsByUniqueId = Dictionary(uniqueKeysWithValues: existing.map { ($0.uniqueId, $0) })
-        membershipByGroupId = Dictionary(uniqueKeysWithValues: existing.map { ($0.groupId, $0.memberUniqueIds) })
+        membershipByGroupId = Dictionary(uniqueKeysWithValues: existing.map { ($0.groupId, $0.memberIdentifiers) })
 
         database = db
         dao = groupDAO
@@ -142,7 +143,7 @@ actor GroupDatasource {
     func toggleFavorite(uniqueId: String) async {
         guard var existing = groupsByUniqueId[uniqueId] else { return }
         guard existing.isGroupUser else { return }
-        guard existing.memberUniqueIds.isEmpty == false else { return }
+        guard existing.memberIdentifiers.isEmpty == false else { return }
 
         if existing.isFavorite {
             existing.isFavorite = false
@@ -273,12 +274,12 @@ actor GroupDatasource {
 
         for groupMetadata in metadata {
             let existing = existingByGroupId[groupMetadata.id]
-            let members = membershipByGroupId[groupMetadata.id] ?? existing?.memberUniqueIds ?? []
+            let members = membershipByGroupId[groupMetadata.id] ?? existing?.memberIdentifiers ?? []
             let merged = makeRecord(
                 groupId: groupMetadata.id,
                 metadata: groupMetadata,
                 existing: existing,
-                memberUniqueIds: members
+                memberIdentifiers: members
             )
             await upsertRecord(merged)
         }
@@ -290,7 +291,7 @@ actor GroupDatasource {
         _ = try? await requireDAO()
 
         for group in groups {
-            membershipByGroupId[group.id] = Self.memberUniqueIds(from: group)
+            membershipByGroupId[group.id] = Self.memberIdentifiers(from: group)
         }
 
         let existingByGroupId = Dictionary(
@@ -304,12 +305,12 @@ actor GroupDatasource {
         for groupId in allGroupIds {
             let existing = existingByGroupId[groupId]
             let metadata = metadataByGroupId[groupId]
-            let members = membershipByGroupId[groupId] ?? existing?.memberUniqueIds ?? []
+            let members = membershipByGroupId[groupId] ?? existing?.memberIdentifiers ?? []
             let merged = makeRecord(
                 groupId: groupId,
                 metadata: metadata,
                 existing: existing,
-                memberUniqueIds: members
+                memberIdentifiers: members
             )
             await upsertRecord(merged)
         }
@@ -321,9 +322,9 @@ actor GroupDatasource {
         groupId: Int,
         metadata: TydomGroupMetadata?,
         existing: GroupRecord?,
-        memberUniqueIds: [String]
+        memberIdentifiers: [DeviceIdentifier]
     ) -> GroupRecord {
-        let normalizedMembers = Self.uniqueOrdered(memberUniqueIds)
+        let normalizedMembers = Self.uniqueOrdered(memberIdentifiers)
         let isEmptyGroup = normalizedMembers.isEmpty
         let isUserGroup = metadata?.isGroupUser ?? existing?.isGroupUser ?? false
         let isFavorite = (!isUserGroup || isEmptyGroup) ? false : (existing?.isFavorite ?? false)
@@ -338,7 +339,7 @@ actor GroupDatasource {
             picto: metadata?.picto ?? existing?.picto,
             isGroupUser: isUserGroup,
             isGroupAll: metadata?.isGroupAll ?? existing?.isGroupAll ?? false,
-            memberUniqueIds: normalizedMembers,
+            memberIdentifiers: normalizedMembers,
             isFavorite: isFavorite,
             favoriteOrder: favoriteOrder,
             dashboardOrder: dashboardOrder,
@@ -359,7 +360,11 @@ actor GroupDatasource {
     }
 
     private func syncDevices(_ devices: [DeviceRecord]) async {
-        devicesByUniqueId = Dictionary(uniqueKeysWithValues: devices.map { ($0.uniqueId, $0) })
+        devicesByIdentifier = Dictionary(
+            uniqueKeysWithValues: devices.map {
+                (DeviceIdentifier(deviceId: $0.deviceId, endpointId: $0.endpointId), $0)
+            }
+        )
 
         // Keep optimistic light state during partial fan-out transitions and
         // release it only once actual member state converges (or override expires).
@@ -523,10 +528,9 @@ actor GroupDatasource {
     }
 
     private func lightDescriptor(for group: GroupRecord) -> DrivingLightControlDescriptor? {
-        let descriptors = group.memberUniqueIds
-            .compactMap { memberUniqueId in
-                devicesByUniqueId[memberUniqueId]?.drivingLightControlDescriptor()
-            }
+        let descriptors = group.memberIdentifiers.compactMap { memberIdentifier in
+            devicesByIdentifier[memberIdentifier]?.drivingLightControlDescriptor()
+        }
         guard descriptors.isEmpty == false else { return nil }
 
         let maxNormalized = descriptors.reduce(0.0) { partial, descriptor in
@@ -698,13 +702,12 @@ actor GroupDatasource {
     }
 
     private func resolveMemberEndpoints(for group: GroupRecord) -> [MemberEndpoint] {
-        group.memberUniqueIds.compactMap { memberUniqueId in
-            guard let parsed = Self.parseMemberUniqueId(memberUniqueId) else { return nil }
-            let resolvedDevice = devicesByUniqueId[memberUniqueId]
+        group.memberIdentifiers.map { memberIdentifier in
+            let resolvedDevice = devicesByIdentifier[memberIdentifier]
             return MemberEndpoint(
-                uniqueId: memberUniqueId,
-                deviceId: resolvedDevice?.deviceId ?? parsed.deviceId,
-                endpointId: resolvedDevice?.endpointId ?? parsed.endpointId,
+                identifier: memberIdentifier,
+                deviceId: resolvedDevice?.deviceId ?? memberIdentifier.deviceId,
+                endpointId: resolvedDevice?.endpointId ?? memberIdentifier.endpointId,
                 device: resolvedDevice
             )
         }
@@ -720,7 +723,7 @@ actor GroupDatasource {
         }
 
         groupsByUniqueId[record.uniqueId] = record
-        membershipByGroupId[record.groupId] = record.memberUniqueIds
+        membershipByGroupId[record.groupId] = record.memberIdentifiers
     }
 
     private func deleteRecord(uniqueId: String) async {
@@ -746,18 +749,8 @@ actor GroupDatasource {
             resolvedGroup: DeviceGroup.from(usage: group.usage),
             dashboardOrder: group.dashboardOrder ?? group.favoriteOrder,
             source: .group,
-            memberUniqueIds: group.memberUniqueIds
+            memberIdentifiers: group.memberIdentifiers
         )
-    }
-
-    private static func parseMemberUniqueId(_ uniqueId: String) -> (endpointId: Int, deviceId: Int)? {
-        let components = uniqueId.split(separator: "_")
-        guard components.count == 2,
-              let endpointId = Int(components[0]),
-              let deviceId = Int(components[1]) else {
-            return nil
-        }
-        return (endpointId, deviceId)
     }
 
     private static func normalizedValueForGroupControl(_ value: PayloadValue) -> Double {
@@ -779,24 +772,24 @@ actor GroupDatasource {
         return 0
     }
 
-    private static func memberUniqueIds(from group: TydomGroup) -> [String] {
-        var memberIds: [String] = []
+    private static func memberIdentifiers(from group: TydomGroup) -> [DeviceIdentifier] {
+        var memberIds: [DeviceIdentifier] = []
         for device in group.devices {
             if device.endpoints.isEmpty {
-                memberIds.append("\(device.id)_\(device.id)")
+                memberIds.append(.init(deviceId: device.id, endpointId: device.id))
                 continue
             }
 
             for endpoint in device.endpoints {
-                memberIds.append("\(endpoint.id)_\(device.id)")
+                memberIds.append(.init(deviceId: device.id, endpointId: endpoint.id))
             }
         }
         return uniqueOrdered(memberIds)
     }
 
-    private static func uniqueOrdered(_ values: [String]) -> [String] {
-        var seen = Set<String>()
-        var result: [String] = []
+    private static func uniqueOrdered<T: Hashable>(_ values: [T]) -> [T] {
+        var seen = Set<T>()
+        var result: [T] = []
         for value in values where !seen.contains(value) {
             seen.insert(value)
             result.append(value)
@@ -816,11 +809,15 @@ actor GroupDatasource {
         picto TEXT,
         isGroupUser INTEGER NOT NULL,
         isGroupAll INTEGER NOT NULL,
-        memberUniqueIds TEXT NOT NULL,
+        memberIdentifiers TEXT NOT NULL,
         isFavorite INTEGER NOT NULL,
         favoriteOrder INTEGER,
         dashboardOrder INTEGER,
         updatedAt REAL NOT NULL
     );
+    """
+
+    private static let renameLegacyMemberUniqueIdsColumnSQL = """
+    ALTER TABLE groups RENAME COLUMN memberUniqueIds TO memberIdentifiers;
     """
 }

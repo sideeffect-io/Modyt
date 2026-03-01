@@ -21,7 +21,8 @@ extension DomainRepository where Item == Scene, Upsert == SceneUpsert {
     ) -> Self {
         Self(
             configuration: .init(
-                resolveUpsert: resolveUpsert
+                resolveUpsert: resolveUpsert,
+                idValue: { .text($0) }
             ),
             createDAO: createDAO,
             now: now,

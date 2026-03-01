@@ -6,12 +6,12 @@ import Testing
 struct SunlightDescriptorTests {
     @Test
     func sunlightDescriptorUsesPreferredKeyWithDefaultRange() async {
-        let streamBox = BufferedStreamBox<Device?>()
+        let streamBox = DeviceStreamBox()
         let store = makeStore(streamBox: streamBox)
 
         streamBox.yield(
             makeSunlightRepositoryDevice(
-                id: "sun-1",
+                identifier: .init(deviceId: 1, endpointId: 1),
                 name: "Ensoleillement",
                 usage: "unknownSunSensor",
                 data: [
@@ -36,12 +36,12 @@ struct SunlightDescriptorTests {
 
     @Test
     func sunlightDescriptorConvertsKilowattUnitToWattsPerSquareMeter() async {
-        let streamBox = BufferedStreamBox<Device?>()
+        let streamBox = DeviceStreamBox()
         let store = makeStore(streamBox: streamBox)
 
         streamBox.yield(
             makeSunlightRepositoryDevice(
-                id: "sun-2",
+                identifier: .init(deviceId: 2, endpointId: 1),
                 name: "Roof Sensor",
                 usage: "weather",
                 data: [
@@ -67,7 +67,7 @@ struct SunlightDescriptorTests {
         #expect(store.descriptor?.unitSymbol == "W/m2")
     }
 
-    private func makeStore(streamBox: BufferedStreamBox<Device?>) -> SunlightStore {
+    private func makeStore(streamBox: DeviceStreamBox) -> SunlightStore {
         SunlightStore(
             dependencies: .init(
                 observeSunlight: { streamBox.stream }
@@ -76,15 +76,16 @@ struct SunlightDescriptorTests {
     }
 
     private func makeSunlightRepositoryDevice(
-        id: String,
+        identifier: DeviceIdentifier,
         name: String,
         usage: String,
         data: [String: JSONValue],
         metadata: [String: JSONValue]? = nil
     ) -> Device {
         Device(
-            id: id,
-            endpointId: 1,
+            id: identifier,
+            deviceId: identifier.deviceId,
+            endpointId: identifier.endpointId,
             name: name,
             usage: usage,
             kind: "sensor",
@@ -119,7 +120,7 @@ struct SunlightStoreTests {
 
     @Test
     func observationUpdatesDescriptorFromIncomingDescriptor() async {
-        let streamBox = BufferedStreamBox<Device?>()
+        let streamBox = DeviceStreamBox()
         let store = SunlightStore(
             initialDescriptor: makeSunlightDescriptor(value: 250),
             dependencies: .init(
@@ -129,7 +130,7 @@ struct SunlightStoreTests {
 
         streamBox.yield(
             makeSunlightRepositoryDevice(
-                id: "sun-11",
+                identifier: .init(deviceId: 11, endpointId: 1),
                 name: "Sunlight",
                 usage: "weather",
                 data: ["lightPower": .number(740)]
@@ -145,7 +146,7 @@ struct SunlightStoreTests {
 
     @Test
     func observationClearsDescriptorWhenDeviceDisappears() async {
-        let streamBox = BufferedStreamBox<Device?>()
+        let streamBox = DeviceStreamBox()
         let store = SunlightStore(
             initialDescriptor: makeSunlightDescriptor(value: 180),
             dependencies: .init(
@@ -163,15 +164,16 @@ struct SunlightStoreTests {
     }
 
     private func makeSunlightRepositoryDevice(
-        id: String,
+        identifier: DeviceIdentifier,
         name: String,
         usage: String,
         data: [String: JSONValue],
         metadata: [String: JSONValue]? = nil
     ) -> Device {
         Device(
-            id: id,
-            endpointId: 1,
+            id: identifier,
+            deviceId: identifier.deviceId,
+            endpointId: identifier.endpointId,
             name: name,
             usage: usage,
             kind: "sensor",
@@ -200,5 +202,37 @@ struct SunlightStoreTests {
                 batteryLevel: batteryLevel
             )
         )
+    }
+}
+
+@MainActor
+private func waitUntil(
+    cycles: Int = 30,
+    condition: @escaping @MainActor () -> Bool
+) async -> Bool {
+    for _ in 0..<cycles {
+        if condition() {
+            return true
+        }
+        await Task.yield()
+    }
+    return condition()
+}
+
+private final class DeviceStreamBox: @unchecked Sendable {
+    let stream: AsyncStream<Device?>
+
+    private let continuation: AsyncStream<Device?>.Continuation
+
+    init() {
+        var localContinuation: AsyncStream<Device?>.Continuation?
+        self.stream = AsyncStream { continuation in
+            localContinuation = continuation
+        }
+        self.continuation = localContinuation!
+    }
+
+    func yield(_ value: Device?) {
+        continuation.yield(value)
     }
 }

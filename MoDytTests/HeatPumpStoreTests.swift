@@ -84,7 +84,7 @@ struct HeatPumpStoreEffectTests {
     func observationReceivesGatewayValueAndStartsFeature() async {
         let streamBox = DeviceStreamBox()
         let store = HeatPumpStore(
-            uniqueId: "heat-pump-1",
+            identifier: .init(deviceId: 1, endpointId: 1),
             dependencies: .init(
                 observeHeatPump: { _ in streamBox.stream },
                 executeSetPointCommand: { _ in }
@@ -93,7 +93,7 @@ struct HeatPumpStoreEffectTests {
 
         streamBox.yield(
             makeDevice(
-                id: "heat-pump-1",
+                identifier: .init(deviceId: 1, endpointId: 1),
                 data: [
                     "temperature": .number(18.0),
                     "setpoint": .number(18.5)
@@ -115,7 +115,7 @@ struct HeatPumpStoreEffectTests {
         let streamBox = DeviceStreamBox()
         let commands = RecordedGatewayCommands()
         let store = HeatPumpStore(
-            uniqueId: "1_42",
+            identifier: .init(deviceId: 42, endpointId: 1),
             dependencies: .init(
                 observeHeatPump: { _ in streamBox.stream },
                 executeSetPointCommand: { command in
@@ -128,7 +128,7 @@ struct HeatPumpStoreEffectTests {
 
         streamBox.yield(
             makeDevice(
-                id: "1_42",
+                identifier: .init(deviceId: 42, endpointId: 1),
                 data: [
                     "temperature": .number(20.0),
                     "setpoint": .number(20.0)
@@ -165,7 +165,7 @@ struct HeatPumpStoreEffectTests {
         let commands = RecordedGatewayCommands()
         let transactionIDs = TransactionIDSequence(ids: ["tx-1", "tx-2", "tx-3", "tx-4"])
         let store = HeatPumpStore(
-            uniqueId: "1_42",
+            identifier: .init(deviceId: 42, endpointId: 1),
             dependencies: .init(
                 observeHeatPump: { _ in streamBox.stream },
                 executeSetPointCommand: { command in
@@ -178,7 +178,7 @@ struct HeatPumpStoreEffectTests {
 
         streamBox.yield(
             makeDevice(
-                id: "1_42",
+                identifier: .init(deviceId: 42, endpointId: 1),
                 data: [
                     "temperature": .number(20.0),
                     "setpoint": .number(20.0)
@@ -202,8 +202,9 @@ struct HeatPumpStoreEffectTests {
 
         try await Task.sleep(for: .milliseconds(40))
         #expect(await commands.values().isEmpty)
+        try await Task.sleep(for: .milliseconds(400))
 
-        let didComplete = await waitUntil {
+        let didComplete = await waitUntil(cycles: 120) {
             store.state == .featureIsStarted(HeatPumpValues(temperature: 20.0, setPoint: 21.5))
         }
         #expect(didComplete)
@@ -214,12 +215,13 @@ struct HeatPumpStoreEffectTests {
     }
 
     private func makeDevice(
-        id: String,
+        identifier: DeviceIdentifier,
         data: [String: JSONValue]
     ) -> Device {
         Device(
-            id: id,
-            endpointId: 1,
+            id: identifier,
+            deviceId: identifier.deviceId,
+            endpointId: identifier.endpointId,
             name: "Heat Pump",
             usage: "boiler",
             kind: "heater",

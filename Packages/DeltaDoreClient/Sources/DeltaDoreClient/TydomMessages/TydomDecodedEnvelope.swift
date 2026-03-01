@@ -96,28 +96,29 @@ struct TydomDeviceUpdate: Sendable, Equatable {
         case cdata
     }
 
-    let id: Int
+    let deviceId: Int
     let endpointId: Int
-    let uniqueId: String
     let data: [String: PayloadValue]
     let entries: [TydomDeviceDataEntry]
     let metadata: [String: PayloadValue]?
     let cdataEntries: [PayloadValue]?
     let source: Source
 
+    var identifier: TydomDeviceIdentifier {
+        TydomDeviceIdentifier(deviceId: deviceId, endpointId: endpointId)
+    }
+
     init(
-        id: Int,
+        deviceId: Int,
         endpointId: Int,
-        uniqueId: String,
         data: [String: PayloadValue],
         entries: [TydomDeviceDataEntry] = [],
         metadata: [String: PayloadValue]? = nil,
         cdataEntries: [PayloadValue]? = nil,
         source: Source
     ) {
-        self.id = id
+        self.deviceId = deviceId
         self.endpointId = endpointId
-        self.uniqueId = uniqueId
         self.data = data
         self.entries = entries
         self.metadata = metadata

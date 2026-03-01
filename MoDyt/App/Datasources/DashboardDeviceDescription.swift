@@ -15,7 +15,7 @@ struct DashboardDeviceDescription: Identifiable, Sendable, Equatable {
     let source: DashboardFavoriteSource
     let sceneType: String?
     let scenePicto: String?
-    let memberUniqueIds: [String]
+    let memberIdentifiers: [DeviceIdentifier]
 
     init(
         uniqueId: String,
@@ -26,7 +26,7 @@ struct DashboardDeviceDescription: Identifiable, Sendable, Equatable {
         source: DashboardFavoriteSource = .device,
         sceneType: String? = nil,
         scenePicto: String? = nil,
-        memberUniqueIds: [String] = []
+        memberIdentifiers: [DeviceIdentifier] = []
     ) {
         self.uniqueId = uniqueId
         self.name = name
@@ -36,7 +36,7 @@ struct DashboardDeviceDescription: Identifiable, Sendable, Equatable {
         self.source = source
         self.sceneType = sceneType
         self.scenePicto = scenePicto
-        self.memberUniqueIds = memberUniqueIds
+        self.memberIdentifiers = memberIdentifiers
     }
 
     var id: String { uniqueId }
@@ -49,14 +49,15 @@ struct DashboardDeviceDescription: Identifiable, Sendable, Equatable {
         resolvedGroup ?? DeviceGroup.from(usage: usage)
     }
 
-    var shutterUniqueIds: [String] {
+    var shutterIdentifiers: [DeviceIdentifier] {
         guard group == .shutter else { return [] }
 
         switch source {
         case .device:
-            return [uniqueId]
+            guard let identifier = DeviceIdentifier(storageKey: uniqueId) else { return [] }
+            return [identifier]
         case .group:
-            return memberUniqueIds
+            return memberIdentifiers
         case .scene:
             return []
         }

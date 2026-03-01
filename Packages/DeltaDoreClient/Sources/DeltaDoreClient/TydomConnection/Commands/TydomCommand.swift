@@ -238,9 +238,28 @@ extension TydomCommand {
         return request(method: .get, path: path, transactionId: transactionId)
     }
 
+    private final class TransactionIdState: @unchecked Sendable {
+        let lock = NSLock()
+        var lastIssued: UInt64 = 0
+    }
+
+    private static let transactionIdState = TransactionIdState()
+
     public static func defaultTransactionId(now: @Sendable () -> Date = Date.init) -> String {
-        let milliseconds = Int(now().timeIntervalSince1970 * 1000)
-        return String(milliseconds)
+        let milliseconds = UInt64(now().timeIntervalSince1970 * 1000)
+        let candidate = milliseconds * 1_000
+
+        let state = transactionIdState
+        state.lock.lock()
+        defer { state.lock.unlock() }
+
+        if candidate <= state.lastIssued {
+            state.lastIssued += 1
+        } else {
+            state.lastIssued = candidate
+        }
+
+        return String(state.lastIssued)
     }
 }
 

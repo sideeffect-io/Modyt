@@ -12,7 +12,7 @@ struct GroupMetadataUpsert: DomainUpsert, Equatable {
 
 struct GroupMembershipUpsert: DomainUpsert, Equatable {
     let id: String
-    let memberUniqueIds: [String]
+    let memberIdentifiers: [DeviceIdentifier]
 }
 
 enum GroupUpsertEvent: DomainUpsert {
@@ -39,7 +39,8 @@ extension DomainRepository where Item == Group, Upsert == GroupUpsertEvent {
     ) -> Self {
         Self(
             configuration: .init(
-                resolveUpsert: resolveUpsert
+                resolveUpsert: resolveUpsert,
+                idValue: { .text($0) }
             ),
             createDAO: createDAO,
             now: now,
@@ -96,7 +97,7 @@ extension DomainRepository where Item == Group, Upsert == GroupUpsertEvent {
         metadata: GroupMetadataUpsert,
         timestamp: Date
     ) -> Group {
-        let memberUniqueIDs = existing?.memberUniqueIds.uniquePreservingOrder() ?? []
+        let memberIdentifiers = existing?.memberIdentifiers.uniquePreservingOrder() ?? []
 
         return Group(
             id: metadata.id,
@@ -105,7 +106,7 @@ extension DomainRepository where Item == Group, Upsert == GroupUpsertEvent {
             picto: metadata.picto,
             isGroupUser: metadata.isGroupUser,
             isGroupAll: metadata.isGroupAll,
-            memberUniqueIds: memberUniqueIDs,
+            memberIdentifiers: memberIdentifiers,
             isFavorite: existing?.isFavorite ?? false,
             dashboardOrder: existing?.dashboardOrder,
             updatedAt: timestamp
@@ -117,7 +118,7 @@ extension DomainRepository where Item == Group, Upsert == GroupUpsertEvent {
         membership: GroupMembershipUpsert,
         timestamp: Date
     ) -> Group {
-        let memberUniqueIDs = membership.memberUniqueIds.uniquePreservingOrder() 
+        let memberIdentifiers = membership.memberIdentifiers.uniquePreservingOrder()
 
         let isGroupUser = existing?.isGroupUser ?? false
 
@@ -128,7 +129,7 @@ extension DomainRepository where Item == Group, Upsert == GroupUpsertEvent {
             picto: existing?.picto,
             isGroupUser: isGroupUser,
             isGroupAll: existing?.isGroupAll ?? false,
-            memberUniqueIds: memberUniqueIDs,
+            memberIdentifiers: memberIdentifiers,
             isFavorite: existing?.isFavorite ?? false,
             dashboardOrder: existing?.dashboardOrder,
             updatedAt: timestamp
@@ -145,7 +146,7 @@ extension DomainRepository where Item == Group, Upsert == GroupUpsertEvent {
         picto TEXT,
         isGroupUser INTEGER NOT NULL,
         isGroupAll INTEGER NOT NULL,
-        memberUniqueIds TEXT NOT NULL,
+        memberIdentifiers TEXT NOT NULL,
         isFavorite INTEGER NOT NULL,
         dashboardOrder INTEGER,
         updatedAt REAL NOT NULL

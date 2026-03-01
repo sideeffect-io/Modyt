@@ -4,7 +4,6 @@ import DeltaDoreClient
 struct AppEnvironment: Sendable {
     let repository: DeviceDatasource
     let groupRepository: GroupDatasource
-    let newShutterRepository: ShutterRepository
     let sendDeviceCommand: @Sendable (String, String, PayloadValue) async -> Void
     let log: @Sendable (String) -> Void
 
@@ -28,13 +27,6 @@ struct AppEnvironment: Sendable {
             deviceRepository: repository,
             log: log
         )
-        let newShutterRepository = ShutterRepository(
-            databasePath: databaseURL.path,
-            deviceRepository: repository,
-            log: log
-        )
-        let commandTransactionIdGenerator = CommandTransactionIdGenerator(now: now)
-
         let sendDeviceCommand: @Sendable (String, String, PayloadValue) async -> Void = { uniqueId, key, value in
             if GroupRecord.isGroupUniqueId(uniqueId) {
                 let fanOut = await groupRepository.fanOutCommands(
@@ -49,7 +41,7 @@ struct AppEnvironment: Sendable {
                 }
 
                 for command in fanOut {
-                    let transactionId = await commandTransactionIdGenerator.next()
+                    let transactionId = TydomCommand.defaultTransactionId()
                     let commandValue = deviceCommandValue(from: command.value)
                     let request = TydomCommand.putDevicesData(
                         deviceId: String(command.deviceId),
@@ -59,23 +51,17 @@ struct AppEnvironment: Sendable {
                         transactionId: transactionId
                     )
                     let isShutterLikeCommand = key == "position" || key == "level"
-                    if isShutterLikeCommand {
-//                        let memberUniqueId = "\(command.endpointId)_\(command.deviceId)"
-//                        log(
-//                            "ShutterTrace command group-send source=\(uniqueId) member=\(memberUniqueId) tx=\(transactionId) key=\(command.key) value=\(command.value.traceString)"
-//                        )
-                    }
 
                     do {
                         try await client.send(text: request.request)
                         if isShutterLikeCommand {
                             log(
-                                "ShutterTrace command group-send-success source=\(uniqueId) member=\(command.endpointId)_\(command.deviceId) tx=\(transactionId)"
+                                "ShutterTrace command group-send-success source=\(uniqueId) memberDeviceId=\(command.deviceId) memberEndpointId=\(command.endpointId) tx=\(transactionId)"
                             )
                         }
                     } catch {
                         log(
-                            "AppEnvironment group command failed uniqueId=\(uniqueId) member=\(command.endpointId)_\(command.deviceId) key=\(command.key) error=\(error)"
+                            "AppEnvironment group command failed uniqueId=\(uniqueId) memberDeviceId=\(command.deviceId) memberEndpointId=\(command.endpointId) key=\(command.key) error=\(error)"
                         )
                     }
                 }
@@ -85,7 +71,7 @@ struct AppEnvironment: Sendable {
             guard let device = await repository.device(uniqueId: uniqueId) else { return }
 
             let commandValue = deviceCommandValue(from: value)
-            let transactionId = await commandTransactionIdGenerator.next()
+            let transactionId = TydomCommand.defaultTransactionId()
             let command = TydomCommand.putDevicesData(
                 deviceId: String(device.deviceId),
                 endpointId: String(device.endpointId),
@@ -94,11 +80,6 @@ struct AppEnvironment: Sendable {
                 transactionId: transactionId
             )
             let isShutterCommand = device.group == .shutter || key == "position" || key == "level"
-            if isShutterCommand {
-//                log(
-//                    "ShutterTrace command send uniqueId=\(uniqueId) deviceId=\(device.deviceId) endpointId=\(device.endpointId) tx=\(transactionId) key=\(key) value=\(value.traceString) usage=\(device.usage)"
-//                )
-            }
 
             do {
                 try await client.send(text: command.request)
@@ -113,30 +94,9 @@ struct AppEnvironment: Sendable {
         return AppEnvironment(
             repository: repository,
             groupRepository: groupRepository,
-            newShutterRepository: newShutterRepository,
             sendDeviceCommand: sendDeviceCommand,
             log: log
         )
-    }
-}
-
-private actor CommandTransactionIdGenerator {
-    private let now: @Sendable () -> Date
-    private var lastIssued: UInt64 = 0
-
-    init(now: @escaping @Sendable () -> Date) {
-        self.now = now
-    }
-
-    func next() -> String {
-        let milliseconds = UInt64(now().timeIntervalSince1970 * 1000)
-        let candidate = milliseconds * 1_000
-        if candidate <= lastIssued {
-            lastIssued += 1
-        } else {
-            lastIssued = candidate
-        }
-        return String(lastIssued)
     }
 }
 

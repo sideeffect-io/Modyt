@@ -120,16 +120,16 @@ final class HeatPumpStore {
     }
 
     struct Dependencies {
-        let observeHeatPump: @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
+        let observeHeatPump: @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
         let executeSetPointCommand: @Sendable (HeatPumpGatewayCommand) async -> Void
         let makeTransactionID: @Sendable () async -> String
         let setPointDebounceInterval: DispatchTimeInterval
 
         init(
-            observeHeatPump: @escaping @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable,
+            observeHeatPump: @escaping @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable,
             executeSetPointCommand: @escaping @Sendable (HeatPumpGatewayCommand) async -> Void,
             makeTransactionID: @escaping @Sendable () async -> String = {
-                TydomCommand.defaultTransactionId(now: Date.init)
+                TydomCommand.defaultTransactionId()
             },
             setPointDebounceInterval: DispatchTimeInterval = .seconds(2)
         ) {
@@ -168,7 +168,7 @@ final class HeatPumpStore {
     }
 
     init(
-        uniqueId: String,
+        identifier: DeviceIdentifier,
         dependencies: Dependencies
     ) {
         self.state = .featureIsIdle(HeatPumpValues(temperature: 0.0, setPoint: 0.0))
@@ -183,8 +183,8 @@ final class HeatPumpStore {
             await self.executeDebouncedSetPoint(value)
         }
 
-        observationTask.task = Task { [weak self, worker, uniqueId] in
-            await worker.observeHeatPump(uniqueId: uniqueId) { [weak self] observation in
+        observationTask.task = Task { [weak self, worker, identifier] in
+            await worker.observeHeatPump(identifier: identifier) { [weak self] observation in
                 self?.commandContext = observation.commandContext
                 self?.send(
                     .valuesWereReceivedFromGateway(
@@ -257,11 +257,11 @@ final class HeatPumpStore {
             let commandContext: CommandContext
         }
 
-        private let observeHeatPumpSource: @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
+        private let observeHeatPumpSource: @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
         private let executeSetPointCommandAction: @Sendable (HeatPumpGatewayCommand) async -> Void
 
         init(
-            observeHeatPump: @escaping @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable,
+            observeHeatPump: @escaping @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable,
             executeSetPointCommand: @escaping @Sendable (HeatPumpGatewayCommand) async -> Void
         ) {
             self.observeHeatPumpSource = observeHeatPump
@@ -269,10 +269,10 @@ final class HeatPumpStore {
         }
 
         func observeHeatPump(
-            uniqueId: String,
+            identifier: DeviceIdentifier,
             onObservation: @escaping @MainActor @Sendable (Observation) -> Void
         ) async {
-            let stream = await observeHeatPumpSource(uniqueId)
+            let stream = await observeHeatPumpSource(identifier)
             for await device in stream {
                 guard !Task.isCancelled else { return }
                 guard let device else { continue }
@@ -283,7 +283,7 @@ final class HeatPumpStore {
                         temperature: values.temperature,
                         setPoint: values.setPoint,
                         commandContext: CommandContext(
-                            deviceID: device.deviceID,
+                            deviceID: device.deviceId,
                             endpointID: device.endpointId,
                             setPointName: setPointName
                         )

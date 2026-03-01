@@ -124,37 +124,54 @@ struct DashboardDeviceCardView: View {
         if supportsActiveControls(for: favorite) {
             switch favorite.controlKind {
             case .shutter:
-                if favorite.shutterUniqueIds.isEmpty {
+                if favorite.shutterIdentifiers.isEmpty {
                     Text("Shutters unavailable")
                         .font(.system(.caption, design: .rounded))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 } else {
                     ShutterView(
-                        shutterUniqueIds: favorite.shutterUniqueIds,
-                        layout: .regular
+                        deviceIds: favorite.shutterIdentifiers
                     )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 }
             case .light:
-                LightView(uniqueId: favorite.controlUniqueId)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                if let groupID = favorite.controlGroupId {
+                    LightView(uniqueId: groupID)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                } else if let identifier = favorite.controlDeviceIdentifier {
+                    LightView(uniqueId: identifier.storageKey)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                }
             case .temperature:
-                TemperatureView(uniqueId: favorite.controlUniqueId)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                if let identifier = favorite.controlDeviceIdentifier {
+                    TemperatureView(identifier: identifier)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                }
             case .thermostat:
-                ThermostatView(uniqueId: favorite.controlUniqueId)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                if let identifier = favorite.controlDeviceIdentifier {
+                    ThermostatView(identifier: identifier)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                }
             case .heatPump:
-                HeatPumpView(uniqueId: favorite.controlUniqueId)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                if let identifier = favorite.controlDeviceIdentifier {
+                    HeatPumpView(identifier: identifier)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                }
             case .sunlight:
-                SunlightView(uniqueId: favorite.controlUniqueId)
+                if let identifier = favorite.controlDeviceIdentifier {
+                    SunlightView(identifier: identifier)
+                }
             case .energyConsumption:
-                EnergyConsumptionView(uniqueId: favorite.controlUniqueId)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                if let identifier = favorite.controlDeviceIdentifier {
+                    EnergyConsumptionView(identifier: identifier)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                }
             case .smoke:
-                SmokeView(uniqueId: favorite.controlUniqueId)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                if let identifier = favorite.controlDeviceIdentifier {
+                    SmokeView(identifier: identifier)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                }
             default:
                 EmptyView()
             }

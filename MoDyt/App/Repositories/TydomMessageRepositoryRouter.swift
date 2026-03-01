@@ -86,8 +86,7 @@ actor TydomMessageRepositoryRouter {
 extension DeviceUpsert {
     init(tydomDevice: TydomDevice) {
         self.init(
-            id: tydomDevice.uniqueId,
-            endpointId: tydomDevice.endpointId,
+            id: .init(deviceId: tydomDevice.deviceId, endpointId: tydomDevice.endpointId),
             name: tydomDevice.name,
             usage: tydomDevice.usage,
             kind: tydomDevice.kind.repositoryRawValue,
@@ -114,9 +113,9 @@ extension GroupMembershipUpsert {
     init(tydomGroup: TydomGroup) {
         self.init(
             id: String(tydomGroup.id),
-            memberUniqueIds: tydomGroup.devices.flatMap { device in
+            memberIdentifiers: tydomGroup.devices.flatMap { device in
                 device.endpoints.map { endpoint in
-                    "\(endpoint.id)_\(device.id)"
+                    DeviceIdentifier(deviceId: device.id, endpointId: endpoint.id)
                 }
             }
         )

@@ -1,7 +1,8 @@
 import Foundation
 
 struct Device: DomainType {
-    let id: String
+    let id: DeviceIdentifier
+    let deviceId: Int
     let endpointId: Int
     var name: String
     var usage: String

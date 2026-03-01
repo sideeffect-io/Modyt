@@ -3,8 +3,8 @@ import DeltaDoreClient
 extension Device {
     var asDeviceRecord: DeviceRecord {
         DeviceRecord(
-            uniqueId: id,
-            deviceId: deviceID,
+            uniqueId: id.storageKey,
+            deviceId: deviceId,
             endpointId: endpointId,
             name: name,
             usage: usage,
@@ -16,13 +16,6 @@ extension Device {
             dashboardOrder: dashboardOrder,
             updatedAt: updatedAt
         )
-    }
-
-    var deviceID: Int {
-        id
-            .split(separator: "_")
-            .last
-            .flatMap { Int($0) } ?? 0
     }
 }
 

@@ -266,11 +266,20 @@ public struct TydomDeviceDataEntry: Sendable, Equatable {
     }
 }
 
+public struct TydomDeviceIdentifier: Sendable, Equatable, Hashable, Codable {
+    public let deviceId: Int
+    public let endpointId: Int
+
+    public init(deviceId: Int, endpointId: Int) {
+        self.deviceId = deviceId
+        self.endpointId = endpointId
+    }
+}
+
 
 public struct TydomDevice: Sendable, Equatable {
-    public let id: Int
+    public let deviceId: Int
     public let endpointId: Int
-    public let uniqueId: String
     public let name: String
     public let usage: String
     public let kind: TydomDeviceKind
@@ -278,10 +287,13 @@ public struct TydomDevice: Sendable, Equatable {
     public let entries: [TydomDeviceDataEntry]
     public let metadata: [String: PayloadValue]?
 
+    public var identifier: TydomDeviceIdentifier {
+        TydomDeviceIdentifier(deviceId: deviceId, endpointId: endpointId)
+    }
+
     public init(
-        id: Int,
+        deviceId: Int,
         endpointId: Int,
-        uniqueId: String,
         name: String,
         usage: String,
         kind: TydomDeviceKind,
@@ -289,9 +301,8 @@ public struct TydomDevice: Sendable, Equatable {
         entries: [TydomDeviceDataEntry],
         metadata: [String: PayloadValue]?
     ) {
-        self.id = id
+        self.deviceId = deviceId
         self.endpointId = endpointId
-        self.uniqueId = uniqueId
         self.name = name
         self.usage = usage
         self.kind = kind

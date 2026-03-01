@@ -1,12 +1,12 @@
 import Foundation
 
 actor TydomDeviceCacheStore {
-    private var devices: [String: TydomDeviceCacheEntry] = [:]
+    private var devices: [TydomDeviceIdentifier: TydomDeviceCacheEntry] = [:]
 
     init() {}
 
-    func deviceInfo(for uniqueId: String) async -> TydomDeviceInfo? {
-        guard let entry = devices[uniqueId],
+    func deviceInfo(for identifier: TydomDeviceIdentifier) async -> TydomDeviceInfo? {
+        guard let entry = devices[identifier],
               let name = entry.name, name.isEmpty == false,
               let usage = entry.usage, usage.isEmpty == false
         else {
@@ -16,7 +16,7 @@ actor TydomDeviceCacheStore {
     }
 
     func upsert(_ entry: TydomDeviceCacheEntry) async {
-        var current = devices[entry.uniqueId] ?? TydomDeviceCacheEntry(uniqueId: entry.uniqueId)
+        var current = devices[entry.identifier] ?? TydomDeviceCacheEntry(identifier: entry.identifier)
         if let name = entry.name { current.name = name }
         if let usage = entry.usage { current.usage = usage }
         if let metadata = entry.metadata {
@@ -26,6 +26,6 @@ actor TydomDeviceCacheStore {
             }
             current.metadata = mergedMetadata
         }
-        devices[entry.uniqueId] = current
+        devices[entry.identifier] = current
     }
 }

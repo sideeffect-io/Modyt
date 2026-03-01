@@ -21,10 +21,10 @@ final class ThermostatStore {
     }
 
     struct Dependencies {
-        let observeThermostat: @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
+        let observeThermostat: @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
 
         init(
-            observeThermostat: @escaping @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
+            observeThermostat: @escaping @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
         ) {
             self.observeThermostat = observeThermostat
         }
@@ -36,11 +36,11 @@ final class ThermostatStore {
     private let worker: Worker
 
     init(
-        uniqueId: String,
+        identifier: DeviceIdentifier,
         dependencies: Dependencies
     ) {
         self.worker = Worker(
-            uniqueId: uniqueId,
+            identifier: identifier,
             observeThermostat: dependencies.observeThermostat
         )
 
@@ -82,21 +82,21 @@ final class ThermostatStore {
     }
 
     private actor Worker {
-        private let uniqueId: String
-        private let observeThermostat: @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
+        private let identifier: DeviceIdentifier
+        private let observeThermostat: @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
 
         init(
-            uniqueId: String,
-            observeThermostat: @escaping @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
+            identifier: DeviceIdentifier,
+            observeThermostat: @escaping @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
         ) {
-            self.uniqueId = uniqueId
+            self.identifier = identifier
             self.observeThermostat = observeThermostat
         }
 
         func observe(
             onState: @escaping @Sendable (Device?, Descriptor?) async -> Void
         ) async {
-            let stream = await observeThermostat(uniqueId)
+            let stream = await observeThermostat(identifier)
             for await device in stream {
                 guard !Task.isCancelled else { return }
                 await onState(device, device?.thermostatDescriptor())

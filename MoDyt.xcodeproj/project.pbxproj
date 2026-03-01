@@ -51,6 +51,11 @@
 			path = Packages;
 			sourceTree = "<group>";
 		};
+		1A7A82D42F40000100A1B2C3 /* MoDytTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = MoDytTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -78,6 +83,7 @@
 			isa = PBXGroup;
 			children = (
 				1A50E6BA2F2D19640072A200 /* MoDyt */,
+				1A7A82D42F40000100A1B2C3 /* MoDytTests */,
 				1A50E6E22F2D19B70072A200 /* Packages */,
 				1A50E6B92F2D19640072A200 /* Products */,
 			);
@@ -133,6 +139,9 @@
 			);
 			dependencies = (
 				1A50E6C72F2D19650072A200 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				1A7A82D42F40000100A1B2C3 /* MoDytTests */,
 			);
 			name = MoDytTests;
 			packageProductDependencies = (

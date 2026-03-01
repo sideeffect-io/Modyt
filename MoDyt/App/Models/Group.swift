@@ -7,7 +7,7 @@ struct Group: DomainType {
     var picto: String?
     var isGroupUser: Bool
     var isGroupAll: Bool
-    var memberUniqueIds: [String]
+    var memberIdentifiers: [DeviceIdentifier]
     var isFavorite: Bool
     var dashboardOrder: Int?
     var updatedAt: Date

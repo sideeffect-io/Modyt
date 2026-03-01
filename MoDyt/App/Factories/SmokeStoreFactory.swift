@@ -1,14 +1,14 @@
 import SwiftUI
 
 struct SmokeStoreFactory {
-    let make: @MainActor (String) -> SmokeStore
+    let make: @MainActor (DeviceIdentifier) -> SmokeStore
 
     static func live(dependencies: DependencyBag) -> SmokeStoreFactory {
         let deviceRepository = dependencies.localStorageDatasources.deviceRepository
 
-        return SmokeStoreFactory { uniqueId in
+        return SmokeStoreFactory { identifier in
             SmokeStore(
-                uniqueId: uniqueId,
+                identifier: identifier,
                 dependencies: .init(
                     observeSmoke: { await deviceRepository.observeByID($0).removeDuplicates() }
                 )

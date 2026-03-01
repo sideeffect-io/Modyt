@@ -26,7 +26,8 @@ struct ClimateFixtureTests {
 
     private func makeDevice(from sample: ClimateSample) -> Device {
         Device(
-            id: "1_42",
+            id: .init(deviceId: 42, endpointId: 1),
+            deviceId: 42,
             endpointId: 1,
             name: sample.name,
             usage: sample.usage,

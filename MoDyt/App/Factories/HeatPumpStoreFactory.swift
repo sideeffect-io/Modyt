@@ -2,28 +2,74 @@ import SwiftUI
 import DeltaDoreClient
 
 struct HeatPumpStoreFactory {
-    let make: @MainActor (String) -> HeatPumpStore
+    let make: @MainActor (DeviceIdentifier) -> HeatPumpStore
     
     static func live(dependencies: DependencyBag) -> HeatPumpStoreFactory {
         let deviceRepository = dependencies.localStorageDatasources.deviceRepository
         let gatewayClient = dependencies.gatewayClient
         let ackRepository = dependencies.localStorageDatasources.ackRepository
         
-        return HeatPumpStoreFactory { uniqueId in
+        return HeatPumpStoreFactory { identifier in
             HeatPumpStore(
-                uniqueId: uniqueId,
+                identifier: identifier,
                 dependencies: .init(
-                    observeHeatPump: { await deviceRepository.observeByID($0) },
+                    observeHeatPump: { requestedIdentifier in
+                        await deviceRepository
+                            .observeByDeviceID(requestedIdentifier.deviceId)
+                            .map { devices in
+                                Self.resolveObservedDevice(
+                                    for: requestedIdentifier,
+                                    in: devices
+                                )
+                            }
+                            .removeDuplicates()
+                    },
                     executeSetPointCommand: { command in
                         try? await gatewayClient.send(text: command.request)
                         _ = try? await ackRepository.waitForACK(transactionId: command.transactionId)
                     },
                     makeTransactionID: {
-                        TydomCommand.defaultTransactionId(now: Date.init)
+                        TydomCommand.defaultTransactionId()
                     }
                 )
             )
         }
+    }
+
+    static func resolveObservedDevice(
+        for identifier: DeviceIdentifier,
+        in devices: [Device]
+    ) -> Device? {
+        let siblingEndpoints = devices.filter { $0.deviceId == identifier.deviceId }
+        guard siblingEndpoints.isEmpty == false else { return nil }
+
+        guard let primaryDevice = siblingEndpoints.first(where: { $0.id == identifier })
+            ?? siblingEndpoints.first else {
+            return nil
+        }
+
+        var mergedData: [String: JSONValue] = [:]
+        var mergedMetadata: [String: JSONValue] = [:]
+        var hasMetadata = false
+
+        for device in siblingEndpoints where device.id != primaryDevice.id {
+            mergedData.merge(device.data) { _, next in next }
+            if let metadata = device.metadata {
+                mergedMetadata.merge(metadata) { _, next in next }
+                hasMetadata = true
+            }
+        }
+
+        mergedData.merge(primaryDevice.data) { _, next in next }
+        if let metadata = primaryDevice.metadata {
+            mergedMetadata.merge(metadata) { _, next in next }
+            hasMetadata = true
+        }
+
+        var resolvedDevice = primaryDevice
+        resolvedDevice.data = mergedData
+        resolvedDevice.metadata = hasMetadata ? mergedMetadata : nil
+        return resolvedDevice
     }
 }
 

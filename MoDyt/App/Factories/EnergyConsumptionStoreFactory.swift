@@ -1,14 +1,14 @@
 import SwiftUI
 
 struct EnergyConsumptionStoreFactory {
-    let make: @MainActor (String) -> EnergyConsumptionStore
+    let make: @MainActor (DeviceIdentifier) -> EnergyConsumptionStore
 
     static func live(dependencies: DependencyBag) -> EnergyConsumptionStoreFactory {
         let deviceRepository = dependencies.localStorageDatasources.deviceRepository
 
-        return EnergyConsumptionStoreFactory { uniqueId in
+        return EnergyConsumptionStoreFactory { identifier in
             EnergyConsumptionStore(
-                uniqueId: uniqueId,
+                identifier: identifier,
                 dependencies: .init(
                     observeEnergyConsumption: { await deviceRepository.observeByID($0) }
                 )

@@ -41,7 +41,7 @@ private actor SceneExecutionRuntime {
             return .invalidSceneIdentifier
         }
 
-        let transactionID = TydomCommand.defaultTransactionId(now: Date.init)
+        let transactionID = TydomCommand.defaultTransactionId()
         let command = TydomCommand.activateScenario(sceneID, transactionId: transactionID)
 
         do {

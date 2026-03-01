@@ -1,5 +1,7 @@
 import Foundation
 
 protocol DomainUpsert: Sendable {
-    var id: String { get }
+    associatedtype ID: Sendable, Hashable
+
+    var id: ID { get }
 }

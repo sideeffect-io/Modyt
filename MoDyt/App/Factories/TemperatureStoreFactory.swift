@@ -1,15 +1,15 @@
 import SwiftUI
 
 struct TemperatureStoreFactory {
-    let make: @MainActor (String) -> TemperatureStore
+    let make: @MainActor (DeviceIdentifier) -> TemperatureStore
 
     static func live(dependencies: DependencyBag) -> TemperatureStoreFactory {
         let deviceRepository = dependencies.localStorageDatasources.deviceRepository
 
-        return TemperatureStoreFactory { uniqueId in
+        return TemperatureStoreFactory { identifier in
             TemperatureStore(
                 dependencies: .init(
-                    observeTemperature: { await deviceRepository.observeByID(uniqueId) }
+                    observeTemperature: { await deviceRepository.observeByID(identifier) }
                 )
             )
         }

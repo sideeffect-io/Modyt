@@ -50,7 +50,9 @@ actor DeviceDatasource {
                 try await self.startIfNeeded()
                 let snapshot = try await self.listDevices()
                 log("Devices snapshot loaded count=\(snapshot.count)")
-                continuation.yield(snapshot)
+                if snapshot.isEmpty == false {
+                    continuation.yield(snapshot)
+                }
             } catch {
                 log("Devices snapshot load failed error=\(error)")
                 await self.removeObserver(id: observerId)
@@ -144,11 +146,12 @@ actor DeviceDatasource {
         guard let deviceDAO = try? await requireDAO() else { return }
         log("Upsert devices count=\(devices.count) source=\(source) tx=\(transactionId ?? "nil")")
         for device in devices {
-            let existing = try? await deviceDAO.read(.text(device.uniqueId))
+            let storageKey = makeStorageKey(deviceId: device.deviceId, endpointId: device.endpointId)
+            let existing = try? await deviceDAO.read(.text(storageKey))
             let merged = merge(existing: existing, incoming: device, now: now())
             if Self.shouldTraceShutter(existing: existing, incoming: device, merged: merged) {
                 log(
-                    "ShutterTrace repository upsert source=\(source) tx=\(transactionId ?? "nil") uniqueId=\(device.uniqueId) usage=\(device.usage) existing=\(Self.positionTrace(in: existing?.data)) incoming=\(Self.positionTrace(in: device.data)) merged=\(Self.positionTrace(in: merged.data)) descriptor=\(Self.descriptorTrace(for: merged))"
+                    "ShutterTrace repository upsert source=\(source) tx=\(transactionId ?? "nil") deviceId=\(device.deviceId) endpointId=\(device.endpointId) usage=\(device.usage) existing=\(Self.positionTrace(in: existing?.data)) incoming=\(Self.positionTrace(in: device.data)) merged=\(Self.positionTrace(in: merged.data)) descriptor=\(Self.descriptorTrace(for: merged))"
                 )
             }
             if existing == nil {
@@ -545,8 +548,8 @@ private func merge(
     let mergedData = mergeDictionaries(existing?.data, incoming.data)
     let mergedMetadata = mergeDictionaries(existing?.metadata, incoming.metadata)
     return DeviceRecord(
-        uniqueId: incoming.uniqueId,
-        deviceId: incoming.id,
+        uniqueId: makeStorageKey(deviceId: incoming.deviceId, endpointId: incoming.endpointId),
+        deviceId: incoming.deviceId,
         endpointId: incoming.endpointId,
         name: incoming.name,
         usage: incoming.usage,
@@ -558,6 +561,10 @@ private func merge(
         dashboardOrder: existing?.dashboardOrder,
         updatedAt: now
     )
+}
+
+private func makeStorageKey(deviceId: Int, endpointId: Int) -> String {
+    "\(deviceId):\(endpointId)"
 }
 
 private func mergeDictionaries(

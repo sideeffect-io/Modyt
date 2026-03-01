@@ -1,30 +1,35 @@
 import Foundation
 
 enum FavoriteType: Sendable, Equatable, Hashable, Codable {
-    case device(deviceId: String)
+    case device(identifier: DeviceIdentifier)
     case scene(sceneId: String)
-    case group(groupId: String, memberUniqueIds: [String])
+    case group(groupId: String, memberIdentifiers: [DeviceIdentifier])
     
     var id: String {
         switch self {
-        case .device(deviceId: let id):
-            return "device:\(id)"
+        case .device(identifier: let id):
+            return "device:\(id.deviceId):\(id.endpointId)"
         case .scene(sceneId: let id):
             return "scene:\(id)"
-        case .group(groupId: let id, memberUniqueIds: _):
+        case .group(groupId: let id, memberIdentifiers: _):
             return "group:\(id)"
         }
     }
 
-    var entityId: String {
+    var sceneOrGroupId: String? {
         switch self {
-        case .device(let id):
-            return id
+        case .device:
+            return nil
         case .scene(let id):
             return id
         case .group(let id, _):
             return id
         }
+    }
+
+    var deviceIdentifier: DeviceIdentifier? {
+        guard case .device(let identifier) = self else { return nil }
+        return identifier
     }
 }
 
@@ -75,21 +80,28 @@ struct FavoriteItem: Sendable, Equatable {
     }
 
     var sceneExecutionUniqueId: String {
-        type.entityId
+        type.sceneOrGroupId ?? ""
     }
 
-    var controlUniqueId: String {
-        type.entityId
+    var controlGroupId: String? {
+        if case .group(let id, _) = type {
+            return id
+        }
+        return nil
     }
 
-    var shutterUniqueIds: [String] {
+    var controlDeviceIdentifier: DeviceIdentifier? {
+        type.deviceIdentifier
+    }
+
+    var shutterIdentifiers: [DeviceIdentifier] {
         guard group == .shutter else { return [] }
 
         switch type {
-        case .device(let deviceID):
-            return [deviceID]
-        case .group(_, let memberUniqueIds):
-            return memberUniqueIds
+        case .device(let identifier):
+            return [identifier]
+        case .group(_, let memberIdentifiers):
+            return memberIdentifiers
         case .scene:
             return []
         }

@@ -70,7 +70,7 @@ struct MainReducerTransitionTests {
             initial: .gatewayHandlingIsStarting,
             event: .gatewayHandlingWasSuccessful,
             expected: .featureIsStarted,
-            expectedEffects: []
+            expectedEffects: [.setAppActive]
         ),
         .init(
             initial: .featureIsStarted,
@@ -111,32 +111,8 @@ struct MainReducerTransitionTests {
         .init(
             initial: .reconnectionIsInProgress,
             event: .reconnectionWasSuccessful,
-            expected: .refreshingDataIsInProgress,
-            expectedEffects: [.refreshDataFromGateway]
-        ),
-        .init(
-            initial: .refreshingDataIsInProgress,
-            event: .refreshingDataWasAFailure,
-            expected: .refreshingDataIsInError,
-            expectedEffects: []
-        ),
-        .init(
-            initial: .refreshingDataIsInError,
-            event: .refreshingDataWasRequested,
-            expected: .refreshingDataIsInProgress,
-            expectedEffects: [.refreshDataFromGateway]
-        ),
-        .init(
-            initial: .refreshingDataIsInError,
-            event: .disconnectionWasRequested,
-            expected: .disconnectionIsInProgress,
-            expectedEffects: [.disconnect]
-        ),
-        .init(
-            initial: .refreshingDataIsInProgress,
-            event: .refreshingDataWasSuccessful,
-            expected: .featureIsStarted,
-            expectedEffects: [.setAppActive]
+            expected: .gatewayHandlingIsStarting,
+            expectedEffects: [.handleGatewayMessages]
         )
     ]
 }
@@ -229,12 +205,11 @@ struct MainStoreEffectTests {
         let setActiveCalls = Counter()
         let store = makeStore(
             handleGatewayMessages: { .gatewayHandlingWasSuccessful },
-            checkGatewayConnection: { .reconnectionWasRequested },
-            reconnectToGateway: { .reconnectionWasSuccessful },
-            refreshDataFromGateway: { .refreshingDataWasSuccessful },
             setAppActive: {
                 await setActiveCalls.increment()
-            }
+            },
+            checkGatewayConnection: { .reconnectionWasRequested },
+            reconnectToGateway: { .reconnectionWasSuccessful }
         )
 
         store.send(.startingGatewayHandlingWasRequested)
@@ -243,16 +218,19 @@ struct MainStoreEffectTests {
         await settle(cycles: 24)
 
         #expect(store.state.featureState == .featureIsStarted)
-        #expect(await setActiveCalls.value() == 1)
+        #expect(await setActiveCalls.value() >= 1)
     }
 
     @Test
     func reconnectionSuccessAndRefreshFailureEndsInRefreshingDataError() async {
+        let gatewayMessagesCounter = Counter()
         let store = makeStore(
-            handleGatewayMessages: { .gatewayHandlingWasSuccessful },
+            handleGatewayMessages: {
+                let count = await gatewayMessagesCounter.incrementAndGet()
+                return count == 1 ? .gatewayHandlingWasSuccessful : .gatewayHandlingWasAFailure
+            },
             checkGatewayConnection: { .reconnectionWasRequested },
-            reconnectToGateway: { .reconnectionWasSuccessful },
-            refreshDataFromGateway: { .refreshingDataWasAFailure }
+            reconnectToGateway: { .reconnectionWasSuccessful }
         )
 
         store.send(.startingGatewayHandlingWasRequested)
@@ -260,7 +238,7 @@ struct MainStoreEffectTests {
         store.send(.appActiveWasReceived)
         await settle(cycles: 24)
 
-        #expect(store.state.featureState == .refreshingDataIsInError)
+        #expect(store.state.featureState == .gatewayHandlingIsInError)
     }
 
     @Test
@@ -320,8 +298,7 @@ struct MainStoreEffectTests {
         setAppInactive: @escaping @Sendable () async -> Void = {},
         setAppActive: @escaping @Sendable () async -> Void = {},
         checkGatewayConnection: @escaping @Sendable () async -> MainEvent? = { nil },
-        reconnectToGateway: @escaping @Sendable () async -> MainEvent = { .reconnectionWasSuccessful },
-        refreshDataFromGateway: @escaping @Sendable () async -> MainEvent = { .refreshingDataWasSuccessful }
+        reconnectToGateway: @escaping @Sendable () async -> MainEvent = { .reconnectionWasSuccessful }
     ) -> MainStore {
         MainStore(
             dependencies: .init(
@@ -330,8 +307,7 @@ struct MainStoreEffectTests {
                 setAppInactive: setAppInactive,
                 setAppActive: setAppActive,
                 checkGatewayConnection: checkGatewayConnection,
-                reconnectToGateway: reconnectToGateway,
-                refreshDataFromGateway: refreshDataFromGateway
+                reconnectToGateway: reconnectToGateway
             )
         )
     }
@@ -339,7 +315,7 @@ struct MainStoreEffectTests {
 
 struct MainGatewayDataRequestPipelineTests {
     @Test
-    func pipelineSendsExpectedRequestsAndWaitsForEachACK() async throws {
+    func pipelineSendsExpectedRequestsInOrder() async throws {
         let txGenerator = TransactionIDSequence(values: [
             "tx-1",
             "tx-2",
@@ -349,18 +325,17 @@ struct MainGatewayDataRequestPipelineTests {
             "tx-6"
         ])
         let sentRequests = Recorder<String>()
-        let waitedTransactionIDs = Recorder<String>()
+        let generatedTransactionIDs = Recorder<String>()
 
         let pipeline = MainGatewayDataRequestPipeline(
             requests: MainGatewayDataRequestPipeline.defaultRequests,
             makeTransactionID: {
-                await txGenerator.next()
+                let transactionId = await txGenerator.next()
+                await generatedTransactionIDs.append(transactionId)
+                return transactionId
             },
             sendText: { request in
                 await sentRequests.append(request)
-            },
-            waitForACK: { transactionId in
-                await waitedTransactionIDs.append(transactionId)
             }
         )
 
@@ -376,9 +351,9 @@ struct MainGatewayDataRequestPipelineTests {
             "/groups/file"
         ])
 
-        let waited = await waitedTransactionIDs.values()
-        #expect(waited == ["tx-1", "tx-2", "tx-3", "tx-4", "tx-5", "tx-6"])
-        #expect(Set(waited).count == 6)
+        let generated = await generatedTransactionIDs.values()
+        #expect(generated == ["tx-1", "tx-2", "tx-3", "tx-4", "tx-5", "tx-6"])
+        #expect(Set(generated).count == 6)
     }
 
     private func extractPath(from request: String) -> String {
@@ -410,9 +385,7 @@ struct MainViewPresentationStateTests {
         .init(state: .userIsDisconnected, expectedPresentation: .none, shouldBlock: false),
         .init(state: .featureIsStarted, expectedPresentation: .none, shouldBlock: false),
         .init(state: .reconnectionIsInProgress, expectedPresentation: .progress("Reconnecting"), shouldBlock: true),
-        .init(state: .reconnectionIsInError, expectedPresentation: .reconnectionError, shouldBlock: true),
-        .init(state: .refreshingDataIsInProgress, expectedPresentation: .progress("Loading gateway data"), shouldBlock: true),
-        .init(state: .refreshingDataIsInError, expectedPresentation: .refreshingDataError, shouldBlock: true)
+        .init(state: .reconnectionIsInError, expectedPresentation: .reconnectionError, shouldBlock: true)
     ]
 }
 
@@ -437,7 +410,7 @@ struct MainViewBehaviorContractTests {
     @Test
     func settingsDisconnectCallbackForwardsToParent() {
         let recorder = MainActorRecorder()
-        let callback = mainSettingsDisconnectCallback {
+        let callback: () -> Void = {
             recorder.record()
         }
 

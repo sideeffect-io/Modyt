@@ -16,8 +16,8 @@ struct GroupRow: View {
                 isFavorite: group.isFavorite,
                 action: onToggleFavorite
             )
-            .disabled(group.memberUniqueIds.isEmpty)
-            .opacity(group.memberUniqueIds.isEmpty ? 0.5 : 1)
+            .disabled(group.memberIdentifiers.isEmpty)
+            .opacity(group.memberIdentifiers.isEmpty ? 0.5 : 1)
         }
         .padding(16)
         .glassCard(cornerRadius: 22)

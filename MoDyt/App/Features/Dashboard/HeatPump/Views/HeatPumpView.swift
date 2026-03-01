@@ -3,12 +3,12 @@ import SwiftUI
 struct HeatPumpView: View {
     @Environment(\.heatPumpStoreFactory) private var heatPumpStoreFactory
 
-    let uniqueId: String
+    let identifier: DeviceIdentifier
     @State private var pendingPulseOn = false
     @State private var pendingSpinOn = false
 
     var body: some View {
-        WithStoreView(factory: { heatPumpStoreFactory.make(uniqueId) }) { store in
+        WithStoreView(factory: { heatPumpStoreFactory.make(identifier) }) { store in
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
 
@@ -25,17 +25,32 @@ struct HeatPumpView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .accessibilityLabel("Current heat pump value")
 
-                    HStack(spacing: 12) {
-                        SetPointButton(
-                            systemImage: "minus",
-                            tint: Color(red: 0.24, green: 0.56, blue: 0.98),
-                            size: 30,
-                            iconSize: 14,
-                            accessibilityLabel: "Decrease target value",
-                            action: {
-                                store.send(.newSetPointWasReceived(store.setPoint - 0.5))
-                            }
-                        )
+                    ZStack {
+                        HStack(spacing: 0) {
+                            SetPointButton(
+                                systemImage: "minus",
+                                tint: Color(red: 0.24, green: 0.56, blue: 0.98),
+                                size: 30,
+                                iconSize: 14,
+                                accessibilityLabel: "Decrease target value",
+                                action: {
+                                    store.send(.newSetPointWasReceived(store.setPoint - 0.5))
+                                }
+                            )
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                            SetPointButton(
+                                systemImage: "plus",
+                                tint: Color(red: 0.95, green: 0.34, blue: 0.32),
+                                size: 30,
+                                iconSize: 14,
+                                accessibilityLabel: "Increase target value",
+                                action: {
+                                    store.send(.newSetPointWasReceived(store.setPoint + 0.5))
+                                }
+                            )
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                        }
 
                         HStack(spacing: 6) {
                             Image(systemName: "arrow.triangle.2.circlepath")
@@ -47,6 +62,8 @@ struct HeatPumpView: View {
                             Text(store.setPoint, format: .number.precision(.fractionLength(1)))
                                 .font(.system(size: 22, weight: .semibold, design: .rounded))
                                 .monospacedDigit()
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
 
                             Image(systemName: "arrow.triangle.2.circlepath")
                                 .font(.system(size: 12, weight: .semibold))
@@ -55,6 +72,7 @@ struct HeatPumpView: View {
                                 .rotationEffect(.degrees(pendingSpinOn ? 360 : 0))
                                 .accessibilityHidden(true)
                         }
+                        .fixedSize(horizontal: true, vertical: false)
                         .foregroundStyle(store.isSetPointBeingSet ? AppColors.ember : .primary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
@@ -69,25 +87,15 @@ struct HeatPumpView: View {
                                 )
                                 .scaleEffect(store.isSetPointBeingSet && pendingPulseOn ? 1.03 : 1)
                         }
+                        .allowsHitTesting(false)
                         .onAppear {
                             updatePendingAnimation(isPending: store.isSetPointBeingSet)
                         }
                         .onChange(of: store.isSetPointBeingSet) { _, isPending in
                             updatePendingAnimation(isPending: isPending)
                         }
-
-                        SetPointButton(
-                            systemImage: "plus",
-                            tint: Color(red: 0.95, green: 0.34, blue: 0.32),
-                            size: 30,
-                            iconSize: 14,
-                            accessibilityLabel: "Increase target value",
-                            action: {
-                                store.send(.newSetPointWasReceived(store.setPoint + 0.5))
-                            }
-                        )
                     }
-                    .frame(maxWidth: .infinity, alignment: .center)
+                    .frame(maxWidth: .infinity)
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel("Heat pump target value")
                 }

@@ -228,8 +228,9 @@ struct ACKRepositoryTests {
             metadata: makeMetadata(transactionId: transactionId)
         )
 
+        await settle(cycles: 20)
         await testTime.advance(by: .seconds(120))
-        await settle()
+        await settle(cycles: 20)
 
         let waiter = Task {
             try await repository.waitForACK(transactionId: transactionId)
@@ -436,7 +437,7 @@ private actor TestTimeDriver {
         orderSeed += 1
 
         try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 if Task.isCancelled {
                     continuation.resume(throwing: CancellationError())
                     return

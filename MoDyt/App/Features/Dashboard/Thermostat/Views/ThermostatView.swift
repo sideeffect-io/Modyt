@@ -3,10 +3,10 @@ import SwiftUI
 struct ThermostatView: View {
     @Environment(\.thermostatStoreFactory) private var thermostatStoreFactory
 
-    let uniqueId: String
+    let identifier: DeviceIdentifier
 
     var body: some View {
-        WithStoreView(factory: { thermostatStoreFactory.make(uniqueId) }) { store in
+        WithStoreView(factory: { thermostatStoreFactory.make(identifier) }) { store in
             thermostatContent(store: store)
         }
     }

@@ -1,13 +1,13 @@
 import Foundation
 
 struct TydomMessageHydratorDependencies: Sendable {
-    let deviceInfo: @Sendable (String) async -> TydomDeviceInfo?
+    let deviceInfo: @Sendable (TydomDeviceIdentifier) async -> TydomDeviceInfo?
     let scenarioMetadata: @Sendable (Int) async -> TydomScenarioMetadata?
     let applyCacheMutation: @Sendable (TydomCacheMutation) async -> Void
     let log: @Sendable (String) -> Void
 
     init(
-        deviceInfo: @escaping @Sendable (String) async -> TydomDeviceInfo?,
+        deviceInfo: @escaping @Sendable (TydomDeviceIdentifier) async -> TydomDeviceInfo?,
         scenarioMetadata: @escaping @Sendable (Int) async -> TydomScenarioMetadata?,
         applyCacheMutation: @escaping @Sendable (TydomCacheMutation) async -> Void,
         log: @escaping @Sendable (String) -> Void = { _ in }
@@ -121,12 +121,12 @@ struct TydomMessageHydrator: Sendable {
         var missingInfo = 0
         var skippedCData = 0
         var emptyData = 0
-        var missingInfoSamples: [String] = []
+        var missingInfoSamples: [TydomDeviceIdentifier] = []
         for update in updates {
-            guard let info = await dependencies.deviceInfo(update.uniqueId) else {
+            guard let info = await dependencies.deviceInfo(update.identifier) else {
                 missingInfo += 1
                 if missingInfoSamples.count < 5 {
-                    missingInfoSamples.append(update.uniqueId)
+                    missingInfoSamples.append(update.identifier)
                 }
                 continue
             }
@@ -159,13 +159,12 @@ struct TydomMessageHydrator: Sendable {
             }
             if isShutterUsage(info.usage), let traceValue = tracePositionValue(in: update.data) {
                 dependencies.log(
-                    "ShutterTrace hydrator uniqueId=\(update.uniqueId) usage=\(info.usage) source=\(update.source) tx=\(transactionId ?? "nil") position=\(traceValue)"
+                    "ShutterTrace hydrator endpointId=\(update.endpointId) deviceId=\(update.deviceId) usage=\(info.usage) source=\(update.source) tx=\(transactionId ?? "nil") position=\(traceValue)"
                 )
             }
             devices.append(TydomDevice(
-                id: update.id,
+                deviceId: update.deviceId,
                 endpointId: update.endpointId,
-                uniqueId: update.uniqueId,
                 name: info.name,
                 usage: info.usage,
                 kind: TydomDeviceKind.fromUsage(info.usage),

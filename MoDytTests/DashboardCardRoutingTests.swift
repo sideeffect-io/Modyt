@@ -131,7 +131,8 @@ struct DashboardCardRoutingTests {
         data: [String: JSONValue]
     ) -> Device {
         Device(
-            id: "1_42",
+            id: .init(deviceId: 42, endpointId: 1),
+            deviceId: 42,
             endpointId: 1,
             name: name,
             usage: usage,

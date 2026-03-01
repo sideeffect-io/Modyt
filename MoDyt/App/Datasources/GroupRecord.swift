@@ -11,7 +11,7 @@ struct GroupRecord: Codable, Identifiable, Sendable, Equatable {
     var picto: String?
     var isGroupUser: Bool
     var isGroupAll: Bool
-    var memberUniqueIds: [String]
+    var memberIdentifiers: [DeviceIdentifier]
     var isFavorite: Bool
     var favoriteOrder: Int?
     var dashboardOrder: Int?

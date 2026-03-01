@@ -22,10 +22,10 @@ final class EnergyConsumptionStore {
     }
 
     struct Dependencies {
-        let observeEnergyConsumption: @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
+        let observeEnergyConsumption: @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
 
         init(
-            observeEnergyConsumption: @escaping @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
+            observeEnergyConsumption: @escaping @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
         ) {
             self.observeEnergyConsumption = observeEnergyConsumption
         }
@@ -37,12 +37,12 @@ final class EnergyConsumptionStore {
     private let worker: Worker
 
     init(
-        uniqueId: String,
+        identifier: DeviceIdentifier,
         dependencies: Dependencies
     ) {
         self.descriptor = nil
         self.worker = Worker(
-            uniqueId: uniqueId,
+            identifier: identifier,
             observeEnergyConsumption: dependencies.observeEnergyConsumption
         )
 
@@ -59,21 +59,21 @@ final class EnergyConsumptionStore {
     }
 
     private actor Worker {
-        private let uniqueId: String
-        private let observeEnergyConsumption: @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
+        private let identifier: DeviceIdentifier
+        private let observeEnergyConsumption: @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
 
         init(
-            uniqueId: String,
-            observeEnergyConsumption: @escaping @Sendable (String) async -> any AsyncSequence<Device?, Never> & Sendable
+            identifier: DeviceIdentifier,
+            observeEnergyConsumption: @escaping @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
         ) {
-            self.uniqueId = uniqueId
+            self.identifier = identifier
             self.observeEnergyConsumption = observeEnergyConsumption
         }
 
         func observe(
             onDescriptor: @escaping @Sendable (Descriptor?) async -> Void
         ) async {
-            let stream = await observeEnergyConsumption(uniqueId)
+            let stream = await observeEnergyConsumption(identifier)
             for await device in stream {
                 guard !Task.isCancelled else { return }
                 await onDescriptor(device?.energyConsumptionDescriptor())
