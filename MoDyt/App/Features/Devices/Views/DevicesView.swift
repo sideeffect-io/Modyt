@@ -1,10 +1,12 @@
 import SwiftUI
 
 struct DevicesView: View {
-    @Environment(\.devicesStoreFactory) private var devicesStoreFactory
+    @Environment(\.devicesStoreDependencies) private var devicesStoreDependencies
 
     var body: some View {
-        WithStoreView(factory: devicesStoreFactory.make) { store in
+        WithStoreView(
+            store: DevicesStore(dependencies: devicesStoreDependencies),
+        ) { store in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {
                     listHeader
@@ -30,9 +32,6 @@ struct DevicesView: View {
                 .padding(.vertical, 18)
             }
             .navigationTitle("Devices")
-            .task {
-                store.send(.onAppear)
-            }
             .refreshable {
                 store.send(.refreshRequested)
             }

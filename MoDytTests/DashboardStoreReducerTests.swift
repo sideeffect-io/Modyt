@@ -16,11 +16,9 @@ struct DashboardStoreReducerTests {
     @Test
     func onAppearEmitsStartObservingFavoritesEffect() {
         let initialState = DashboardState.initial
-
-        let (nextState, effects) = DashboardReducer.reduce(
-            state: initialState,
-            event: .onAppear
-        )
+        var stateMachine = DashboardStore.StateMachine(state: initialState)
+        let effects = stateMachine.reduce(.onAppear)
+        let nextState = stateMachine.state
 
         #expect(nextState == initialState)
         #expect(effects == [.startObservingFavorites])
@@ -29,11 +27,9 @@ struct DashboardStoreReducerTests {
     @Test
     func refreshRequestedEmitsRefreshAllEffect() {
         let initialState = DashboardState.initial
-
-        let (nextState, effects) = DashboardReducer.reduce(
-            state: initialState,
-            event: .refreshRequested
-        )
+        var stateMachine = DashboardStore.StateMachine(state: initialState)
+        let effects = stateMachine.reduce(.refreshRequested)
+        let nextState = stateMachine.state
 
         #expect(nextState == initialState)
         #expect(effects == [.refreshAll])
@@ -49,10 +45,9 @@ struct DashboardStoreReducerTests {
             memberIdentifiers: [.init(deviceId: 4, endpointId: 1)]
         )
 
-        let (nextState, effects) = DashboardReducer.reduce(
-            state: initialState,
-            event: .reorderFavorite(source, target)
-        )
+        var stateMachine = DashboardStore.StateMachine(state: initialState)
+        let effects = stateMachine.reduce(.reorderFavorite(source, target))
+        let nextState = stateMachine.state
 
         #expect(nextState == initialState)
         #expect(effects == [.reorderFavorite(source, target)])
@@ -76,10 +71,9 @@ struct DashboardStoreReducerTests {
             )
         ]
 
-        let (nextState, effects) = DashboardReducer.reduce(
-            state: initialState,
-            event: .favoritesUpdated(updatedFavorites)
-        )
+        var stateMachine = DashboardStore.StateMachine(state: initialState)
+        let effects = stateMachine.reduce(.favoritesUpdated(updatedFavorites))
+        let nextState = stateMachine.state
 
         #expect(nextState.favorites == updatedFavorites)
         #expect(effects.isEmpty)

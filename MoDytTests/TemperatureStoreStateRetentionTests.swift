@@ -9,9 +9,11 @@ struct TemperatureStoreStateRetentionTests {
         let streamBox = DeviceStreamBox()
         let store = TemperatureStore(
             dependencies: .init(
-                observeTemperature: { streamBox.stream }
-            )
+                observeTemperature: { _ in streamBox.stream }
+            ),
+            identifier: .init(deviceId: 42, endpointId: 1)
         )
+        store.start()
 
         streamBox.yield(
             makeDevice(
@@ -44,9 +46,11 @@ struct TemperatureStoreStateRetentionTests {
         let streamBox = DeviceStreamBox()
         let store = TemperatureStore(
             dependencies: .init(
-                observeTemperature: { streamBox.stream }
-            )
+                observeTemperature: { _ in streamBox.stream }
+            ),
+            identifier: .init(deviceId: 42, endpointId: 1)
         )
+        store.start()
 
         streamBox.yield(
             makeDevice(

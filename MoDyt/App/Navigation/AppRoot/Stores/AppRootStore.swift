@@ -19,22 +19,34 @@ enum AppRootEvent {
     case didDisconnect
 }
 
+enum AppRootEffect: Sendable {}
+
 @Observable
 @MainActor
-final class AppRootStore {
-    private(set) var state: AppRootState
+final class AppRootStore: StartableStore {
+    struct StateMachine {
+        var state: AppRootState = .initial
 
-    init(state: AppRootState = .initial) {
-        self.state = state
+        mutating func reduce(_ event: AppRootEvent) -> [AppRootEffect] {
+            switch event {
+            case .authenticated:
+                state.route = .runtime
+            case .didDisconnect:
+                state.route = .authentication
+            }
+            return []
+        }
+    }
+
+    private(set) var stateMachine: StateMachine = StateMachine()
+
+    var state: AppRootState {
+        stateMachine.state
     }
 
     func send(_ event: AppRootEvent) {
-        switch event {
-        case .authenticated:
-            state.route = .runtime
-
-        case .didDisconnect:
-            state.route = .authentication
-        }
+        _ = stateMachine.reduce(event)
     }
+
+    func start() {}
 }

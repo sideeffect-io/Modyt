@@ -8,11 +8,12 @@ struct ThermostatStoreStateRetentionTests {
     func transientNilDescriptorKeepsLastValidState() async {
         let streamBox = DeviceStreamBox()
         let store = ThermostatStore(
-            identifier: .init(deviceId: 42, endpointId: 1),
             dependencies: .init(
                 observeThermostat: { _ in streamBox.stream }
-            )
+            ),
+            identifier: .init(deviceId: 42, endpointId: 1)
         )
+        store.start()
 
         streamBox.yield(
             makeDevice(
@@ -48,11 +49,12 @@ struct ThermostatStoreStateRetentionTests {
     func deviceRemovalClearsState() async {
         let streamBox = DeviceStreamBox()
         let store = ThermostatStore(
-            identifier: .init(deviceId: 42, endpointId: 1),
             dependencies: .init(
                 observeThermostat: { _ in streamBox.stream }
-            )
+            ),
+            identifier: .init(deviceId: 42, endpointId: 1)
         )
+        store.start()
 
         streamBox.yield(
             makeDevice(

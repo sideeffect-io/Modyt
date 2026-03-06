@@ -32,45 +32,42 @@ enum SceneExecutionEffect: Sendable, Equatable {
     case clearFeedback
 }
 
-enum SceneExecutionReducer {
-    static func reduce(
-        state: SceneExecutionState,
-        event: SceneExecutionEvent,
-        uniqueId: String
-    ) -> (SceneExecutionState, [SceneExecutionEffect]) {
-        var state = state
-        var effects: [SceneExecutionEffect] = []
-
-        switch event {
-        case .executeTapped:
-            guard !state.isExecuting else { return (state, effects) }
-            state.isExecuting = true
-            state.feedback = nil
-            effects = [.executeScene(uniqueId)]
-
-        case .executionFinished(let result):
-            state.isExecuting = false
-            switch result {
-            case .acknowledged:
-                state.feedback = .success
-            case .rejected, .invalidSceneIdentifier, .sendFailed:
-                state.feedback = .failure
-            case .sentWithoutAcknowledgement:
-                state.feedback = .sent
-            }
-            effects = [.clearFeedback]
-
-        case .clearFeedback:
-            state.feedback = nil
-        }
-
-        return (state, effects)
-    }
-}
-
 @Observable
 @MainActor
-final class SceneExecutionStore {
+final class SceneExecutionStore: StartableStore {
+    struct StateMachine {
+        var state: SceneExecutionState = .initial
+
+        mutating func reduce(
+            _ event: SceneExecutionEvent,
+            uniqueId: String
+        ) -> [SceneExecutionEffect] {
+            switch event {
+            case .executeTapped:
+                guard !state.isExecuting else { return [] }
+                state.isExecuting = true
+                state.feedback = nil
+                return [.executeScene(uniqueId)]
+
+            case .executionFinished(let result):
+                state.isExecuting = false
+                switch result {
+                case .acknowledged:
+                    state.feedback = .success
+                case .rejected, .invalidSceneIdentifier, .sendFailed:
+                    state.feedback = .failure
+                case .sentWithoutAcknowledgement:
+                    state.feedback = .sent
+                }
+                return [.clearFeedback]
+
+            case .clearFeedback:
+                state.feedback = nil
+                return []
+            }
+        }
+    }
+
     struct Dependencies {
         let executeScene: @Sendable (String) async -> SceneExecutionResult
         let sleep: @Sendable (Duration) async -> Void
@@ -92,15 +89,22 @@ final class SceneExecutionStore {
         }
     }
 
-    private(set) var state: SceneExecutionState
+    private(set) var stateMachine: StateMachine = StateMachine()
+
+    var state: SceneExecutionState {
+        stateMachine.state
+    }
 
     private let uniqueId: String
     private let executionTask = TaskHandle()
     private let feedbackTask = TaskHandle()
     private let worker: Worker
+    private var hasStarted = false
 
-    init(uniqueId: String, dependencies: Dependencies) {
-        self.state = .initial
+    init(
+        dependencies: Dependencies,
+        uniqueId: String
+    ) {
         self.uniqueId = uniqueId
         self.worker = Worker(
             executeScene: dependencies.executeScene,
@@ -110,13 +114,18 @@ final class SceneExecutionStore {
         )
     }
 
+    func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
+    }
+
+    deinit {
+        executionTask.cancel()
+        feedbackTask.cancel()
+    }
+
     func send(_ event: SceneExecutionEvent) {
-        let (nextState, effects) = SceneExecutionReducer.reduce(
-            state: state,
-            event: event,
-            uniqueId: uniqueId
-        )
-        state = nextState
+        let effects = stateMachine.reduce(event, uniqueId: uniqueId)
         handle(effects)
     }
 
@@ -178,20 +187,5 @@ final class SceneExecutionStore {
         func waitBeforeClearingFeedback() async {
             await sleepAction(feedbackDuration)
         }
-    }
-}
-
-private final class TaskHandle {
-    var task: Task<Void, Never>? {
-        didSet { oldValue?.cancel() }
-    }
-
-    func cancel() {
-        task?.cancel()
-        task = nil
-    }
-
-    deinit {
-        task?.cancel()
     }
 }

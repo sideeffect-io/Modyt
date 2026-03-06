@@ -98,11 +98,14 @@ struct TemperatureStoreDescriptorTests {
     }
 
     private func makeStore(streamBox: DeviceStreamBox) -> TemperatureStore {
-        TemperatureStore(
+        let store = TemperatureStore(
             dependencies: .init(
-                observeTemperature: { streamBox.stream }
-            )
+                observeTemperature: { _ in streamBox.stream }
+            ),
+            identifier: .init(deviceId: 42, endpointId: 1)
         )
+        store.start()
+        return store
     }
 
     private func makeDevice(

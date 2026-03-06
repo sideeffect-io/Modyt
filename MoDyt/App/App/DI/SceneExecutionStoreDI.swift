@@ -1,30 +1,31 @@
-import Foundation
-import SwiftUI
 import DeltaDoreClient
+import SwiftUI
 
-struct SceneExecutionStoreFactory {
-    let make: @MainActor (String) -> SceneExecutionStore
-
-    static func live(dependencies: DependencyBag) -> SceneExecutionStoreFactory {
+enum SceneExecutionStoreDependencyFactory {
+    static func make(
+        dependencyBag: DependencyBag = .production
+    ) -> SceneExecutionStore.Dependencies {
+        let gatewayClient = dependencyBag.gatewayClient
+        let ackRepository = dependencyBag.localStorageDatasources.ackRepository
         let runtime = SceneExecutionRuntime(
-            gatewayClient: dependencies.gatewayClient,
-            ackRepository: dependencies.localStorageDatasources.ackRepository
+            gatewayClient: gatewayClient,
+            ackRepository: ackRepository
         )
 
-        return SceneExecutionStoreFactory { uniqueId in
-            SceneExecutionStore(
-                uniqueId: uniqueId,
-                dependencies: .init(
-                    executeScene: { sceneID in
-                        await runtime.executeScene(sceneID: sceneID)
-                    }
-                )
-            )
-        }
+        return .init(
+            executeScene: { sceneID in
+                await runtime.executeScene(sceneID: sceneID)
+            }
+        )
     }
 }
 
-private actor SceneExecutionRuntime {
+extension EnvironmentValues {
+    @Entry var sceneExecutionStoreDependencies: SceneExecutionStore.Dependencies =
+        SceneExecutionStoreDependencyFactory.make()
+}
+
+actor SceneExecutionRuntime {
     private let gatewayClient: DeltaDoreClient
     private let ackRepository: ACKRepository
 
@@ -72,18 +73,5 @@ private actor SceneExecutionRuntime {
         }
 
         return .rejected(statusCode: statusCode)
-    }
-}
-
-private struct SceneExecutionStoreFactoryKey: EnvironmentKey {
-    static var defaultValue: SceneExecutionStoreFactory {
-        SceneExecutionStoreFactory.live(dependencies: .live())
-    }
-}
-
-extension EnvironmentValues {
-    var sceneExecutionStoreFactory: SceneExecutionStoreFactory {
-        get { self[SceneExecutionStoreFactoryKey.self] }
-        set { self[SceneExecutionStoreFactoryKey.self] = newValue }
     }
 }

@@ -118,7 +118,7 @@ extension DomainRepository where Item == Group, Upsert == GroupUpsertEvent {
         membership: GroupMembershipUpsert,
         timestamp: Date
     ) -> Group {
-        let memberIdentifiers = membership.memberIdentifiers.uniquePreservingOrder()
+        let memberIdentifiers = canonicalMemberIdentifiers(membership.memberIdentifiers)
 
         let isGroupUser = existing?.isGroupUser ?? false
 
@@ -134,6 +134,19 @@ extension DomainRepository where Item == Group, Upsert == GroupUpsertEvent {
             dashboardOrder: existing?.dashboardOrder,
             updatedAt: timestamp
         )
+    }
+
+    private static func canonicalMemberIdentifiers(
+        _ values: [DeviceIdentifier]
+    ) -> [DeviceIdentifier] {
+        values
+            .uniquePreservingOrder()
+            .sorted {
+                if $0.deviceId == $1.deviceId {
+                    return $0.endpointId < $1.endpointId
+                }
+                return $0.deviceId < $1.deviceId
+            }
     }
 
     private static let tableName = "groups"

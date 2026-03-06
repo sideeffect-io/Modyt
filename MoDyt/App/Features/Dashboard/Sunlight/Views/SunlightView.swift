@@ -1,13 +1,18 @@
 import SwiftUI
 
 struct SunlightView: View {
-    @Environment(\.sunlightStoreFactory) private var sunlightStoreFactory
+    @Environment(\.sunlightStoreDependencies) private var sunlightStoreDependencies
     @Environment(\.colorScheme) private var colorScheme
 
     let identifier: DeviceIdentifier
 
     var body: some View {
-        WithStoreView(factory: { sunlightStoreFactory.make(identifier) }) { store in
+        WithStoreView(
+            store: SunlightStore(
+                dependencies: sunlightStoreDependencies,
+                identifier: identifier
+            ),
+        ) { store in
             sunlightContent(descriptor: store.descriptor)
         }
     }

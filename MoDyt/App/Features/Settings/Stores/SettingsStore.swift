@@ -22,49 +22,56 @@ enum SettingsEffect: Sendable, Equatable {
     case requestDisconnect
 }
 
-enum SettingsReducer {
-    static func reduce(state: SettingsState, event: SettingsEvent) -> (SettingsState, [SettingsEffect]) {
-        var state = state
-        var effects: [SettingsEffect] = []
-
-        switch event {
-        case .disconnectTapped:
-            guard !state.isDisconnecting else { return (state, effects) }
-            state.isDisconnecting = true
-            state.didDisconnect = false
-            state.errorMessage = nil
-            effects = [.requestDisconnect]
-
-        case .disconnectFinished:
-            state.isDisconnecting = false
-            state.didDisconnect = true
-            state.errorMessage = nil
-        }
-
-        return (state, effects)
-    }
-}
-
 @Observable
 @MainActor
-final class SettingsStore {
+final class SettingsStore: StartableStore {
+    struct StateMachine {
+        var state: SettingsState = .initial
+
+        mutating func reduce(_ event: SettingsEvent) -> [SettingsEffect] {
+            switch event {
+            case .disconnectTapped:
+                guard !state.isDisconnecting else { return [] }
+                state.isDisconnecting = true
+                state.didDisconnect = false
+                state.errorMessage = nil
+                return [.requestDisconnect]
+
+            case .disconnectFinished:
+                state.isDisconnecting = false
+                state.didDisconnect = true
+                state.errorMessage = nil
+                return []
+            }
+        }
+    }
+
     struct Dependencies {
         let requestDisconnect: @Sendable () async -> Void
     }
 
-    private(set) var state: SettingsState
+    private(set) var stateMachine: StateMachine = StateMachine()
+
+    var state: SettingsState {
+        stateMachine.state
+    }
 
     private let worker: Worker
+    private let disconnectTask = TaskHandle()
 
     init(dependencies: Dependencies) {
-        self.state = .initial
         self.worker = Worker(requestDisconnect: dependencies.requestDisconnect)
     }
 
     func send(_ event: SettingsEvent) {
-        let (nextState, effects) = SettingsReducer.reduce(state: state, event: event)
-        state = nextState
+        let effects = stateMachine.reduce(event)
         handle(effects)
+    }
+
+    func start() {}
+
+    deinit {
+        disconnectTask.cancel()
     }
 
     private func handle(_ effects: [SettingsEffect]) {
@@ -76,7 +83,7 @@ final class SettingsStore {
     private func handle(_ effect: SettingsEffect) {
         switch effect {
         case .requestDisconnect:
-            Task { [weak self, worker] in
+            disconnectTask.task = Task { [weak self, worker] in
                 await worker.requestDisconnect()
                 self?.receive(.disconnectFinished)
             }

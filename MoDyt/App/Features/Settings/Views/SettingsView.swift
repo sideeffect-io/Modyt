@@ -1,11 +1,13 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @Environment(\.settingsStoreFactory) private var settingsStoreFactory
+    @Environment(\.settingsStoreDependencies) private var settingsStoreDependencies
     let onDidDisconnect: @MainActor () -> Void
 
     var body: some View {
-        WithStoreView(factory: settingsStoreFactory.make) { store in
+        WithStoreView(
+            store: SettingsStore(dependencies: settingsStoreDependencies),
+        ) { store in
             VStack(spacing: 20) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Connection")

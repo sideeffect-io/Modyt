@@ -1,10 +1,12 @@
 import SwiftUI
 
 struct GroupsView: View {
-    @Environment(\.groupsStoreFactory) private var groupsStoreFactory
+    @Environment(\.groupsStoreDependencies) private var groupsStoreDependencies
 
     var body: some View {
-        WithStoreView(factory: groupsStoreFactory.make) { store in
+        WithStoreView(
+            store: GroupsStore(dependencies: groupsStoreDependencies),
+        ) { store in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {
                     listHeader
@@ -33,9 +35,6 @@ struct GroupsView: View {
                 .padding(.vertical, 18)
             }
             .navigationTitle("Groups")
-            .task {
-                store.send(.onAppear)
-            }
             .refreshable {
                 store.send(.refreshRequested)
             }

@@ -3,7 +3,31 @@ import Observation
 
 @Observable
 @MainActor
-final class ThermostatStore {
+final class ThermostatStore: StartableStore {
+    struct State: Sendable, Equatable {
+        var descriptor: Descriptor?
+    }
+
+    enum Event: Sendable {
+        case descriptorWasResolved(Descriptor?)
+    }
+
+    enum Effect: Sendable, Equatable {}
+
+    struct StateMachine {
+        var state = State(descriptor: nil)
+
+        mutating func reduce(_ event: Event) -> [Effect] {
+            switch event {
+            case .descriptorWasResolved(let descriptor):
+                if state.descriptor != descriptor {
+                    state.descriptor = descriptor
+                }
+            }
+            return []
+        }
+    }
+
     struct Descriptor: Sendable, Equatable {
         struct Temperature: Sendable, Equatable {
             let value: Double
@@ -30,46 +54,60 @@ final class ThermostatStore {
         }
     }
 
-    private(set) var state: Descriptor?
+    private(set) var stateMachine: StateMachine = StateMachine()
 
+    var state: Descriptor? {
+        stateMachine.state.descriptor
+    }
+
+    private let identifier: DeviceIdentifier
     private let observationTask = TaskHandle()
     private let worker: Worker
+    private var hasStarted = false
 
     init(
-        identifier: DeviceIdentifier,
-        dependencies: Dependencies
+        dependencies: Dependencies,
+        identifier: DeviceIdentifier
     ) {
+        self.identifier = identifier
         self.worker = Worker(
-            identifier: identifier,
             observeThermostat: dependencies.observeThermostat
         )
+    }
 
+    func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
+        let identifier = self.identifier
         observationTask.task = Task { [weak self, worker] in
-            await worker.observe { [weak self] device, state in
+            await worker.observe(identifier: identifier) { [weak self] device, state in
                 await self?.applyIncomingObservation(device: device, state: state)
             }
         }
     }
 
+    deinit {
+        observationTask.cancel()
+    }
+
     private func applyIncomingObservation(device: Device?, state: Descriptor?) {
         guard let device else {
-            applyIncomingState(nil)
+            send(.descriptorWasResolved(nil))
             return
         }
 
         guard let state else {
             if Self.isClimateCandidate(device) == false {
-                applyIncomingState(nil)
+                send(.descriptorWasResolved(nil))
             }
             return
         }
 
-        applyIncomingState(state)
+        send(.descriptorWasResolved(state))
     }
 
-    private func applyIncomingState(_ state: Descriptor?) {
-        guard self.state != state else { return }
-        self.state = state
+    func send(_ event: Event) {
+        _ = stateMachine.reduce(event)
     }
 
     private static func isClimateCandidate(_ device: Device) -> Bool {
@@ -82,18 +120,16 @@ final class ThermostatStore {
     }
 
     private actor Worker {
-        private let identifier: DeviceIdentifier
         private let observeThermostat: @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
 
         init(
-            identifier: DeviceIdentifier,
             observeThermostat: @escaping @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
         ) {
-            self.identifier = identifier
             self.observeThermostat = observeThermostat
         }
 
         func observe(
+            identifier: DeviceIdentifier,
             onState: @escaping @Sendable (Device?, Descriptor?) async -> Void
         ) async {
             let stream = await observeThermostat(identifier)
@@ -102,15 +138,5 @@ final class ThermostatStore {
                 await onState(device, device?.thermostatDescriptor())
             }
         }
-    }
-}
-
-private final class TaskHandle {
-    var task: Task<Void, Never>? {
-        didSet { oldValue?.cancel() }
-    }
-
-    deinit {
-        task?.cancel()
     }
 }

@@ -1,15 +1,21 @@
 import SwiftUI
 
 struct AuthenticationRootView: View {
-    @Environment(\.authenticationStoreFactory) private var authenticationStoreFactory
+    @Environment(\.authenticationStoreDependencies) private var authenticationStoreDependencies
     let onAuthenticated: @MainActor () -> Void
     
     var body: some View {
-        WithStoreView(factory: { authenticationStoreFactory.make(onAuthenticated) }) { store in
-            content(for: store)
-                .task {
-                    store.send(.onAppear)
+        WithStoreView(
+            store: AuthenticationStore(
+                dependencies: authenticationStoreDependencies,
+                onDelegateEvent: { delegateEvent in
+                    if case .authenticated = delegateEvent {
+                        onAuthenticated()
+                    }
                 }
+            ),
+        ) { store in
+            content(for: store)
         }
     }
     

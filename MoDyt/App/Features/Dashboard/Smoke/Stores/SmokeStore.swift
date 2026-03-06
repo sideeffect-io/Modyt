@@ -3,7 +3,31 @@ import Observation
 
 @Observable
 @MainActor
-final class SmokeStore {
+final class SmokeStore: StartableStore {
+    struct State: Sendable, Equatable {
+        var descriptor: Descriptor?
+    }
+
+    enum Event: Sendable {
+        case descriptorWasReceived(Descriptor?)
+    }
+
+    enum Effect: Sendable, Equatable {}
+
+    struct StateMachine {
+        var state = State(descriptor: nil)
+
+        mutating func reduce(_ event: Event) -> [Effect] {
+            switch event {
+            case .descriptorWasReceived(let descriptor):
+                if state.descriptor != descriptor {
+                    state.descriptor = descriptor
+                }
+            }
+            return []
+        }
+    }
+
     struct Descriptor: Sendable, Equatable {
         struct BatteryStatus: Sendable, Equatable {
             let batteryDefectKey: String?
@@ -48,46 +72,57 @@ final class SmokeStore {
         }
     }
 
-    private(set) var descriptor: Descriptor?
+    private(set) var stateMachine: StateMachine = StateMachine()
 
+    var descriptor: Descriptor? {
+        stateMachine.state.descriptor
+    }
+
+    private let identifier: DeviceIdentifier
     private let observationTask = TaskHandle()
     private let worker: Worker
+    private var hasStarted = false
 
     init(
-        identifier: DeviceIdentifier,
-        dependencies: Dependencies
+        dependencies: Dependencies,
+        identifier: DeviceIdentifier
     ) {
-        self.descriptor = nil
+        self.identifier = identifier
         self.worker = Worker(
-            identifier: identifier,
             observeSmoke: dependencies.observeSmoke
         )
+    }
 
+    func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
         observationTask.task = Task { [weak self, worker] in
-            await worker.observe { [weak self] descriptor in
-                await self?.applyIncomingDescriptor(descriptor)
+            guard let self else { return }
+            await worker.observe(identifier: identifier) { [weak self] descriptor in
+                await self?.send(.descriptorWasReceived(descriptor))
             }
         }
     }
 
-    private func applyIncomingDescriptor(_ descriptor: Descriptor?) {
-        guard self.descriptor != descriptor else { return }
-        self.descriptor = descriptor
+    deinit {
+        observationTask.cancel()
+    }
+
+    func send(_ event: Event) {
+        _ = stateMachine.reduce(event)
     }
 
     private actor Worker {
-        private let identifier: DeviceIdentifier
         private let observeSmoke: @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
 
         init(
-            identifier: DeviceIdentifier,
             observeSmoke: @escaping @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
         ) {
-            self.identifier = identifier
             self.observeSmoke = observeSmoke
         }
 
         func observe(
+            identifier: DeviceIdentifier,
             onDescriptor: @escaping @Sendable (Descriptor?) async -> Void
         ) async {
             let stream = await observeSmoke(identifier)
@@ -96,15 +131,5 @@ final class SmokeStore {
                 await onDescriptor(device?.smokeStoreDescriptor())
             }
         }
-    }
-}
-
-private final class TaskHandle {
-    var task: Task<Void, Never>? {
-        didSet { oldValue?.cancel() }
-    }
-
-    deinit {
-        task?.cancel()
     }
 }

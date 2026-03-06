@@ -49,70 +49,69 @@ struct HeatPumpGatewayCommand: Sendable, Equatable {
     let transactionId: String
 }
 
-enum HeatPumpReducer {
-    static func reduce(
-        state: HeatPumpState,
-        event: HeatPumpEvent
-    ) -> (HeatPumpState, [HeatPumpEffect]) {
-        switch (state, event) {
-        case (.featureIsIdle(let values), .valuesWereReceivedFromGateway(let temperature, let setPoint)):
-            let nextValues = HeatPumpValues(
-                temperature: temperature,
-                setPoint: setPoint,
-                unitSymbol: values.unitSymbol
-            )
-            return (.featureIsStarted(nextValues), [])
-
-        case (.featureIsStarted(let values), .valuesWereReceivedFromGateway(let temperature, let setPoint)):
-            let nextValues = HeatPumpValues(
-                temperature: temperature,
-                setPoint: setPoint,
-                unitSymbol: values.unitSymbol
-            )
-            return (.featureIsStarted(nextValues), [])
-
-        case (.featureIsStarted(let values), .newSetPointWasReceived(let newSetPoint)):
-            let nextValues = HeatPumpValues(
-                temperature: values.temperature,
-                setPoint: newSetPoint,
-                unitSymbol: values.unitSymbol
-            )
-            return (
-                .setPointIsBeingSet(nextValues),
-                [.updateSetPoint(newSetPoint)]
-            )
-
-        case (.setPointIsBeingSet(let values), .valuesWereReceivedFromGateway(let temperature, let setPoint)):
-            let nextValues = HeatPumpValues(
-                temperature: temperature,
-                setPoint: setPoint,
-                unitSymbol: values.unitSymbol
-            )
-            return (.setPointIsBeingSet(nextValues), [])
-
-        case (.setPointIsBeingSet(let values), .newSetPointWasReceived(let newSetPoint)):
-            let nextValues = HeatPumpValues(
-                temperature: values.temperature,
-                setPoint: newSetPoint,
-                unitSymbol: values.unitSymbol
-            )
-            return (
-                .setPointIsBeingSet(nextValues),
-                [.updateSetPoint(newSetPoint)]
-            )
-
-        case (.setPointIsBeingSet(let values), .setPointWasConfirmed):
-            return (.featureIsStarted(values), [])
-
-        default:
-            return (state, [])
-        }
-    }
-}
-
 @Observable
 @MainActor
-final class HeatPumpStore {
+final class HeatPumpStore: StartableStore {
+    struct StateMachine {
+        var state: HeatPumpState = .featureIsIdle(HeatPumpValues(temperature: 0.0, setPoint: 0.0))
+
+        mutating func reduce(_ event: HeatPumpEvent) -> [HeatPumpEffect] {
+            switch (state, event) {
+            case (.featureIsIdle(let values), .valuesWereReceivedFromGateway(let temperature, let setPoint)):
+                let nextValues = HeatPumpValues(
+                    temperature: temperature,
+                    setPoint: setPoint,
+                    unitSymbol: values.unitSymbol
+                )
+                state = .featureIsStarted(nextValues)
+                return []
+
+            case (.featureIsStarted(let values), .valuesWereReceivedFromGateway(let temperature, let setPoint)):
+                let nextValues = HeatPumpValues(
+                    temperature: temperature,
+                    setPoint: setPoint,
+                    unitSymbol: values.unitSymbol
+                )
+                state = .featureIsStarted(nextValues)
+                return []
+
+            case (.featureIsStarted(let values), .newSetPointWasReceived(let newSetPoint)):
+                let nextValues = HeatPumpValues(
+                    temperature: values.temperature,
+                    setPoint: newSetPoint,
+                    unitSymbol: values.unitSymbol
+                )
+                state = .setPointIsBeingSet(nextValues)
+                return [.updateSetPoint(newSetPoint)]
+
+            case (.setPointIsBeingSet(let values), .valuesWereReceivedFromGateway(let temperature, let setPoint)):
+                let nextValues = HeatPumpValues(
+                    temperature: temperature,
+                    setPoint: setPoint,
+                    unitSymbol: values.unitSymbol
+                )
+                state = .setPointIsBeingSet(nextValues)
+                return []
+
+            case (.setPointIsBeingSet(let values), .newSetPointWasReceived(let newSetPoint)):
+                let nextValues = HeatPumpValues(
+                    temperature: values.temperature,
+                    setPoint: newSetPoint,
+                    unitSymbol: values.unitSymbol
+                )
+                state = .setPointIsBeingSet(nextValues)
+                return [.updateSetPoint(newSetPoint)]
+
+            case (.setPointIsBeingSet(let values), .setPointWasConfirmed):
+                state = .featureIsStarted(values)
+                return []
+
+            default:
+                return []
+            }
+        }
+    }
+
     private struct CommandContext: Sendable, Equatable {
         let deviceID: Int
         let endpointID: Int
@@ -140,13 +139,19 @@ final class HeatPumpStore {
         }
     }
 
-    private(set) var state: HeatPumpState
+    private(set) var stateMachine: StateMachine = StateMachine()
 
+    var state: HeatPumpState {
+        stateMachine.state
+    }
+
+    private let identifier: DeviceIdentifier
     private let dependencies: Dependencies
     private let observationTask = TaskHandle()
     private let worker: Worker
     private let setPointThrottler: Throttler<Double>
     private var commandContext: CommandContext?
+    private var hasStarted = false
 
     var temperature: Double {
         state.values.temperature
@@ -168,10 +173,10 @@ final class HeatPumpStore {
     }
 
     init(
-        identifier: DeviceIdentifier,
-        dependencies: Dependencies
+        dependencies: Dependencies,
+        identifier: DeviceIdentifier
     ) {
-        self.state = .featureIsIdle(HeatPumpValues(temperature: 0.0, setPoint: 0.0))
+        self.identifier = identifier
         self.dependencies = dependencies
         self.setPointThrottler = Throttler(dueTime: dependencies.setPointDebounceInterval)
         self.worker = Worker(
@@ -182,8 +187,13 @@ final class HeatPumpStore {
             guard let self else { return }
             await self.executeDebouncedSetPoint(value)
         }
+    }
 
-        observationTask.task = Task { [weak self, worker, identifier] in
+    func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
+        let identifier = self.identifier
+        observationTask.task = Task { [weak self, worker] in
             await worker.observeHeatPump(identifier: identifier) { [weak self] observation in
                 self?.commandContext = observation.commandContext
                 self?.send(
@@ -196,9 +206,13 @@ final class HeatPumpStore {
         }
     }
 
+    deinit {
+        observationTask.cancel()
+        setPointThrottler.cancel()
+    }
+
     func send(_ event: HeatPumpEvent) {
-        let (nextState, effects) = HeatPumpReducer.reduce(state: state, event: event)
-        state = nextState
+        let effects = stateMachine.reduce(event)
         handle(effects)
     }
 
@@ -250,6 +264,42 @@ final class HeatPumpStore {
         return formatter.string(from: NSNumber(value: value)) ?? String(value)
     }
 
+    nonisolated static func resolveObservedDevice(
+        for identifier: DeviceIdentifier,
+        in devices: [Device]
+    ) -> Device? {
+        let siblingEndpoints = devices.filter { $0.deviceId == identifier.deviceId }
+        guard siblingEndpoints.isEmpty == false else { return nil }
+
+        guard let primaryDevice = siblingEndpoints.first(where: { $0.id == identifier })
+            ?? siblingEndpoints.first else {
+            return nil
+        }
+
+        var mergedData: [String: JSONValue] = [:]
+        var mergedMetadata: [String: JSONValue] = [:]
+        var hasMetadata = false
+
+        for device in siblingEndpoints where device.id != primaryDevice.id {
+            mergedData.merge(device.data) { _, next in next }
+            if let metadata = device.metadata {
+                mergedMetadata.merge(metadata) { _, next in next }
+                hasMetadata = true
+            }
+        }
+
+        mergedData.merge(primaryDevice.data) { _, next in next }
+        if let metadata = primaryDevice.metadata {
+            mergedMetadata.merge(metadata) { _, next in next }
+            hasMetadata = true
+        }
+
+        var resolvedDevice = primaryDevice
+        resolvedDevice.data = mergedData
+        resolvedDevice.metadata = hasMetadata ? mergedMetadata : nil
+        return resolvedDevice
+    }
+
     private actor Worker {
         struct Observation: Sendable {
             let temperature: Double
@@ -295,15 +345,5 @@ final class HeatPumpStore {
         func executeSetPointCommand(_ command: HeatPumpGatewayCommand) async {
             await executeSetPointCommandAction(command)
         }
-    }
-}
-
-private final class TaskHandle {
-    var task: Task<Void, Never>? {
-        didSet { oldValue?.cancel() }
-    }
-
-    deinit {
-        task?.cancel()
     }
 }

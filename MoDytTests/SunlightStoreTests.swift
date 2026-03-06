@@ -68,11 +68,14 @@ struct SunlightDescriptorTests {
     }
 
     private func makeStore(streamBox: DeviceStreamBox) -> SunlightStore {
-        SunlightStore(
+        let store = SunlightStore(
             dependencies: .init(
-                observeSunlight: { streamBox.stream }
-            )
+                observeSunlight: { _ in streamBox.stream }
+            ),
+            identifier: .init(deviceId: 1, endpointId: 1)
         )
+        store.start()
+        return store
     }
 
     private func makeSunlightRepositoryDevice(
@@ -101,32 +104,31 @@ struct SunlightDescriptorTests {
 @MainActor
 struct SunlightStoreTests {
     @Test
-    func initUsesInitialDescriptor() {
+    func initStartsWithoutDescriptor() {
         let store = SunlightStore(
-            initialDescriptor: makeSunlightDescriptor(value: 320, batteryDefect: false),
             dependencies: .init(
-                observeSunlight: {
+                observeSunlight: { _ in
                     AsyncStream { continuation in
                         continuation.finish()
                     }
                 }
-            )
+            ),
+            identifier: .init(deviceId: 11, endpointId: 1)
         )
 
-        #expect(store.descriptor?.value == 320)
-        #expect(store.descriptor?.unitSymbol == "W/m2")
-        #expect(store.descriptor?.batteryStatus?.batteryDefect == false)
+        #expect(store.descriptor == nil)
     }
 
     @Test
     func observationUpdatesDescriptorFromIncomingDescriptor() async {
         let streamBox = DeviceStreamBox()
         let store = SunlightStore(
-            initialDescriptor: makeSunlightDescriptor(value: 250),
             dependencies: .init(
-                observeSunlight: { streamBox.stream }
-            )
+                observeSunlight: { _ in streamBox.stream }
+            ),
+            identifier: .init(deviceId: 11, endpointId: 1)
         )
+        store.start()
 
         streamBox.yield(
             makeSunlightRepositoryDevice(
@@ -148,11 +150,12 @@ struct SunlightStoreTests {
     func observationClearsDescriptorWhenDeviceDisappears() async {
         let streamBox = DeviceStreamBox()
         let store = SunlightStore(
-            initialDescriptor: makeSunlightDescriptor(value: 180),
             dependencies: .init(
-                observeSunlight: { streamBox.stream }
-            )
+                observeSunlight: { _ in streamBox.stream }
+            ),
+            identifier: .init(deviceId: 11, endpointId: 1)
         )
+        store.start()
 
         streamBox.yield(nil)
         let didClear = await waitUntil {
@@ -185,24 +188,6 @@ struct SunlightStoreTests {
         )
     }
 
-    private func makeSunlightDescriptor(
-        value: Double,
-        batteryDefect: Bool? = nil,
-        batteryLevel: Double? = nil
-    ) -> SunlightStore.Descriptor {
-        SunlightStore.Descriptor(
-            key: "lightPower",
-            value: value,
-            range: 0...1400,
-            unitSymbol: "W/m2",
-            batteryStatus: SunlightStore.Descriptor.BatteryStatus(
-                batteryDefectKey: batteryDefect == nil ? nil : "battDefect",
-                batteryDefect: batteryDefect,
-                batteryLevelKey: batteryLevel == nil ? nil : "battery",
-                batteryLevel: batteryLevel
-            )
-        )
-    }
 }
 
 @MainActor

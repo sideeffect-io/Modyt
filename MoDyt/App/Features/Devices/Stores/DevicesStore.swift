@@ -20,45 +20,47 @@ enum DevicesEffect: Sendable, Equatable {
     case toggleFavorite(DeviceIdentifier)
 }
 
-enum DevicesReducer {
-    static func reduce(state: DevicesState, event: DevicesEvent) -> (DevicesState, [DevicesEffect]) {
-        var state = state
-        var effects: [DevicesEffect] = []
-
-        switch event {
-        case .onAppear:
-            effects = [.startObservingDevices]
-
-        case .devicesUpdated(let groupedDevices):
-            state.groupedDevices = groupedDevices
-
-        case .refreshRequested:
-            effects = [.refreshAll]
-
-        case .toggleFavorite(let uniqueId):
-            effects = [.toggleFavorite(uniqueId)]
-        }
-
-        return (state, effects)
-    }
-}
-
 @Observable
 @MainActor
-final class DevicesStore {
+final class DevicesStore: StartableStore {
+    struct StateMachine {
+        var state: DevicesState = .initial
+
+        mutating func reduce(_ event: DevicesEvent) -> [DevicesEffect] {
+            switch event {
+            case .onAppear:
+                return [.startObservingDevices]
+
+            case .devicesUpdated(let groupedDevices):
+                state.groupedDevices = groupedDevices
+                return []
+
+            case .refreshRequested:
+                return [.refreshAll]
+
+            case .toggleFavorite(let uniqueId):
+                return [.toggleFavorite(uniqueId)]
+            }
+        }
+    }
+
     struct Dependencies {
         let observeDevices: @Sendable () async -> any AsyncSequence<[RepositoryDeviceTypeSection], Never> & Sendable
         let toggleFavorite: @Sendable (DeviceIdentifier) async -> Void
         let refreshAll: @Sendable () async -> Void
     }
 
-    private(set) var state: DevicesState
+    private(set) var stateMachine: StateMachine = StateMachine()
+
+    var state: DevicesState {
+        stateMachine.state
+    }
 
     private let deviceTask = TaskHandle()
     private let worker: Worker
+    private var hasStarted = false
 
     init(dependencies: Dependencies) {
-        self.state = .initial
         self.worker = Worker(
             observeDevices: dependencies.observeDevices,
             toggleFavorite: dependencies.toggleFavorite,
@@ -67,9 +69,18 @@ final class DevicesStore {
     }
 
     func send(_ event: DevicesEvent) {
-        let (nextState, effects) = DevicesReducer.reduce(state: state, event: event)
-        state = nextState
+        let effects = stateMachine.reduce(event)
         handle(effects)
+    }
+
+    func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
+        send(.onAppear)
+    }
+
+    deinit {
+        deviceTask.cancel()
     }
 
     private func handle(_ effects: [DevicesEffect]) {
@@ -138,20 +149,5 @@ final class DevicesStore {
         func refreshAll() async {
             await refreshAllAction()
         }
-    }
-}
-
-private final class TaskHandle {
-    var task: Task<Void, Never>? {
-        didSet { oldValue?.cancel() }
-    }
-
-    func cancel() {
-        task?.cancel()
-        task = nil
-    }
-
-    deinit {
-        task?.cancel()
     }
 }

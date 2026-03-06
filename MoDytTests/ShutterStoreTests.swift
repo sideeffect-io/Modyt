@@ -54,30 +54,59 @@ struct ShutterReducerTests {
 
     @Test(arguments: transitionCases)
     func reducerAppliesConfiguredTransition(_ transition: TransitionCase) {
-        let (nextState, effects) = ShutterReducer.reduce(
-            state: transition.initial,
-            event: transition.event
-        )
+        var stateMachine = ShutterStore.StateMachine(state: transition.initial)
+        let effects = stateMachine.reduce(transition.event)
+        let nextState = stateMachine.state
 
         #expect(nextState == transition.expected)
         #expect(effects == transition.expectedEffects)
     }
 
     @Test
-    func reducerLeavesUnknownTransitionUntouched() {
-        let initial = ShutterState.featureIsStarted(
+    func movingStateEqualityIgnoresTimeoutTaskIdentity() {
+        let firstTask = Task<Void, Never> {}
+        let secondTask = Task<Void, Never> {}
+        defer {
+            firstTask.cancel()
+            secondTask.cancel()
+        }
+
+        let lhs = ShutterState.shutterIsMovingInApp(
             deviceIds: Self.deviceIds,
-            position: 42,
-            target: nil
+            position: 33,
+            target: 80,
+            timeoutTask: firstTask
         )
 
-        let (nextState, effects) = ShutterReducer.reduce(
-            state: initial,
-            event: .timeoutHasExpired
+        let rhs = ShutterState.shutterIsMovingInApp(
+            deviceIds: Self.deviceIds,
+            position: 33,
+            target: 80,
+            timeoutTask: secondTask
         )
 
-        #expect(nextState == initial)
+        #expect(lhs == rhs)
+    }
+
+    @Test
+    func timeoutTaskWasCreatedAssignsTaskInMovingState() {
+        let timeoutTask = Task<Void, Never> {}
+        defer { timeoutTask.cancel() }
+
+        let initial = ShutterState.shutterIsMovingInApp(
+            deviceIds: Self.deviceIds,
+            position: 33,
+            target: 80,
+            timeoutTask: nil
+        )
+
+        var stateMachine = ShutterStore.StateMachine(state: initial)
+        let effects = stateMachine.reduce(.timeoutTaskWasCreated(task: timeoutTask))
+        let nextState = stateMachine.state
+
         #expect(effects.isEmpty)
+        #expect(nextState.timeoutTask != nil)
+        #expect(nextState == .shutterIsMovingInApp(deviceIds: Self.deviceIds, position: 33, target: 80))
     }
 
     private static let deviceIds: [DeviceIdentifier] = [
@@ -93,10 +122,16 @@ struct ShutterReducerTests {
             expectedEffects: []
         ),
         .init(
-            initial: .featureIsStarted(deviceIds: deviceIds, position: 20, target: nil),
+            initial: .featureIsStarted(deviceIds: deviceIds, position: 20, target: 10),
             event: .valueWasReceived(position: 60, target: nil),
             expected: .featureIsStarted(deviceIds: deviceIds, position: 60, target: nil),
             expectedEffects: []
+        ),
+        .init(
+            initial: .featureIsStarted(deviceIds: deviceIds, position: 10, target: nil),
+            event: .valueWasReceived(position: 20, target: 55),
+            expected: .shutterIsMovingInApp(deviceIds: deviceIds, position: 20, target: 55),
+            expectedEffects: [.startTimeout]
         ),
         .init(
             initial: .featureIsStarted(deviceIds: deviceIds, position: 30, target: nil),
@@ -105,52 +140,73 @@ struct ShutterReducerTests {
             expectedEffects: [
                 .sendCommand(deviceIds: deviceIds, position: 75),
                 .startTimeout,
-                .setTarget(deviceIds: deviceIds, target: 75),
+                .persistTarget(deviceIds: deviceIds, target: 75),
             ]
         ),
         .init(
-            initial: .featureIsStarted(deviceIds: deviceIds, position: 10, target: nil),
-            event: .valueWasReceived(position: 20, target: 55),
-            expected: .shutterIsMovingInApp(deviceIds: deviceIds, position: 20, target: 55),
+            initial: .shutterIsMovingInApp(deviceIds: deviceIds, position: 40, target: 60),
+            event: .targetWasSetInApp(target: 20),
+            expected: .shutterIsMovingInApp(deviceIds: deviceIds, position: 40, target: 20),
             expectedEffects: [
-                .startTimeout
+                .cancelTimeout(task: nil),
+                .sendCommand(deviceIds: deviceIds, position: 20),
+                .startTimeout,
+                .persistTarget(deviceIds: deviceIds, target: 20),
             ]
         ),
         .init(
             initial: .shutterIsMovingInApp(deviceIds: deviceIds, position: 40, target: 60),
             event: .valueWasReceived(position: 45, target: 20),
             expected: .shutterIsMovingInApp(deviceIds: deviceIds, position: 45, target: 20),
-            expectedEffects: [.startTimeout]
+            expectedEffects: [.cancelTimeout(task: nil), .startTimeout]
         ),
         .init(
             initial: .shutterIsMovingInApp(deviceIds: deviceIds, position: 20, target: 40),
-            event: .valueWasReceived(position: 40, target: nil),
-            expected: .shutterIsMovingInApp(
-                deviceIds: deviceIds,
-                position: 20,
-                target: 40,
-                hasTargetBeenACKed: true
-            ),
-            expectedEffects: []
+            event: .valueWasReceived(position: 70, target: 70),
+            expected: .featureIsStarted(deviceIds: deviceIds, position: 70, target: nil),
+            expectedEffects: [
+                .cancelTimeout(task: nil),
+                .persistTarget(deviceIds: deviceIds, target: nil),
+            ]
         ),
         .init(
             initial: .shutterIsMovingInApp(deviceIds: deviceIds, position: 0, target: 100),
-            event: .valueWasReceived(position: 100, target: nil),
-            expected: .shutterIsMovingInApp(
-                deviceIds: deviceIds,
-                position: 0,
-                target: 100,
-                hasTargetBeenACKed: true
-            ),
-            expectedEffects: []
+            event: .valueWasReceived(position: 100, target: 100),
+            expected: .featureIsStarted(deviceIds: deviceIds, position: 100, target: nil),
+            expectedEffects: [
+                .cancelTimeout(task: nil),
+                .persistTarget(deviceIds: deviceIds, target: nil),
+            ]
+        ),
+        .init(
+            initial: .shutterIsMovingInApp(deviceIds: deviceIds, position: 0, target: 100),
+            event: .valueWasReceived(position: 98, target: 100),
+            expected: .featureIsStarted(deviceIds: deviceIds, position: 98, target: nil),
+            expectedEffects: [
+                .cancelTimeout(task: nil),
+                .persistTarget(deviceIds: deviceIds, target: nil),
+            ]
         ),
         .init(
             initial: .shutterIsMovingInApp(deviceIds: deviceIds, position: 70, target: 80),
             event: .timeoutHasExpired,
             expected: .featureIsStarted(deviceIds: deviceIds, position: 70, target: nil),
             expectedEffects: [
-                .setTarget(deviceIds: deviceIds, target: nil)
+                .cancelTimeout(task: nil),
+                .persistTarget(deviceIds: deviceIds, target: nil),
             ]
+        ),
+        .init(
+            initial: .shutterIsMovingInApp(deviceIds: deviceIds, position: 70, target: 80),
+            event: .targetWasSetInApp(target: 80),
+            expected: .shutterIsMovingInApp(deviceIds: deviceIds, position: 70, target: 80),
+            expectedEffects: []
+        ),
+        .init(
+            initial: .featureIsStarted(deviceIds: deviceIds, position: 42, target: nil),
+            event: .timeoutHasExpired,
+            expected: .featureIsStarted(deviceIds: deviceIds, position: 42, target: nil),
+            expectedEffects: []
         ),
     ]
 }
@@ -165,14 +221,15 @@ struct ShutterStoreEffectTests {
         let streamBox = DeviceArrayStreamBox()
 
         let store = ShutterStore(
-            deviceIds: [id10],
             dependencies: .init(
                 observeDevices: { _ in streamBox.stream },
                 sendCommand: { _, _ in },
-                sleep: {},
-                setTarget: { _, _ in }
-            )
+                sleep: { _ in },
+                persistTarget: { _, _ in }
+            ),
+            deviceIds: [id10]
         )
+        store.start()
 
         streamBox.yield([
             makeShutter(identifier: id10, position: 25, target: nil),
@@ -194,14 +251,15 @@ struct ShutterStoreEffectTests {
         let streamBox = DeviceArrayStreamBox()
 
         let store = ShutterStore(
-            deviceIds: [id10],
             dependencies: .init(
                 observeDevices: { _ in streamBox.stream },
                 sendCommand: { _, _ in },
-                sleep: {},
-                setTarget: { _, _ in }
-            )
+                sleep: { _ in },
+                persistTarget: { _, _ in }
+            ),
+            deviceIds: [id10]
         )
+        store.start()
 
         streamBox.yield([
             Device(
@@ -232,28 +290,60 @@ struct ShutterStoreEffectTests {
     }
 
     @Test
-    func observationAveragesMultiShutterValues() async {
+    func observationAveragesMultiShutterValuesWhenAllTargetsArePresent() async {
         let streamBox = DeviceArrayStreamBox()
         let commands = RecordedShutterCommands()
         let targets = RecordedShutterTargets()
-        let timeoutCounter = ThreadSafeCounter()
 
         let store = ShutterStore(
-            deviceIds: [id10, id11],
             dependencies: .init(
                 observeDevices: { _ in streamBox.stream },
                 sendCommand: { deviceIds, position in
                     await commands.record(deviceIds: deviceIds, position: position)
                 },
-                sleep: {
-                    timeoutCounter.increment()
+                sleep: { _ in
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
                 },
-                setTarget: { deviceIds, target in
+                persistTarget: { deviceIds, target in
                     await targets.record(deviceIds: deviceIds, target: target)
                 }
-            )
+            ),
+            deviceIds: [id10, id11]
         )
+        store.start()
+
+        streamBox.yield([
+            makeShutter(identifier: id10, position: 100, target: 70),
+            makeShutter(identifier: id11, position: 0, target: 40),
+        ])
+
+        let didObserve = await waitUntil {
+            store.state == .featureIsStarted(
+                deviceIds: [id10, id11],
+                position: 50,
+                target: 55
+            )
+        }
+
+        #expect(didObserve)
+        #expect(await commands.values().isEmpty)
+        #expect(await targets.values().isEmpty)
+    }
+
+    @Test
+    func observationAveragesAvailableTargetsWhenOneShutterHasNoTarget() async {
+        let streamBox = DeviceArrayStreamBox()
+
+        let store = ShutterStore(
+            dependencies: .init(
+                observeDevices: { _ in streamBox.stream },
+                sendCommand: { _, _ in },
+                sleep: { _ in },
+                persistTarget: { _, _ in }
+            ),
+            deviceIds: [id10, id11]
+        )
+        store.start()
 
         streamBox.yield([
             makeShutter(identifier: id10, position: 100, target: nil),
@@ -269,9 +359,6 @@ struct ShutterStoreEffectTests {
         }
 
         #expect(didObserve)
-        #expect(await commands.values().isEmpty)
-        #expect(await targets.values().isEmpty)
-        #expect(timeoutCounter.value() == 0)
     }
 
     @Test
@@ -279,24 +366,25 @@ struct ShutterStoreEffectTests {
         let streamBox = DeviceArrayStreamBox()
         let commands = RecordedShutterCommands()
         let targets = RecordedShutterTargets()
-        let timeoutCounter = ThreadSafeCounter()
+        let sleepDurations = RecordedSleepDurations()
 
         let store = ShutterStore(
-            deviceIds: [id10, id11],
             dependencies: .init(
                 observeDevices: { _ in streamBox.stream },
                 sendCommand: { deviceIds, position in
                     await commands.record(deviceIds: deviceIds, position: position)
                 },
-                sleep: {
-                    timeoutCounter.increment()
+                sleep: { duration in
+                    await sleepDurations.record(duration)
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
                 },
-                setTarget: { deviceIds, target in
+                persistTarget: { deviceIds, target in
                     await targets.record(deviceIds: deviceIds, target: target)
                 }
-            )
+            ),
+            deviceIds: [id10, id11]
         )
+        store.start()
 
         streamBox.yield([
             makeShutter(identifier: id10, position: 20, target: nil),
@@ -317,7 +405,8 @@ struct ShutterStoreEffectTests {
         let didEmitEffects = await waitUntilAsync {
             let sentCommands = await commands.values()
             let persistedTargets = await targets.values()
-            return sentCommands.count == 1 && persistedTargets.count == 1
+            let durations = await sleepDurations.values()
+            return sentCommands.count == 1 && persistedTargets.count == 1 && durations.count == 1
         }
         #expect(didEmitEffects)
 
@@ -328,7 +417,6 @@ struct ShutterStoreEffectTests {
                 target: 75
             )
         )
-        #expect(timeoutCounter.value() == 1)
 
         let sentCommands = await commands.values()
         #expect(sentCommands == [
@@ -339,6 +427,169 @@ struct ShutterStoreEffectTests {
         #expect(persistedTargets == [
             .init(deviceIds: [id10, id11], target: 75)
         ])
+
+        let durations = await sleepDurations.values()
+        #expect(durations == [.seconds(60)])
+
+        #expect(store.state.timeoutTask != nil)
+    }
+
+    @Test
+    func retargetWhileMovingCancelsPreviousTimeoutAndStartsAnotherOne() async {
+        let streamBox = DeviceArrayStreamBox()
+        let commands = RecordedShutterCommands()
+        let targets = RecordedShutterTargets()
+        let timeoutLifecycle = TimeoutLifecycleRecorder()
+
+        let store = ShutterStore(
+            dependencies: .init(
+                observeDevices: { _ in streamBox.stream },
+                sendCommand: { deviceIds, position in
+                    await commands.record(deviceIds: deviceIds, position: position)
+                },
+                sleep: { _ in
+                    await timeoutLifecycle.didStart()
+                    do {
+                        try await Task.sleep(for: .seconds(5))
+                    } catch {
+                        await timeoutLifecycle.didCancel()
+                        throw error
+                    }
+                },
+                persistTarget: { deviceIds, target in
+                    await targets.record(deviceIds: deviceIds, target: target)
+                }
+            ),
+            deviceIds: [id10, id11]
+        )
+        store.start()
+
+        streamBox.yield([
+            makeShutter(identifier: id10, position: 20, target: nil),
+            makeShutter(identifier: id11, position: 40, target: nil),
+        ])
+
+        let didStart = await waitUntil {
+            store.state == .featureIsStarted(
+                deviceIds: [id10, id11],
+                position: 30,
+                target: nil
+            )
+        }
+        #expect(didStart)
+
+        store.send(.targetWasSetInApp(target: 75))
+
+        let firstTimeoutStarted = await waitUntilAsync {
+            await timeoutLifecycle.startCount() == 1
+        }
+        #expect(firstTimeoutStarted)
+
+        store.send(.targetWasSetInApp(target: 25))
+
+        let secondTimeoutStarted = await waitUntilAsync {
+            await timeoutLifecycle.startCount() == 2
+        }
+        #expect(secondTimeoutStarted)
+
+        let firstTimeoutCancelled = await waitUntilAsync {
+            await timeoutLifecycle.cancelCount() >= 1
+        }
+        #expect(firstTimeoutCancelled)
+
+        #expect(
+            store.state == .shutterIsMovingInApp(
+                deviceIds: [id10, id11],
+                position: 30,
+                target: 25
+            )
+        )
+
+        let sentCommands = await commands.values()
+        #expect(sentCommands.count == 2)
+        #expect(sentCommands.contains(.init(deviceIds: [id10, id11], position: 75)))
+        #expect(sentCommands.contains(.init(deviceIds: [id10, id11], position: 25)))
+
+        let persistedTargets = await targets.values()
+        #expect(persistedTargets.count == 2)
+        #expect(persistedTargets.contains(.init(deviceIds: [id10, id11], target: 75)))
+        #expect(persistedTargets.contains(.init(deviceIds: [id10, id11], target: 25)))
+    }
+
+    @Test
+    func leavingMovingStateCancelsTimeoutAndPersistsNilTarget() async {
+        let streamBox = DeviceArrayStreamBox()
+        let targets = RecordedShutterTargets()
+        let timeoutLifecycle = TimeoutLifecycleRecorder()
+
+        let store = ShutterStore(
+            dependencies: .init(
+                observeDevices: { _ in streamBox.stream },
+                sendCommand: { _, _ in },
+                sleep: { _ in
+                    await timeoutLifecycle.didStart()
+                    do {
+                        try await Task.sleep(for: .seconds(5))
+                    } catch {
+                        await timeoutLifecycle.didCancel()
+                        throw error
+                    }
+                },
+                persistTarget: { deviceIds, target in
+                    await targets.record(deviceIds: deviceIds, target: target)
+                }
+            ),
+            deviceIds: [id10, id11]
+        )
+        store.start()
+
+        streamBox.yield([
+            makeShutter(identifier: id10, position: 20, target: nil),
+            makeShutter(identifier: id11, position: 40, target: nil),
+        ])
+
+        let didStart = await waitUntil {
+            store.state == .featureIsStarted(
+                deviceIds: [id10, id11],
+                position: 30,
+                target: nil
+            )
+        }
+        #expect(didStart)
+
+        store.send(.targetWasSetInApp(target: 75))
+
+        let timeoutStarted = await waitUntilAsync {
+            await timeoutLifecycle.startCount() == 1
+        }
+        #expect(timeoutStarted)
+
+        store.send(.valueWasReceived(position: 75, target: 75))
+
+        let didStopMoving = await waitUntil {
+            store.state == .featureIsStarted(
+                deviceIds: [id10, id11],
+                position: 75,
+                target: nil
+            )
+        }
+        #expect(didStopMoving)
+
+        let timeoutCancelled = await waitUntilAsync {
+            await timeoutLifecycle.cancelCount() >= 1
+        }
+        #expect(timeoutCancelled)
+
+        #expect(store.state.timeoutTask == nil)
+
+        let didPersistTwoTargets = await waitUntilAsync {
+            await targets.values().count == 2
+        }
+        #expect(didPersistTwoTargets)
+
+        let persistedTargets = await targets.values()
+        #expect(persistedTargets.contains(.init(deviceIds: [id10, id11], target: 75)))
+        #expect(persistedTargets.contains(.init(deviceIds: [id10, id11], target: nil)))
     }
 
     private func makeShutter(
@@ -363,7 +614,7 @@ struct ShutterStoreEffectTests {
     }
 
     private func waitUntil(
-        cycles: Int = 60,
+        cycles: Int = 120,
         condition: @escaping @MainActor () -> Bool
     ) async -> Bool {
         for _ in 0..<cycles {
@@ -376,7 +627,7 @@ struct ShutterStoreEffectTests {
     }
 
     private func waitUntilAsync(
-        cycles: Int = 60,
+        cycles: Int = 120,
         condition: @escaping @Sendable () async -> Bool
     ) async -> Bool {
         for _ in 0..<cycles {
@@ -440,20 +691,35 @@ private actor RecordedShutterTargets {
     }
 }
 
-private final class ThreadSafeCounter: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storage: Int = 0
+private actor RecordedSleepDurations {
+    private var durations: [Duration] = []
 
-    func increment() {
-        lock.lock()
-        storage += 1
-        lock.unlock()
+    func record(_ duration: Duration) {
+        durations.append(duration)
     }
 
-    func value() -> Int {
-        lock.lock()
-        let current = storage
-        lock.unlock()
-        return current
+    func values() -> [Duration] {
+        durations
+    }
+}
+
+private actor TimeoutLifecycleRecorder {
+    private var starts = 0
+    private var cancellations = 0
+
+    func didStart() {
+        starts += 1
+    }
+
+    func didCancel() {
+        cancellations += 1
+    }
+
+    func startCount() -> Int {
+        starts
+    }
+
+    func cancelCount() -> Int {
+        cancellations
     }
 }

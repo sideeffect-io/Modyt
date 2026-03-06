@@ -2,14 +2,16 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct DashboardView: View {
-    @Environment(\.dashboardStoreFactory) private var dashboardStoreFactory
+    @Environment(\.dashboardStoreDependencies) private var dashboardStoreDependencies
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var dragSource: FavoriteType?
     @State private var dropTarget: FavoriteType?
 
     var body: some View {
-        WithStoreView(factory: dashboardStoreFactory.make) { store in
+        WithStoreView(
+            store: DashboardStore(dependencies: dashboardStoreDependencies),
+        ) { store in
             ScrollView {
                 VStack(spacing: 22) {
                     favoritesSection(store: store)
@@ -21,9 +23,6 @@ struct DashboardView: View {
                 Color.clear.frame(height: 74)
             }
             .navigationTitle("Dashboard")
-            .task {
-                store.send(.onAppear)
-            }
             .refreshable {
                 store.send(.refreshRequested)
             }

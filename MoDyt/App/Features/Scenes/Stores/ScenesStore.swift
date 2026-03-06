@@ -20,45 +20,47 @@ enum ScenesEffect: Sendable, Equatable {
     case toggleFavorite(String)
 }
 
-enum ScenesReducer {
-    static func reduce(state: ScenesState, event: ScenesEvent) -> (ScenesState, [ScenesEffect]) {
-        var state = state
-        var effects: [ScenesEffect] = []
-
-        switch event {
-        case .onAppear:
-            effects = [.startObservingScenes]
-
-        case .scenesUpdated(let scenes):
-            state.scenes = scenes
-
-        case .refreshRequested:
-            effects = [.refreshAll]
-
-        case .toggleFavorite(let uniqueId):
-            effects = [.toggleFavorite(uniqueId)]
-        }
-
-        return (state, effects)
-    }
-}
-
 @Observable
 @MainActor
-final class ScenesStore {
+final class ScenesStore: StartableStore {
+    struct StateMachine {
+        var state: ScenesState = .initial
+
+        mutating func reduce(_ event: ScenesEvent) -> [ScenesEffect] {
+            switch event {
+            case .onAppear:
+                return [.startObservingScenes]
+
+            case .scenesUpdated(let scenes):
+                state.scenes = scenes
+                return []
+
+            case .refreshRequested:
+                return [.refreshAll]
+
+            case .toggleFavorite(let uniqueId):
+                return [.toggleFavorite(uniqueId)]
+            }
+        }
+    }
+
     struct Dependencies {
         let observeScenes: @Sendable () async -> any AsyncSequence<[Scene], Never> & Sendable
         let toggleFavorite: @Sendable (String) async -> Void
         let refreshAll: @Sendable () async -> Void
     }
 
-    private(set) var state: ScenesState
+    private(set) var stateMachine: StateMachine = StateMachine()
+
+    var state: ScenesState {
+        stateMachine.state
+    }
 
     private let sceneTask = TaskHandle()
     private let worker: Worker
+    private var hasStarted = false
 
     init(dependencies: Dependencies) {
-        self.state = .initial
         self.worker = Worker(
             observeScenes: dependencies.observeScenes,
             toggleFavorite: dependencies.toggleFavorite,
@@ -67,9 +69,18 @@ final class ScenesStore {
     }
 
     func send(_ event: ScenesEvent) {
-        let (nextState, effects) = ScenesReducer.reduce(state: state, event: event)
-        state = nextState
+        let effects = stateMachine.reduce(event)
         handle(effects)
+    }
+
+    func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
+        send(.onAppear)
+    }
+
+    deinit {
+        sceneTask.cancel()
     }
 
     private func handle(_ effects: [ScenesEffect]) {
@@ -139,20 +150,5 @@ final class ScenesStore {
         func refreshAll() async {
             await refreshAllAction()
         }
-    }
-}
-
-private final class TaskHandle {
-    var task: Task<Void, Never>? {
-        didSet { oldValue?.cancel() }
-    }
-
-    func cancel() {
-        task?.cancel()
-        task = nil
-    }
-
-    deinit {
-        task?.cancel()
     }
 }

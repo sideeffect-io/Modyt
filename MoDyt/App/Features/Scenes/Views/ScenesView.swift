@@ -1,10 +1,12 @@
 import SwiftUI
 
 struct ScenesView: View {
-    @Environment(\.scenesStoreFactory) private var scenesStoreFactory
+    @Environment(\.scenesStoreDependencies) private var scenesStoreDependencies
 
     var body: some View {
-        WithStoreView(factory: scenesStoreFactory.make) { store in
+        WithStoreView(
+            store: ScenesStore(dependencies: scenesStoreDependencies),
+        ) { store in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {
                     listHeader
@@ -33,9 +35,6 @@ struct ScenesView: View {
                 .padding(.vertical, 18)
             }
             .navigationTitle("Scenes")
-            .task {
-                store.send(.onAppear)
-            }
             .refreshable {
                 store.send(.refreshRequested)
             }

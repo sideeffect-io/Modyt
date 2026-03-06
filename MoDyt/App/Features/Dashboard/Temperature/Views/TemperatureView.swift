@@ -1,13 +1,18 @@
 import SwiftUI
 
 struct TemperatureView: View {
-    @Environment(\.temperatureStoreFactory) private var temperatureStoreFactory
+    @Environment(\.temperatureStoreDependencies) private var temperatureStoreDependencies
     @Environment(\.colorScheme) private var colorScheme
 
     let identifier: DeviceIdentifier
 
     var body: some View {
-        WithStoreView(factory: { temperatureStoreFactory.make(identifier) }) { store in
+        WithStoreView(
+            store: TemperatureStore(
+                dependencies: temperatureStoreDependencies,
+                identifier: identifier
+            ),
+        ) { store in
             valueContent(descriptor: store.descriptor)
         }
     }

@@ -3,7 +3,31 @@ import Observation
 
 @Observable
 @MainActor
-final class SunlightStore {
+final class SunlightStore: StartableStore {
+    struct State: Sendable, Equatable {
+        var descriptor: Descriptor?
+    }
+
+    enum Event: Sendable {
+        case descriptorWasReceived(Descriptor?)
+    }
+
+    enum Effect: Sendable, Equatable {}
+
+    struct StateMachine {
+        var state = State(descriptor: nil)
+
+        mutating func reduce(_ event: Event) -> [Effect] {
+            switch event {
+            case .descriptorWasReceived(let descriptor):
+                if state.descriptor != descriptor {
+                    state.descriptor = descriptor
+                }
+            }
+            return []
+        }
+    }
+
     struct Descriptor: Sendable, Equatable {
         struct BatteryStatus: Sendable, Equatable {
             let batteryDefectKey: String?
@@ -35,71 +59,71 @@ final class SunlightStore {
     }
 
     struct Dependencies {
-        let observeSunlight: @Sendable () async -> any AsyncSequence<Device?, Never> & Sendable
+        let observeSunlight: @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
 
         init(
-            observeSunlight: @escaping @Sendable () async -> any AsyncSequence<Device?, Never> & Sendable
+            observeSunlight: @escaping @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
         ) {
             self.observeSunlight = observeSunlight
         }
     }
 
-    private(set) var descriptor: Descriptor?
+    private(set) var stateMachine: StateMachine = StateMachine()
 
+    var descriptor: Descriptor? {
+        stateMachine.state.descriptor
+    }
+
+    private let identifier: DeviceIdentifier
     private let observationTask = TaskHandle()
     private let worker: Worker
+    private var hasStarted = false
 
     init(
-        initialDescriptor: Descriptor? = nil,
-        dependencies: Dependencies
+        dependencies: Dependencies,
+        identifier: DeviceIdentifier
     ) {
-        self.descriptor = initialDescriptor
+        self.identifier = identifier
         self.worker = Worker(observeSunlight: dependencies.observeSunlight)
+    }
 
+    func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
+        let identifier = self.identifier
         observationTask.task = Task { [weak self, worker] in
-            await worker.observe { [weak self] descriptor in
-                await self?.applyIncomingDescriptor(descriptor)
+            await worker.observe(identifier: identifier) { [weak self] descriptor in
+                await self?.send(.descriptorWasReceived(descriptor))
             }
         }
     }
 
-    private func applyIncomingDescriptor(_ descriptor: Descriptor?) {
-        guard self.descriptor != descriptor else { return }
-        self.descriptor = descriptor
+    deinit {
+        observationTask.cancel()
     }
 
-private actor Worker {
-        private let observeSunlight: @Sendable () async -> any AsyncSequence<Device?, Never> & Sendable
+    func send(_ event: Event) {
+        _ = stateMachine.reduce(event)
+    }
+
+    private actor Worker {
+        private let observeSunlight: @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
 
         init(
-            observeSunlight: @escaping @Sendable () async -> any AsyncSequence<Device?, Never> & Sendable
+            observeSunlight: @escaping @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
         ) {
             self.observeSunlight = observeSunlight
         }
 
         func observe(
+            identifier: DeviceIdentifier,
             onDescriptor: @escaping @Sendable (Descriptor?) async -> Void
         ) async {
-            let stream = await observeSunlight()
+            let stream = await observeSunlight(identifier)
             for await device in stream {
                 guard !Task.isCancelled else { return }
                 await onDescriptor(device?.sunlightStoreDescriptor())
             }
         }
-    }
-}
-
-private final class TaskHandle {
-    var task: Task<Void, Never>? {
-        didSet { oldValue?.cancel() }
-    }
-
-    func cancel() {
-        task?.cancel()
-        task = nil
-    }
-
-    deinit {
-        task?.cancel()
     }
 }

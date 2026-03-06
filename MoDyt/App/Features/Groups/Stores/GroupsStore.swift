@@ -20,45 +20,47 @@ enum GroupsEffect: Sendable, Equatable {
     case toggleFavorite(String)
 }
 
-enum GroupsReducer {
-    static func reduce(state: GroupsState, event: GroupsEvent) -> (GroupsState, [GroupsEffect]) {
-        var state = state
-        var effects: [GroupsEffect] = []
-
-        switch event {
-        case .onAppear:
-            effects = [.startObservingGroups]
-
-        case .groupsUpdated(let groups):
-            state.groups = groups
-
-        case .refreshRequested:
-            effects = [.refreshAll]
-
-        case .toggleFavorite(let uniqueId):
-            effects = [.toggleFavorite(uniqueId)]
-        }
-
-        return (state, effects)
-    }
-}
-
 @Observable
 @MainActor
-final class GroupsStore {
+final class GroupsStore: StartableStore {
+    struct StateMachine {
+        var state: GroupsState = .initial
+
+        mutating func reduce(_ event: GroupsEvent) -> [GroupsEffect] {
+            switch event {
+            case .onAppear:
+                return [.startObservingGroups]
+
+            case .groupsUpdated(let groups):
+                state.groups = groups
+                return []
+
+            case .refreshRequested:
+                return [.refreshAll]
+
+            case .toggleFavorite(let uniqueId):
+                return [.toggleFavorite(uniqueId)]
+            }
+        }
+    }
+
     struct Dependencies {
         let observeGroups: @Sendable () async -> any AsyncSequence<[Group], Never> & Sendable
         let toggleFavorite: @Sendable (String) async -> Void
         let refreshAll: @Sendable () async -> Void
     }
 
-    private(set) var state: GroupsState
+    private(set) var stateMachine: StateMachine = StateMachine()
+
+    var state: GroupsState {
+        stateMachine.state
+    }
 
     private let groupsTask = TaskHandle()
     private let worker: Worker
+    private var hasStarted = false
 
     init(dependencies: Dependencies) {
-        self.state = .initial
         self.worker = Worker(
             observeGroups: dependencies.observeGroups,
             toggleFavorite: dependencies.toggleFavorite,
@@ -67,9 +69,18 @@ final class GroupsStore {
     }
 
     func send(_ event: GroupsEvent) {
-        let (nextState, effects) = GroupsReducer.reduce(state: state, event: event)
-        state = nextState
+        let effects = stateMachine.reduce(event)
         handle(effects)
+    }
+
+    func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
+        send(.onAppear)
+    }
+
+    deinit {
+        groupsTask.cancel()
     }
 
     private func handle(_ effects: [GroupsEffect]) {
@@ -141,20 +152,5 @@ final class GroupsStore {
         func refreshAll() async {
             await refreshAllAction()
         }
-    }
-}
-
-private final class TaskHandle {
-    var task: Task<Void, Never>? {
-        didSet { oldValue?.cancel() }
-    }
-
-    func cancel() {
-        task?.cancel()
-        task = nil
-    }
-
-    deinit {
-        task?.cancel()
     }
 }

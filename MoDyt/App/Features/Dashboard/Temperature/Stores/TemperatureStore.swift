@@ -3,7 +3,31 @@ import Observation
 
 @Observable
 @MainActor
-final class TemperatureStore {
+final class TemperatureStore: StartableStore {
+    struct State: Sendable, Equatable {
+        var descriptor: Descriptor?
+    }
+
+    enum Event: Sendable {
+        case descriptorWasResolved(Descriptor?)
+    }
+
+    enum Effect: Sendable, Equatable {}
+
+    struct StateMachine {
+        var state = State(descriptor: nil)
+
+        mutating func reduce(_ event: Event) -> [Effect] {
+            switch event {
+            case .descriptorWasResolved(let descriptor):
+                if state.descriptor != descriptor {
+                    state.descriptor = descriptor
+                }
+            }
+            return []
+        }
+    }
+
     struct Descriptor: Sendable, Equatable {
         struct BatteryStatus: Sendable, Equatable {
             let defect: Bool?
@@ -21,65 +45,83 @@ final class TemperatureStore {
     }
 
     struct Dependencies {
-        let observeTemperature: @Sendable () async -> any AsyncSequence<Device?, Never> & Sendable
+        let observeTemperature: @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
 
         init(
-            observeTemperature: @escaping @Sendable () async -> any AsyncSequence<Device?, Never> & Sendable
+            observeTemperature: @escaping @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
         ) {
             self.observeTemperature = observeTemperature
         }
     }
 
-    private(set) var descriptor: Descriptor?
+    private(set) var stateMachine: StateMachine = StateMachine()
 
+    var descriptor: Descriptor? {
+        stateMachine.state.descriptor
+    }
+
+    private let identifier: DeviceIdentifier
     private let observationTask = TaskHandle()
     private let worker: Worker
+    private var hasStarted = false
 
-    init(dependencies: Dependencies) {
-        self.descriptor = nil
+    init(
+        dependencies: Dependencies,
+        identifier: DeviceIdentifier
+    ) {
+        self.identifier = identifier
         self.worker = Worker(observeTemperature: dependencies.observeTemperature)
+    }
 
+    func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
+        let identifier = self.identifier
         observationTask.task = Task { [weak self, worker] in
-            await worker.observe { [weak self] device, descriptor in
+            await worker.observe(identifier: identifier) { [weak self] device, descriptor in
                 await self?.applyIncomingObservation(device: device, descriptor: descriptor)
             }
         }
     }
 
+    deinit {
+        observationTask.cancel()
+    }
+
     private func applyIncomingObservation(device: Device?, descriptor: Descriptor?) {
         guard let device else {
-            applyIncomingDescriptor(nil)
+            send(.descriptorWasResolved(nil))
             return
         }
 
         guard let descriptor else {
             if Self.isClimateCandidate(device) == false {
-                applyIncomingDescriptor(nil)
+                send(.descriptorWasResolved(nil))
             }
             return
         }
 
-        applyIncomingDescriptor(descriptor)
+        send(.descriptorWasResolved(descriptor))
     }
 
-    private func applyIncomingDescriptor(_ descriptor: Descriptor?) {
-        guard self.descriptor != descriptor else { return }
-        self.descriptor = descriptor
+    func send(_ event: Event) {
+        _ = stateMachine.reduce(event)
     }
 
     private actor Worker {
-        private let observeTemperature: @Sendable () async -> any AsyncSequence<Device?, Never> & Sendable
+        private let observeTemperature: @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
 
         init(
-            observeTemperature: @escaping @Sendable () async -> any AsyncSequence<Device?, Never> & Sendable
+            observeTemperature: @escaping @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
         ) {
             self.observeTemperature = observeTemperature
         }
 
         func observe(
+            identifier: DeviceIdentifier,
             onObservation: @escaping @Sendable (Device?, Descriptor?) async -> Void
         ) async {
-            let stream = await observeTemperature()
+            let stream = await observeTemperature(identifier)
             for await device in stream {
                 guard !Task.isCancelled else { return }
                 await onObservation(device, TemperatureStore.makeDescriptor(from: device))
@@ -231,14 +273,4 @@ final class TemperatureStore {
         "batteryLevel",
         "battery"
     ]
-}
-
-private final class TaskHandle {
-    var task: Task<Void, Never>? {
-        didSet { oldValue?.cancel() }
-    }
-
-    deinit {
-        task?.cancel()
-    }
 }

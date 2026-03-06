@@ -1,12 +1,17 @@
 import SwiftUI
 
 struct ThermostatView: View {
-    @Environment(\.thermostatStoreFactory) private var thermostatStoreFactory
+    @Environment(\.thermostatStoreDependencies) private var thermostatStoreDependencies
 
     let identifier: DeviceIdentifier
 
     var body: some View {
-        WithStoreView(factory: { thermostatStoreFactory.make(identifier) }) { store in
+        WithStoreView(
+            store: ThermostatStore(
+                dependencies: thermostatStoreDependencies,
+                identifier: identifier
+            ),
+        ) { store in
             thermostatContent(store: store)
         }
     }

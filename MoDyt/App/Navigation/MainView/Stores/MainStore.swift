@@ -40,73 +40,70 @@ enum MainEffect: Sendable, Equatable {
     case reconnectToGateway
 }
 
-enum MainReducer {
-    static func reduce(
-        state: MainState,
-        event: MainEvent
-    ) -> (MainState, [MainEffect]) {
-        var state = state
-        var effects: [MainEffect] = []
-
-        switch (state.featureState, event) {
-        case (.featureIsIdle, .startingGatewayHandlingWasRequested):
-            state.featureState = .gatewayHandlingIsStarting
-            effects = [.handleGatewayMessages]
-
-        case (.gatewayHandlingIsStarting, .gatewayHandlingWasAFailure):
-            state.featureState = .gatewayHandlingIsInError
-
-        case (.gatewayHandlingIsInError, .startingGatewayHandlingWasRequested):
-            state.featureState = .gatewayHandlingIsStarting
-            effects = [.handleGatewayMessages]
-
-        case (.gatewayHandlingIsInError, .disconnectionWasRequested):
-            state.featureState = .disconnectionIsInProgress
-            effects = [.disconnect]
-
-        case (.disconnectionIsInProgress, .disconnectionWasSuccessful):
-            state.featureState = .userIsDisconnected
-
-        case (.gatewayHandlingIsStarting, .gatewayHandlingWasSuccessful):
-            state.featureState = .featureIsStarted
-            effects = [.setAppActive]
-
-        case (.featureIsStarted, .appInactiveWasReceived):
-            effects = [.setAppInactive]
-
-        case (.featureIsStarted, .appActiveWasReceived):
-            effects = [.checkGatewayConnection]
-
-        case (.featureIsStarted, .reconnectionWasRequested):
-            state.featureState = .reconnectionIsInProgress
-            effects = [.reconnectToGateway]
-
-        case (.reconnectionIsInProgress, .reconnectionWasAFailure):
-            state.featureState = .reconnectionIsInError
-
-        case (.reconnectionIsInError, .reconnectionWasRequested):
-            state.featureState = .reconnectionIsInProgress
-            effects = [.reconnectToGateway]
-
-        case (.reconnectionIsInError, .disconnectionWasRequested):
-            state.featureState = .disconnectionIsInProgress
-            effects = [.disconnect]
-
-        case (.reconnectionIsInProgress, .reconnectionWasSuccessful):
-            state.featureState = .gatewayHandlingIsStarting
-            effects = [.handleGatewayMessages]
-
-        default:
-            break
-        }
-
-        return (state, effects)
-    }
-}
-
 @Observable
 @MainActor
-final class MainStore {
+final class MainStore: StartableStore {
+    struct StateMachine {
+        var state: MainState = .initial
+
+        mutating func reduce(_ event: MainEvent) -> [MainEffect] {
+            switch (state.featureState, event) {
+            case (.featureIsIdle, .startingGatewayHandlingWasRequested):
+                state.featureState = .gatewayHandlingIsStarting
+                return [.handleGatewayMessages]
+
+            case (.gatewayHandlingIsStarting, .gatewayHandlingWasAFailure):
+                state.featureState = .gatewayHandlingIsInError
+                return []
+
+            case (.gatewayHandlingIsInError, .startingGatewayHandlingWasRequested):
+                state.featureState = .gatewayHandlingIsStarting
+                return [.handleGatewayMessages]
+
+            case (.gatewayHandlingIsInError, .disconnectionWasRequested):
+                state.featureState = .disconnectionIsInProgress
+                return [.disconnect]
+
+            case (.disconnectionIsInProgress, .disconnectionWasSuccessful):
+                state.featureState = .userIsDisconnected
+                return []
+
+            case (.gatewayHandlingIsStarting, .gatewayHandlingWasSuccessful):
+                state.featureState = .featureIsStarted
+                return [.setAppActive]
+
+            case (.featureIsStarted, .appInactiveWasReceived):
+                return [.setAppInactive]
+
+            case (.featureIsStarted, .appActiveWasReceived):
+                return [.checkGatewayConnection]
+
+            case (.featureIsStarted, .reconnectionWasRequested):
+                state.featureState = .reconnectionIsInProgress
+                return [.reconnectToGateway]
+
+            case (.reconnectionIsInProgress, .reconnectionWasAFailure):
+                state.featureState = .reconnectionIsInError
+                return []
+
+            case (.reconnectionIsInError, .reconnectionWasRequested):
+                state.featureState = .reconnectionIsInProgress
+                return [.reconnectToGateway]
+
+            case (.reconnectionIsInError, .disconnectionWasRequested):
+                state.featureState = .disconnectionIsInProgress
+                return [.disconnect]
+
+            case (.reconnectionIsInProgress, .reconnectionWasSuccessful):
+                state.featureState = .gatewayHandlingIsStarting
+                return [.handleGatewayMessages]
+
+            default:
+                return []
+            }
+        }
+    }
+
     struct Dependencies {
         let handleGatewayMessages: @Sendable () async -> MainEvent
         let disconnect: @Sendable () async -> Void
@@ -116,7 +113,11 @@ final class MainStore {
         let reconnectToGateway: @Sendable () async -> MainEvent
     }
 
-    private(set) var state: MainState
+    private(set) var stateMachine: StateMachine = StateMachine()
+
+    var state: MainState {
+        stateMachine.state
+    }
 
     private let gatewayHandlingTask = TaskHandle()
     private let disconnectTask = TaskHandle()
@@ -124,9 +125,9 @@ final class MainStore {
     private let checkConnectionTask = TaskHandle()
     private let reconnectTask = TaskHandle()
     private let worker: Worker
+    private var hasStarted = false
 
     init(dependencies: Dependencies) {
-        self.state = .initial
         self.worker = Worker(
             handleGatewayMessages: dependencies.handleGatewayMessages,
             disconnect: dependencies.disconnect,
@@ -138,9 +139,22 @@ final class MainStore {
     }
 
     func send(_ event: MainEvent) {
-        let (nextState, effects) = MainReducer.reduce(state: state, event: event)
-        state = nextState
+        let effects = stateMachine.reduce(event)
         handle(effects)
+    }
+
+    func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
+        send(.startingGatewayHandlingWasRequested)
+    }
+
+    deinit {
+        gatewayHandlingTask.cancel()
+        disconnectTask.cancel()
+        appActivityTask.cancel()
+        checkConnectionTask.cancel()
+        reconnectTask.cancel()
     }
 
     private func handle(_ effects: [MainEffect]) {
@@ -252,20 +266,5 @@ final class MainStore {
         func reconnectToGateway() async -> MainEvent {
             await reconnectToGatewayAction()
         }
-    }
-}
-
-private final class TaskHandle {
-    var task: Task<Void, Never>? {
-        didSet { oldValue?.cancel() }
-    }
-
-    func cancel() {
-        task?.cancel()
-        task = nil
-    }
-
-    deinit {
-        task?.cancel()
     }
 }

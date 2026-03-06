@@ -110,7 +110,9 @@ After each change, make sure the code compiles:
 
 ## Swift documentation
 
-When needed use the Cupertino MCP server to access the officiel Swift documentation and Apple coding guides.
+When you need guidance about the Swift language or Apple coding guides:
+- use the Cupertino MCP server to access the officiel Swift documentation.
+_ use the Sosumi MCP server to access the officiel Swift documentation.
 
 ---
 

@@ -4,9 +4,15 @@ extension TydomConnection.Dependencies {
     static func live(onDisconnect: @escaping @Sendable () async -> Void = {}) -> TydomConnection.Dependencies {
         TydomConnection.Dependencies(
             makeSession: { allowInsecureTLS, timeout, credential in
-                let configuration = URLSessionConfiguration.default
+                let configuration = URLSessionConfiguration.ephemeral
                 configuration.timeoutIntervalForRequest = timeout
                 configuration.timeoutIntervalForResource = timeout
+                configuration.httpShouldSetCookies = false
+                configuration.httpCookieAcceptPolicy = .never
+                configuration.httpCookieStorage = nil
+                configuration.urlCache = nil
+                configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+                configuration.urlCredentialStorage = nil
                 if #available(iOS 13.0, macOS 10.15, tvOS 13.0, watchOS 6.0, *) {
                     if allowInsecureTLS {
                         configuration.tlsMinimumSupportedProtocolVersion = .TLSv12

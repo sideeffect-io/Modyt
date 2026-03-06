@@ -1,10 +1,10 @@
 import SwiftUI
 
 struct AppRootView: View {
-    @Environment(\.appCoordinatorStoreFactory) private var appCoordinatorStoreFactory
-
     var body: some View {
-        WithStoreView(factory: appCoordinatorStoreFactory.make ) { store in
+        WithStoreView(
+            store: AppRootStore(),
+        ) { store in
             ZStack {
                 AppBackgroundView()
                     .ignoresSafeArea()

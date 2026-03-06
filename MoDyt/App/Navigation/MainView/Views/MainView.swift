@@ -55,7 +55,7 @@ func shouldNotifyParentOnMainFeatureStateChange(
 }
 
 struct MainView: View {
-    @Environment(\.mainStoreFactory) private var mainStoreFactory
+    @Environment(\.mainStoreDependencies) private var mainStoreDependencies
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var selectedTab: MainTab = .dashboard
@@ -63,10 +63,11 @@ struct MainView: View {
     let onDisconnected: @MainActor () -> Void
 
     var body: some View {
-        WithStoreView(factory: mainStoreFactory.make) { store in
+        WithStoreView(
+            store: MainStore(dependencies: mainStoreDependencies),
+        ) { store in
             content(for: store)
                 .task {
-                    store.send(.startingGatewayHandlingWasRequested)
                     store.send(mainEvent(for: scenePhase))
                 }
                 .onChange(of: scenePhase) { _, newPhase in

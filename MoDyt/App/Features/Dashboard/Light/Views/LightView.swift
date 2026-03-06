@@ -1,14 +1,19 @@
 import SwiftUI
 
 struct LightView: View {
-    @Environment(\.lightStoreFactory) private var lightStoreFactory
+    @Environment(\.lightStoreDependencies) private var lightStoreDependencies
 
     let uniqueId: String
 
     @State private var requestedPowerTarget: Double?
 
     var body: some View {
-        WithStoreView(factory: { lightStoreFactory.make(uniqueId) }) { store in
+        WithStoreView(
+            store: LightStore(
+                uniqueId: uniqueId,
+                dependencies: lightStoreDependencies
+            ),
+        ) { store in
             let descriptor = store.descriptor
             let powerIsOn = descriptor.isOn
             let percentage = Int((descriptor.normalizedLevel * 100).rounded())
@@ -16,6 +21,7 @@ struct LightView: View {
             HStack(alignment: .center, spacing: 14) {
                 GaugeControlView(
                     sourceNormalizedLevel: descriptor.normalizedLevel,
+                    showsMovingOutline: store.isChangingInApp,
                     requestedTarget: $requestedPowerTarget,
                     onCommit: { normalized in
                         store.setLevelNormalized(normalized)
@@ -41,6 +47,7 @@ struct LightView: View {
 
 private struct GaugeControlView: View {
     let sourceNormalizedLevel: Double
+    let showsMovingOutline: Bool
     @Binding var requestedTarget: Double?
     let onCommit: (Double) -> Void
 
@@ -57,6 +64,7 @@ private struct GaugeControlView: View {
         PathGauge(
             normalizedValue: clampedRenderedValue,
             isOn: isOn,
+            showsMovingOutline: showsMovingOutline,
             percentage: percentage,
             onChange: { normalized in
                 let snapped = Self.snap(normalized)
@@ -124,14 +132,18 @@ private struct PathGauge: View {
 
     let normalizedValue: Double
     let isOn: Bool
+    let showsMovingOutline: Bool
     let percentage: Int
     let onChange: (Double) -> Void
     let onCommit: (Double) -> Void
+
+    @State private var movingDashPhase: CGFloat = 0
 
     var body: some View {
         let progress = CGFloat(min(max(normalizedValue, 0), 1))
         let angle = Self.startAngle + (Self.sweepAngle * Double(progress))
         let radius = Self.diameter * 0.5 - Self.lineWidth * 0.5
+        let outlinePerimeter = Self.outlinePerimeter(radius: radius)
 
         ZStack {
             GaugeArc(progress: 1)
@@ -142,6 +154,14 @@ private struct PathGauge: View {
                     isOn ? Self.onGradient : Self.offGradient,
                     style: StrokeStyle(lineWidth: Self.lineWidth, lineCap: .round)
                 )
+
+            if showsMovingOutline {
+                GaugeArc(progress: 1)
+                    .stroke(
+                        Self.movingOutlineGradient,
+                        style: movingOutlineStrokeStyle(perimeter: outlinePerimeter)
+                    )
+            }
 
             Circle()
                 .fill(.white)
@@ -175,6 +195,19 @@ private struct PathGauge: View {
                     onCommit(normalized(from: gesture.location))
                 }
         )
+        .onAppear {
+            updateMovingOutlineAnimation(isMoving: showsMovingOutline, perimeter: outlinePerimeter)
+        }
+        .onChange(of: showsMovingOutline) { _, isMoving in
+            updateMovingOutlineAnimation(isMoving: isMoving, perimeter: outlinePerimeter)
+        }
+        .onChange(of: radius) { _, newRadius in
+            guard showsMovingOutline else { return }
+            updateMovingOutlineAnimation(
+                isMoving: true,
+                perimeter: Self.outlinePerimeter(radius: newRadius)
+            )
+        }
     }
 
     private var trackColor: Color {
@@ -213,6 +246,43 @@ private struct PathGauge: View {
         colors: [Color.white.opacity(0.5), Color.white.opacity(0.2)],
         center: .center
     )
+
+    private static let movingOutlineGradient = AngularGradient(
+        colors: [
+            Color.white.opacity(0.94),
+            Color(red: 0.24, green: 0.78, blue: 0.56),
+            Color.white.opacity(0.9),
+        ],
+        center: .center
+    )
+
+    private func movingOutlineStrokeStyle(perimeter: CGFloat) -> StrokeStyle {
+        let segmentLength = max(perimeter * 0.19, 18)
+        let dashGap = max(perimeter * 2, segmentLength + 1)
+        return StrokeStyle(
+            lineWidth: Self.lineWidth + 1,
+            lineCap: .round,
+            lineJoin: .round,
+            dash: [segmentLength, dashGap],
+            dashPhase: movingDashPhase
+        )
+    }
+
+    private static func outlinePerimeter(radius: CGFloat) -> CGFloat {
+        let normalizedSweep = CGFloat(Self.sweepAngle / 360)
+        return 2 * .pi * radius * normalizedSweep
+    }
+
+    private func updateMovingOutlineAnimation(isMoving: Bool, perimeter: CGFloat) {
+        if isMoving, perimeter > 0 {
+            movingDashPhase = 0
+            withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
+                movingDashPhase = -perimeter
+            }
+            return
+        }
+        movingDashPhase = 0
+    }
 }
 
 private struct PowerClusterView: View {

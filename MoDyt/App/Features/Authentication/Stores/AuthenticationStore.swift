@@ -65,101 +65,110 @@ enum AuthenticationDelegateEvent {
     case authenticated
 }
 
-enum AuthenticationReducer {
-    static func reduce(
-        state: AuthenticationState,
-        event: AuthenticationEvent
-    ) -> (AuthenticationState, [AuthenticationEffect]) {
-        var state = state
-        var effects: [AuthenticationEffect] = []
-
-        switch event {
-        case .onAppear, .retryTapped:
-            state.phase = .bootstrapping
-            effects = [.inspectFlow]
-
-        case .flowInspected(let flow):
-            switch flow {
-            case .connectWithStoredCredentials:
-                state.phase = .connecting
-                effects = [.connectStored]
-            case .connectWithNewCredentials:
-                state.phase = .login(LoginState())
-            }
-
-        case .loginEmailChanged(let email):
-            if case .login(var login) = state.phase {
-                login.email = email
-                login.errorMessage = nil
-                state.phase = .login(login)
-            }
-
-        case .loginPasswordChanged(let password):
-            if case .login(var login) = state.phase {
-                login.password = password
-                login.errorMessage = nil
-                state.phase = .login(login)
-            }
-
-        case .loadSitesTapped:
-            if case .login(var login) = state.phase, login.canLoadSites {
-                login.isLoadingSites = true
-                login.errorMessage = nil
-                state.phase = .login(login)
-                effects = [.listSites(email: login.email, password: login.password)]
-            }
-
-        case .sitesLoaded(let result):
-            if case .login(var login) = state.phase {
-                login.isLoadingSites = false
-                switch result {
-                case .success(let sites):
-                    login.sites = sites
-                    login.selectedSiteIndex = sites.count == 1 ? 0 : nil
-                    login.errorMessage = nil
-                case .failure(let error):
-                    login.errorMessage = error.message
-                }
-                state.phase = .login(login)
-            }
-
-        case .siteSelected(let index):
-            if case .login(var login) = state.phase {
-                login.selectedSiteIndex = index
-                login.errorMessage = nil
-                state.phase = .login(login)
-            }
-
-        case .connectTapped:
-            if case .login(var login) = state.phase, login.canConnect {
-                login.isConnecting = true
-                login.errorMessage = nil
-                state.phase = .login(login)
-                effects = [.connectNew(email: login.email, password: login.password, siteIndex: login.selectedSiteIndex)]
-            }
-
-        case .connectionSucceeded:
-            state.phase = .connecting
-
-        case .connectionFailed(let message):
-            switch state.phase {
-            case .login(var login):
-                login.isLoadingSites = false
-                login.isConnecting = false
-                login.errorMessage = message
-                state.phase = .login(login)
-            default:
-                state.phase = .error(message)
-            }
-        }
-
-        return (state, effects)
-    }
-}
-
 @Observable
 @MainActor
-final class AuthenticationStore {
+final class AuthenticationStore: StartableStore {
+    struct StateMachine {
+        var state: AuthenticationState = .initial
+
+        mutating func reduce(_ event: AuthenticationEvent) -> [AuthenticationEffect] {
+            switch event {
+            case .onAppear, .retryTapped:
+                state.phase = .bootstrapping
+                return [.inspectFlow]
+
+            case .flowInspected(let flow):
+                switch flow {
+                case .connectWithStoredCredentials:
+                    state.phase = .connecting
+                    return [.connectStored]
+                case .connectWithNewCredentials:
+                    state.phase = .login(LoginState())
+                    return []
+                }
+
+            case .loginEmailChanged(let email):
+                if case .login(var login) = state.phase {
+                    login.email = email
+                    login.errorMessage = nil
+                    state.phase = .login(login)
+                }
+                return []
+
+            case .loginPasswordChanged(let password):
+                if case .login(var login) = state.phase {
+                    login.password = password
+                    login.errorMessage = nil
+                    state.phase = .login(login)
+                }
+                return []
+
+            case .loadSitesTapped:
+                if case .login(var login) = state.phase, login.canLoadSites {
+                    login.isLoadingSites = true
+                    login.errorMessage = nil
+                    state.phase = .login(login)
+                    return [.listSites(email: login.email, password: login.password)]
+                }
+                return []
+
+            case .sitesLoaded(let result):
+                if case .login(var login) = state.phase {
+                    login.isLoadingSites = false
+                    switch result {
+                    case .success(let sites):
+                        login.sites = sites
+                        login.selectedSiteIndex = sites.count == 1 ? 0 : nil
+                        login.errorMessage = nil
+                    case .failure(let error):
+                        login.errorMessage = error.message
+                    }
+                    state.phase = .login(login)
+                }
+                return []
+
+            case .siteSelected(let index):
+                if case .login(var login) = state.phase {
+                    login.selectedSiteIndex = index
+                    login.errorMessage = nil
+                    state.phase = .login(login)
+                }
+                return []
+
+            case .connectTapped:
+                if case .login(var login) = state.phase, login.canConnect {
+                    login.isConnecting = true
+                    login.errorMessage = nil
+                    state.phase = .login(login)
+                    return [
+                        .connectNew(
+                            email: login.email,
+                            password: login.password,
+                            siteIndex: login.selectedSiteIndex
+                        )
+                    ]
+                }
+                return []
+
+            case .connectionSucceeded:
+                state.phase = .connecting
+                return []
+
+            case .connectionFailed(let message):
+                switch state.phase {
+                case .login(var login):
+                    login.isLoadingSites = false
+                    login.isConnecting = false
+                    login.errorMessage = message
+                    state.phase = .login(login)
+                default:
+                    state.phase = .error(message)
+                }
+                return []
+            }
+        }
+    }
+
     struct Dependencies {
         let inspectFlow: @Sendable () async -> DeltaDoreClient.ConnectionFlowStatus
         let connectStored: @Sendable () async throws -> Void
@@ -167,17 +176,22 @@ final class AuthenticationStore {
         let connectNew: @Sendable (String, String, Int?) async throws -> Void
     }
 
-    private(set) var state: AuthenticationState
+    private(set) var stateMachine: StateMachine = StateMachine()
+
+    var state: AuthenticationState {
+        stateMachine.state
+    }
 
     var onDelegateEvent: @MainActor (AuthenticationDelegateEvent) -> Void
 
     private let worker: Worker
+    private let effectTask = TaskHandle()
+    private var hasStarted = false
 
     init(
         dependencies: Dependencies,
         onDelegateEvent: @escaping @MainActor (AuthenticationDelegateEvent) -> Void = { _ in }
     ) {
-        self.state = .initial
         self.onDelegateEvent = onDelegateEvent
         self.worker = Worker(
             inspectFlow: dependencies.inspectFlow,
@@ -188,8 +202,7 @@ final class AuthenticationStore {
     }
 
     func send(_ event: AuthenticationEvent) {
-        let (next, effects) = AuthenticationReducer.reduce(state: state, event: event)
-        state = next
+        let effects = stateMachine.reduce(event)
 
         switch event {
         case .connectionSucceeded:
@@ -201,6 +214,16 @@ final class AuthenticationStore {
         handle(effects)
     }
 
+    func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
+        send(.onAppear)
+    }
+
+    deinit {
+        effectTask.cancel()
+    }
+
     private func handle(_ effects: [AuthenticationEffect]) {
         for effect in effects {
             handle(effect)
@@ -210,31 +233,37 @@ final class AuthenticationStore {
     private func handle(_ effect: AuthenticationEffect) {
         switch effect {
         case .inspectFlow:
-            Task { [weak self, worker] in
+            effectTask.task = Task { [weak self, worker] in
                 let flow = await worker.inspectFlow()
+                guard !Task.isCancelled else { return }
                 self?.receive(.flowInspected(flow))
             }
 
         case .connectStored:
-            Task { [weak self, worker] in
+            effectTask.task = Task { [weak self, worker] in
                 if let message = await worker.connectStored() {
+                    guard !Task.isCancelled else { return }
                     self?.receive(.connectionFailed(message))
                 } else {
+                    guard !Task.isCancelled else { return }
                     self?.receive(.connectionSucceeded)
                 }
             }
 
         case .listSites(let email, let password):
-            Task { [weak self, worker] in
+            effectTask.task = Task { [weak self, worker] in
                 let result = await worker.listSites(email: email, password: password)
+                guard !Task.isCancelled else { return }
                 self?.receive(.sitesLoaded(result))
             }
 
         case .connectNew(let email, let password, let siteIndex):
-            Task { [weak self, worker] in
+            effectTask.task = Task { [weak self, worker] in
                 if let message = await worker.connectNew(email: email, password: password, siteIndex: siteIndex) {
+                    guard !Task.isCancelled else { return }
                     self?.receive(.connectionFailed(message))
                 } else {
+                    guard !Task.isCancelled else { return }
                     self?.receive(.connectionSucceeded)
                 }
             }

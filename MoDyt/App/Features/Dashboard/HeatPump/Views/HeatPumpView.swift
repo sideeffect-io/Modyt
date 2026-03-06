@@ -1,14 +1,19 @@
 import SwiftUI
 
 struct HeatPumpView: View {
-    @Environment(\.heatPumpStoreFactory) private var heatPumpStoreFactory
+    @Environment(\.heatPumpStoreDependencies) private var heatPumpStoreDependencies
 
     let identifier: DeviceIdentifier
     @State private var pendingPulseOn = false
     @State private var pendingSpinOn = false
 
     var body: some View {
-        WithStoreView(factory: { heatPumpStoreFactory.make(identifier) }) { store in
+        WithStoreView(
+            store: HeatPumpStore(
+                dependencies: heatPumpStoreDependencies,
+                identifier: identifier
+            ),
+        ) { store in
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
 

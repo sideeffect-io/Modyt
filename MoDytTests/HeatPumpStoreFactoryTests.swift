@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import MoDyt
 
-struct HeatPumpStoreFactoryTests {
+struct HeatPumpStoreResolveObservedDeviceTests {
     @Test
     func mergesSiblingEndpointSignalsWhenPrimaryMissesSetpoint() {
         let primaryIdentifier = DeviceIdentifier(deviceId: 42, endpointId: 1)
@@ -28,7 +28,7 @@ struct HeatPumpStoreFactoryTests {
             ]
         )
 
-        let resolved = HeatPumpStoreFactory.resolveObservedDevice(
+        let resolved = HeatPumpStore.resolveObservedDevice(
             for: primaryIdentifier,
             in: [unrelated, sibling, primary]
         )
@@ -57,7 +57,7 @@ struct HeatPumpStoreFactoryTests {
             ]
         )
 
-        let resolved = HeatPumpStoreFactory.resolveObservedDevice(
+        let resolved = HeatPumpStore.resolveObservedDevice(
             for: primaryIdentifier,
             in: [sibling, primary]
         )
@@ -67,7 +67,7 @@ struct HeatPumpStoreFactoryTests {
 
     @Test
     func returnsNilWhenNoEndpointSharesRequestedDeviceID() {
-        let resolved = HeatPumpStoreFactory.resolveObservedDevice(
+        let resolved = HeatPumpStore.resolveObservedDevice(
             for: .init(deviceId: 42, endpointId: 1),
             in: [
                 makeDevice(

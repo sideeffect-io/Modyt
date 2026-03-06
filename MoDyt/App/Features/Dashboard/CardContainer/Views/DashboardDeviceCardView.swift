@@ -2,14 +2,19 @@ import SwiftUI
 import UIKit
 
 struct DashboardDeviceCardView: View {
-    @Environment(\.dashboardDeviceCardStoreFactory) private var dashboardDeviceCardStoreFactory
+    @Environment(\.dashboardDeviceCardStoreDependencies) private var dashboardDeviceCardStoreDependencies
 
     let favorite: FavoriteItem
 
     private let dashboardCardHeight: CGFloat = 194
 
     var body: some View {
-        WithStoreView(factory: { dashboardDeviceCardStoreFactory.make(favorite.type) }) { store in
+        WithStoreView(
+            store: DashboardDeviceCardStore(
+                dependencies: dashboardDeviceCardStoreDependencies,
+                favoriteType: favorite.type
+            ),
+        ) { store in
             cardContent(
                 for: favorite,
                 onFavoriteTapped: { store.send(.favoriteTapped) }

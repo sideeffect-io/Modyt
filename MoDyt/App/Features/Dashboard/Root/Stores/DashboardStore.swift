@@ -21,45 +21,47 @@ enum DashboardEffect: Sendable, Equatable {
     case reorderFavorite(FavoriteType, FavoriteType)
 }
 
-enum DashboardReducer {
-    static func reduce(state: DashboardState, event: DashboardEvent) -> (DashboardState, [DashboardEffect]) {
-        var state = state
-        var effects: [DashboardEffect] = []
-
-        switch event {
-        case .onAppear:
-            effects = [.startObservingFavorites]
-
-        case .favoritesUpdated(let favorites):
-            state.favorites = favorites
-
-        case .refreshRequested:
-            effects = [.refreshAll]
-
-        case .reorderFavorite(let source, let target):
-            effects = [.reorderFavorite(source, target)]
-        }
-
-        return (state, effects)
-    }
-}
-
 @Observable
 @MainActor
-final class DashboardStore {
+final class DashboardStore: StartableStore {
+    struct StateMachine {
+        var state: DashboardState = .initial
+
+        mutating func reduce(_ event: DashboardEvent) -> [DashboardEffect] {
+            switch event {
+            case .onAppear:
+                return [.startObservingFavorites]
+
+            case .favoritesUpdated(let favorites):
+                state.favorites = favorites
+                return []
+
+            case .refreshRequested:
+                return [.refreshAll]
+
+            case .reorderFavorite(let source, let target):
+                return [.reorderFavorite(source, target)]
+            }
+        }
+    }
+
     struct Dependencies {
         let observeFavorites: @Sendable () async -> any AsyncSequence<[FavoriteItem], Never> & Sendable
         let reorderFavorite: @Sendable (FavoriteType, FavoriteType) async -> Void
         let refreshAll: @Sendable () async -> Void
     }
 
-    private(set) var state: DashboardState
+    private(set) var stateMachine: StateMachine = StateMachine()
+
+    var state: DashboardState {
+        stateMachine.state
+    }
 
     private let favoritesTask = TaskHandle()
     private let worker: Worker
+    private var hasStarted = false
 
     init(dependencies: Dependencies) {
-        self.state = .initial
         self.worker = Worker(
             observeFavorites: dependencies.observeFavorites,
             reorderFavorite: dependencies.reorderFavorite,
@@ -68,9 +70,18 @@ final class DashboardStore {
     }
 
     func send(_ event: DashboardEvent) {
-        let (nextState, effects) = DashboardReducer.reduce(state: state, event: event)
-        state = nextState
+        let effects = stateMachine.reduce(event)
         handle(effects)
+    }
+
+    func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
+        send(.onAppear)
+    }
+
+    deinit {
+        favoritesTask.cancel()
     }
 
     private func handle(_ effects: [DashboardEffect]) {
@@ -139,20 +150,5 @@ final class DashboardStore {
         func reorderFavorite(source: FavoriteType, target: FavoriteType) async {
             await reorderFavoriteAction(source, target)
         }
-    }
-}
-
-private final class TaskHandle {
-    var task: Task<Void, Never>? {
-        didSet { oldValue?.cancel() }
-    }
-
-    func cancel() {
-        task?.cancel()
-        task = nil
-    }
-
-    deinit {
-        task?.cancel()
     }
 }

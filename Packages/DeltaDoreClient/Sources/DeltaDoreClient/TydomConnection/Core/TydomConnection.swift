@@ -605,11 +605,16 @@ public actor TydomConnection {
             )
         } catch {
             DeltaDoreDebugLog.log("Digest challenge with upgrade failed error=\(error)")
-            return try await fetchDigestChallenge(
-                using: session,
-                randomBytes: randomBytes,
-                includeUpgradeHeaders: false
-            )
+            do {
+                return try await fetchDigestChallenge(
+                    using: session,
+                    randomBytes: randomBytes,
+                    includeUpgradeHeaders: false
+                )
+            } catch {
+                DeltaDoreDebugLog.log("Digest challenge without upgrade failed error=\(error)")
+                return try await fetchDigestChallengeNetworkFallback(lastError: error)
+            }
         }
     }
 
@@ -636,9 +641,12 @@ public actor TydomConnection {
         DeltaDoreDebugLog.log(
             "Digest challenge response status=\(status) includeUpgrade=\(includeUpgradeHeaders)"
         )
-        let rawHeader = httpResponse.allHeaderFields.first { key, _ in
-            String(describing: key).lowercased() == "www-authenticate"
-        }?.value as? String
+        let rawHeader = httpResponse.value(forHTTPHeaderField: "WWW-Authenticate")
+            ?? httpResponse.allHeaderFields.first { key, _ in
+                String(describing: key).lowercased() == "www-authenticate"
+            }.flatMap { _, value in
+                normalizeHeaderValue(value)
+            }
         guard let rawHeader else {
             DeltaDoreDebugLog.log(
                 "Digest challenge missing WWW-Authenticate header includeUpgrade=\(includeUpgradeHeaders)"
@@ -646,6 +654,41 @@ public actor TydomConnection {
             throw ConnectionError.missingChallenge
         }
         return try DigestChallenge.parse(from: rawHeader)
+    }
+
+    private nonisolated func normalizeHeaderValue(_ raw: Any) -> String? {
+        if let text = raw as? String {
+            return text
+        }
+        if let values = raw as? [String], values.isEmpty == false {
+            return values.joined(separator: ", ")
+        }
+        if let values = raw as? [Any], values.isEmpty == false {
+            let joined = values
+                .map { String(describing: $0) }
+                .joined(separator: ", ")
+            return joined.isEmpty ? nil : joined
+        }
+        let text = String(describing: raw)
+        return text.isEmpty ? nil : text
+    }
+
+    private func fetchDigestChallengeNetworkFallback(lastError: Error) async throws -> DigestChallenge {
+#if canImport(Network)
+        DeltaDoreDebugLog.log(
+            "Digest challenge URLSession flow failed error=\(lastError). Retrying via NWConnection."
+        )
+        let tlsOptions = makeTLSOptions(
+            allowInsecureTLS: configuration.allowInsecureTLS,
+            host: configuration.host
+        )
+        return try await fetchDigestChallengeNetwork(
+            tlsOptions: tlsOptions,
+            includeUpgradeHeaders: true
+        )
+#else
+        throw lastError
+#endif
     }
 
     private func buildHandshakeHeaders(

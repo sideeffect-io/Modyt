@@ -1,29 +1,31 @@
-import Foundation
-import SwiftUI
 import DeltaDoreClient
+import SwiftUI
 
-struct MainStoreFactory {
-    let make: @MainActor () -> MainStore
+enum MainStoreDependencyFactory {
+    static func make(
+        dependencyBag: DependencyBag = .production
+    ) -> MainStore.Dependencies {
+        let gatewayClient = dependencyBag.gatewayClient
+        let messageRouter = dependencyBag.localStorageDatasources.tydomMessageRepositoryRouter
+        let runtime = MainRuntime(
+            gatewayClient: gatewayClient,
+            router: messageRouter
+        )
 
-    static func live(dependencies: DependencyBag) -> MainStoreFactory {
-        MainStoreFactory {
-            let runtime = MainRuntime(
-                gatewayClient: dependencies.gatewayClient,
-                router: dependencies.localStorageDatasources.tydomMessageRepositoryRouter
-            )
-
-            return MainStore(
-                dependencies: .init(
-                    handleGatewayMessages: runtime.handleGatewayMessages,
-                    disconnect: runtime.disconnect,
-                    setAppInactive: runtime.setAppInactive,
-                    setAppActive: runtime.setAppActive,
-                    checkGatewayConnection: runtime.checkGatewayConnection,
-                    reconnectToGateway: runtime.reconnectToGateway
-                )
-            )
-        }
+        return .init(
+            handleGatewayMessages: { await runtime.handleGatewayMessages() },
+            disconnect: { await runtime.disconnect() },
+            setAppInactive: { await runtime.setAppInactive() },
+            setAppActive: { await runtime.setAppActive() },
+            checkGatewayConnection: { await runtime.checkGatewayConnection() },
+            reconnectToGateway: { await runtime.reconnectToGateway() }
+        )
     }
+}
+
+extension EnvironmentValues {
+    @Entry var mainStoreDependencies: MainStore.Dependencies =
+        MainStoreDependencyFactory.make()
 }
 
 struct MainGatewayDataRequestPipeline: Sendable {
@@ -55,7 +57,7 @@ struct MainGatewayDataRequestPipeline: Sendable {
     }
 }
 
-private actor MainRuntime {
+actor MainRuntime {
     private let gatewayClient: DeltaDoreClient
     private let router: TydomMessageRepositoryRouter
     private let log: @Sendable (String) -> Void
@@ -163,19 +165,5 @@ private actor MainRuntime {
     private func cancelMessageStream() {
         messageStreamTask?.cancel()
         messageStreamTask = nil
-    }
-
-}
-
-private struct MainStoreFactoryKey: EnvironmentKey {
-    static var defaultValue: MainStoreFactory {
-        .live(dependencies: .live())
-    }
-}
-
-extension EnvironmentValues {
-    var mainStoreFactory: MainStoreFactory {
-        get { self[MainStoreFactoryKey.self] }
-        set { self[MainStoreFactoryKey.self] = newValue }
     }
 }

@@ -14,10 +14,9 @@ struct MainReducerTransitionTests {
     @Test(arguments: transitionCases)
     func reducerAppliesConfiguredTransition(_ transition: TransitionCase) {
         let initialState = MainState(featureState: transition.initial)
-        let (nextState, effects) = MainReducer.reduce(
-            state: initialState,
-            event: transition.event
-        )
+        var stateMachine = MainStore.StateMachine(state: initialState)
+        let effects = stateMachine.reduce(transition.event)
+        let nextState = stateMachine.state
 
         #expect(nextState.featureState == transition.expected)
         #expect(effects == transition.expectedEffects)
@@ -26,10 +25,9 @@ struct MainReducerTransitionTests {
     @Test
     func reducerLeavesUnknownTransitionUntouched() {
         let initialState = MainState(featureState: .featureIsIdle)
-        let (nextState, effects) = MainReducer.reduce(
-            state: initialState,
-            event: .appActiveWasReceived
-        )
+        var stateMachine = MainStore.StateMachine(state: initialState)
+        let effects = stateMachine.reduce(.appActiveWasReceived)
+        let nextState = stateMachine.state
 
         #expect(nextState == initialState)
         #expect(effects.isEmpty)

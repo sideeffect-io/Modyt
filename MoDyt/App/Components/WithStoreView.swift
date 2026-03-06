@@ -1,18 +1,25 @@
 import SwiftUI
 
-struct WithStoreView<Store, Content: View>: View {
+struct WithStoreView<Store, Content: View>: View where Store: StartableStore {
     @State private var store: Store
+    @State private var didStart = false
+
     private let content: (Store) -> Content
 
     init(
-        factory: @escaping () -> Store,
+        store: @autoclosure @escaping () -> Store,
         @ViewBuilder content: @escaping (Store) -> Content
     ) {
-        _store = State(initialValue: factory())
+        _store = State(initialValue: store())
         self.content = content
     }
 
     var body: some View {
         content(store)
+            .task {
+                guard !didStart else { return }
+                store.start()
+                didStart = true
+            }
     }
 }
