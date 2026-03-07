@@ -26,21 +26,30 @@ enum ShutterPreset: Int, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum ShutterMovementDirection: Sendable, Equatable {
+    case idle
+    case opening
+    case closing
+}
+
 enum ShutterState: Sendable {
+    private static let movementCompletionTolerance = 3
+
     case featureIsIdle(deviceIds: [DeviceIdentifier], position: Int, target: Int?)
     case featureIsStarted(deviceIds: [DeviceIdentifier], position: Int, target: Int?)
     case shutterIsMovingInApp(
         deviceIds: [DeviceIdentifier],
         position: Int,
         target: Int,
-        timeoutTask: Task<Void, Never>? = nil
+        timeoutTask: Task<Void, Never>? = nil,
+        receivedValueCountAfterInAppTarget: Int? = nil
     )
 
     var deviceIds: [DeviceIdentifier] {
         switch self {
         case .featureIsIdle(let deviceIds, _, _),
              .featureIsStarted(let deviceIds, _, _),
-             .shutterIsMovingInApp(let deviceIds, _, _, _):
+             .shutterIsMovingInApp(let deviceIds, _, _, _, _):
             return deviceIds
         }
     }
@@ -49,7 +58,7 @@ enum ShutterState: Sendable {
         switch self {
         case .featureIsIdle(_, let position, _),
              .featureIsStarted(_, let position, _),
-             .shutterIsMovingInApp(_, let position, _, _):
+             .shutterIsMovingInApp(_, let position, _, _, _):
             return position
         }
     }
@@ -59,20 +68,20 @@ enum ShutterState: Sendable {
         case .featureIsIdle(_, _, let target),
              .featureIsStarted(_, _, let target):
             return target
-        case .shutterIsMovingInApp(_, _, let target, _):
+        case .shutterIsMovingInApp(_, _, let target, _, _):
             return target
         }
     }
 
     var movingTarget: Int? {
-        if case .shutterIsMovingInApp(_, _, let target, _) = self {
+        if case .shutterIsMovingInApp(_, _, let target, _, _) = self {
             return target
         }
         return nil
     }
 
     var timeoutTask: Task<Void, Never>? {
-        if case .shutterIsMovingInApp(_, _, _, let timeoutTask) = self {
+        if case .shutterIsMovingInApp(_, _, _, let timeoutTask, _) = self {
             return timeoutTask
         }
         return nil
@@ -84,18 +93,34 @@ enum ShutterState: Sendable {
             return 0
         case .featureIsStarted(_, let position, _):
             return ShutterPositionMapper.gaugePosition(from: position)
-        case .shutterIsMovingInApp(_, _, let target, _):
-            return ShutterPositionMapper.gaugePosition(from: target)
+        case .shutterIsMovingInApp(_, let position, _, _, _):
+            return ShutterPositionMapper.gaugePosition(from: position)
         }
     }
 
-    var isGaugeDimmed: Bool {
-        switch self {
-        case .featureIsIdle, .shutterIsMovingInApp:
-            return true
-        case .featureIsStarted:
-            return false
+    var destinationGaugePosition: Int? {
+        guard case .shutterIsMovingInApp(_, let position, let target, _, _) = self,
+              abs(position - target) > Self.movementCompletionTolerance else {
+            return nil
         }
+        return ShutterPositionMapper.gaugePosition(from: target)
+    }
+
+    var movementDirection: ShutterMovementDirection {
+        guard case .shutterIsMovingInApp(_, let position, let target, _, _) = self,
+              abs(position - target) > Self.movementCompletionTolerance else {
+            return .idle
+        }
+
+        return target > position ? .opening : .closing
+    }
+
+    var isUserInitiatedMovement: Bool {
+        if case .shutterIsMovingInApp(_, _, _, _, .some) = self {
+            return true
+        }
+
+        return false
     }
 
     var isMovingInApp: Bool {
@@ -126,12 +151,13 @@ extension ShutterState: Equatable {
                 && lhsTarget == rhsTarget
 
         case let (
-            .shutterIsMovingInApp(lhsDeviceIds, lhsPosition, lhsTarget, _),
-            .shutterIsMovingInApp(rhsDeviceIds, rhsPosition, rhsTarget, _)
+            .shutterIsMovingInApp(lhsDeviceIds, lhsPosition, lhsTarget, _, lhsReceivedValueCount),
+            .shutterIsMovingInApp(rhsDeviceIds, rhsPosition, rhsTarget, _, rhsReceivedValueCount)
         ):
             return lhsDeviceIds == rhsDeviceIds
                 && lhsPosition == rhsPosition
                 && lhsTarget == rhsTarget
+                && lhsReceivedValueCount == rhsReceivedValueCount
 
         default:
             return false
@@ -241,7 +267,8 @@ final class ShutterStore: StartableStore {
                         deviceIds: deviceIds,
                         position: newPosition,
                         target: newTarget,
-                        timeoutTask: nil
+                        timeoutTask: nil,
+                        receivedValueCountAfterInAppTarget: nil
                     )
                     return [.startTimeout]
                 }
@@ -262,7 +289,8 @@ final class ShutterStore: StartableStore {
                     deviceIds: deviceIds,
                     position: position,
                     target: newTarget,
-                    timeoutTask: nil
+                    timeoutTask: nil,
+                    receivedValueCountAfterInAppTarget: 0
                 )
                 return [
                     .sendCommand(deviceIds: deviceIds, position: newTarget),
@@ -271,14 +299,15 @@ final class ShutterStore: StartableStore {
                 ]
 
             case let (
-                .shutterIsMovingInApp(deviceIds, position, oldTarget, timeoutTask),
+                .shutterIsMovingInApp(deviceIds, position, oldTarget, timeoutTask, _),
                 .targetWasSetInApp(newTarget)
             ) where newTarget != oldTarget:
                 state = .shutterIsMovingInApp(
                     deviceIds: deviceIds,
                     position: position,
                     target: newTarget,
-                    timeoutTask: nil
+                    timeoutTask: nil,
+                    receivedValueCountAfterInAppTarget: 0
                 )
                 return [
                     .cancelTimeout(task: timeoutTask),
@@ -288,9 +317,31 @@ final class ShutterStore: StartableStore {
                 ]
 
             case let (
-                .shutterIsMovingInApp(deviceIds, _, oldTarget, timeoutTask),
+                .shutterIsMovingInApp(
+                    deviceIds,
+                    _,
+                    oldTarget,
+                    timeoutTask,
+                    receivedValueCountAfterInAppTarget
+                ),
                 .valueWasReceived(newPosition, newTarget)
             ):
+                let nextReceivedValueCount = receivedValueCountAfterInAppTarget.map { $0 + 1 }
+
+                if let nextReceivedValueCount {
+                    state = .shutterIsMovingInApp(
+                        deviceIds: deviceIds,
+                        position: newPosition,
+                        target: oldTarget,
+                        timeoutTask: timeoutTask,
+                        receivedValueCountAfterInAppTarget: nextReceivedValueCount
+                    )
+
+                    if nextReceivedValueCount == 2 {
+                        return []
+                    }
+                }
+
                 if newTarget != oldTarget {
                     if let newTarget {
                         if Self.hasReachedTarget(position: newPosition, target: newTarget) {
@@ -309,7 +360,8 @@ final class ShutterStore: StartableStore {
                             deviceIds: deviceIds,
                             position: newPosition,
                             target: newTarget,
-                            timeoutTask: nil
+                            timeoutTask: nil,
+                            receivedValueCountAfterInAppTarget: nextReceivedValueCount
                         )
                         return [
                             .cancelTimeout(task: timeoutTask),
@@ -335,7 +387,7 @@ final class ShutterStore: StartableStore {
 
                 return []
 
-            case let (.shutterIsMovingInApp(deviceIds, position, _, timeoutTask), .timeoutHasExpired):
+            case let (.shutterIsMovingInApp(deviceIds, position, _, timeoutTask, _), .timeoutHasExpired):
                 state = .featureIsStarted(
                     deviceIds: deviceIds,
                     position: position,
@@ -347,14 +399,21 @@ final class ShutterStore: StartableStore {
                 ]
 
             case let (
-                .shutterIsMovingInApp(deviceIds, position, target, _),
+                .shutterIsMovingInApp(
+                    deviceIds,
+                    position,
+                    target,
+                    _,
+                    receivedValueCountAfterInAppTarget
+                ),
                 .timeoutTaskWasCreated(timeoutTask)
             ):
                 state = .shutterIsMovingInApp(
                     deviceIds: deviceIds,
                     position: position,
                     target: target,
-                    timeoutTask: timeoutTask
+                    timeoutTask: timeoutTask,
+                    receivedValueCountAfterInAppTarget: receivedValueCountAfterInAppTarget
                 )
                 return []
 
@@ -409,6 +468,10 @@ final class ShutterStore: StartableStore {
         state.gaugePosition
     }
 
+    var destinationGaugePosition: Int? {
+        state.destinationGaugePosition
+    }
+
     var target: Int? {
         state.target
     }
@@ -418,11 +481,23 @@ final class ShutterStore: StartableStore {
     }
 
     var isGaugeDimmed: Bool {
-        state.isGaugeDimmed
+        true
     }
 
     var isMovingInApp: Bool {
         state.isMovingInApp
+    }
+
+    var movementDirection: ShutterMovementDirection {
+        state.movementDirection
+    }
+
+    var isMoving: Bool {
+        state.isMovingInApp
+    }
+
+    var isUserInitiatedMovement: Bool {
+        state.isUserInitiatedMovement
     }
 
     init(

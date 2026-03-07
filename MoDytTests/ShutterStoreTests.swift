@@ -5,15 +5,16 @@ import Testing
 struct ShutterPositionMapperTests {
     @Test
     func gaugePositionInvertsRawPosition() {
-        #expect(ShutterPositionMapper.gaugePosition(from: 100) == 0)
-        #expect(ShutterPositionMapper.gaugePosition(from: 75) == 25)
-        #expect(ShutterPositionMapper.gaugePosition(from: 25) == 75)
-        #expect(ShutterPositionMapper.gaugePosition(from: 0) == 100)
+        #expect(ShutterPositionMapper.gaugePosition(from: 100) == 5)
+        #expect(ShutterPositionMapper.gaugePosition(from: 75) == 30)
+        #expect(ShutterPositionMapper.gaugePosition(from: 25) == 80)
+        #expect(ShutterPositionMapper.gaugePosition(from: 0) == 105)
     }
 
     @Test
-    func gaugePositionClampsValuesToPercentRange() {
-        #expect(ShutterPositionMapper.gaugePosition(from: -2) == 100)
+    func gaugePositionClampsValuesToGaugeRange() {
+        #expect(ShutterPositionMapper.gaugePosition(from: -2) == 105)
+        #expect(ShutterPositionMapper.gaugePosition(from: 105) == 0)
         #expect(ShutterPositionMapper.gaugePosition(from: 123) == 0)
     }
 }
@@ -41,6 +42,54 @@ struct DeviceShutterPositionTests {
 
         #expect(device.shutterControlDescriptor()?.key == "position")
         #expect(device.shutterPosition == 30)
+    }
+}
+
+struct ShutterStateDerivedValueTests {
+    private static let deviceIds: [DeviceIdentifier] = [
+        .init(deviceId: 10, endpointId: 1),
+    ]
+
+    @Test
+    func movingStateUsesLivePositionForGaugeAndSeparateDestinationMarker() {
+        let state = ShutterState.shutterIsMovingInApp(
+            deviceIds: Self.deviceIds,
+            position: 40,
+            target: 75,
+            receivedValueCountAfterInAppTarget: 0
+        )
+
+        #expect(state.gaugePosition == ShutterPositionMapper.gaugePosition(from: 40))
+        #expect(state.destinationGaugePosition == ShutterPositionMapper.gaugePosition(from: 75))
+        #expect(state.movementDirection == .opening)
+        #expect(state.isUserInitiatedMovement)
+    }
+
+    @Test
+    func externalMovingStateDoesNotReportUserInitiatedMovement() {
+        let state = ShutterState.shutterIsMovingInApp(
+            deviceIds: Self.deviceIds,
+            position: 70,
+            target: 25
+        )
+
+        #expect(state.gaugePosition == ShutterPositionMapper.gaugePosition(from: 70))
+        #expect(state.destinationGaugePosition == ShutterPositionMapper.gaugePosition(from: 25))
+        #expect(state.movementDirection == .closing)
+        #expect(!state.isUserInitiatedMovement)
+    }
+
+    @Test
+    func movingStateHidesDestinationMarkerWhenWithinCompletionTolerance() {
+        let state = ShutterState.shutterIsMovingInApp(
+            deviceIds: Self.deviceIds,
+            position: 98,
+            target: 100,
+            receivedValueCountAfterInAppTarget: 2
+        )
+
+        #expect(state.destinationGaugePosition == nil)
+        #expect(state.movementDirection == .idle)
     }
 }
 
@@ -97,7 +146,8 @@ struct ShutterReducerTests {
             deviceIds: Self.deviceIds,
             position: 33,
             target: 80,
-            timeoutTask: nil
+            timeoutTask: nil,
+            receivedValueCountAfterInAppTarget: 1
         )
 
         var stateMachine = ShutterStore.StateMachine(state: initial)
@@ -106,7 +156,191 @@ struct ShutterReducerTests {
 
         #expect(effects.isEmpty)
         #expect(nextState.timeoutTask != nil)
-        #expect(nextState == .shutterIsMovingInApp(deviceIds: Self.deviceIds, position: 33, target: 80))
+        #expect(
+            nextState == .shutterIsMovingInApp(
+                deviceIds: Self.deviceIds,
+                position: 33,
+                target: 80,
+                receivedValueCountAfterInAppTarget: 1
+            )
+        )
+    }
+
+    @Test
+    func appInitiatedMoveIgnoresSecondReceivedValue() {
+        var stateMachine = ShutterStore.StateMachine(
+            state: .featureIsStarted(
+                deviceIds: Self.deviceIds,
+                position: 100,
+                target: nil
+            )
+        )
+
+        let startEffects = stateMachine.reduce(.targetWasSetInApp(target: 75))
+        #expect(
+            startEffects == [
+                .sendCommand(deviceIds: Self.deviceIds, position: 75),
+                .startTimeout,
+                .persistTarget(deviceIds: Self.deviceIds, target: 75),
+            ]
+        )
+        #expect(
+            stateMachine.state == .shutterIsMovingInApp(
+                deviceIds: Self.deviceIds,
+                position: 100,
+                target: 75,
+                receivedValueCountAfterInAppTarget: 0
+            )
+        )
+
+        let firstEffects = stateMachine.reduce(.valueWasReceived(position: 100, target: 75))
+        #expect(firstEffects.isEmpty)
+        #expect(
+            stateMachine.state == .shutterIsMovingInApp(
+                deviceIds: Self.deviceIds,
+                position: 100,
+                target: 75,
+                receivedValueCountAfterInAppTarget: 1
+            )
+        )
+
+        let secondEffects = stateMachine.reduce(.valueWasReceived(position: 75, target: 75))
+        #expect(secondEffects.isEmpty)
+        #expect(
+            stateMachine.state == .shutterIsMovingInApp(
+                deviceIds: Self.deviceIds,
+                position: 75,
+                target: 75,
+                receivedValueCountAfterInAppTarget: 2
+            )
+        )
+
+        let thirdEffects = stateMachine.reduce(.valueWasReceived(position: 98, target: 75))
+        #expect(thirdEffects.isEmpty)
+        #expect(
+            stateMachine.state == .shutterIsMovingInApp(
+                deviceIds: Self.deviceIds,
+                position: 98,
+                target: 75,
+                receivedValueCountAfterInAppTarget: 3
+            )
+        )
+    }
+
+    @Test
+    func externalTargetChangeDoesNotIgnoreSecondReceivedValue() {
+        var stateMachine = ShutterStore.StateMachine(
+            state: .featureIsStarted(
+                deviceIds: Self.deviceIds,
+                position: 10,
+                target: nil
+            )
+        )
+
+        let startEffects = stateMachine.reduce(.valueWasReceived(position: 20, target: 55))
+        #expect(startEffects == [.startTimeout])
+        #expect(
+            stateMachine.state == .shutterIsMovingInApp(
+                deviceIds: Self.deviceIds,
+                position: 20,
+                target: 55
+            )
+        )
+
+        let completionEffects = stateMachine.reduce(.valueWasReceived(position: 55, target: 55))
+        #expect(
+            completionEffects == [
+                .cancelTimeout(task: nil),
+                .persistTarget(deviceIds: Self.deviceIds, target: nil),
+            ]
+        )
+        #expect(
+            stateMachine.state == .featureIsStarted(
+                deviceIds: Self.deviceIds,
+                position: 55,
+                target: nil
+            )
+        )
+    }
+
+    @Test
+    func retargetResetsReceivedValueCounter() {
+        var stateMachine = ShutterStore.StateMachine(
+            state: .shutterIsMovingInApp(
+                deviceIds: Self.deviceIds,
+                position: 40,
+                target: 60,
+                receivedValueCountAfterInAppTarget: 1
+            )
+        )
+
+        let retargetEffects = stateMachine.reduce(.targetWasSetInApp(target: 20))
+        #expect(
+            retargetEffects == [
+                .cancelTimeout(task: nil),
+                .sendCommand(deviceIds: Self.deviceIds, position: 20),
+                .startTimeout,
+                .persistTarget(deviceIds: Self.deviceIds, target: 20),
+            ]
+        )
+        #expect(
+            stateMachine.state == .shutterIsMovingInApp(
+                deviceIds: Self.deviceIds,
+                position: 40,
+                target: 20,
+                receivedValueCountAfterInAppTarget: 0
+            )
+        )
+
+        let firstEffects = stateMachine.reduce(.valueWasReceived(position: 40, target: 20))
+        #expect(firstEffects.isEmpty)
+        #expect(
+            stateMachine.state == .shutterIsMovingInApp(
+                deviceIds: Self.deviceIds,
+                position: 40,
+                target: 20,
+                receivedValueCountAfterInAppTarget: 1
+            )
+        )
+
+        let secondEffects = stateMachine.reduce(.valueWasReceived(position: 20, target: 20))
+        #expect(secondEffects.isEmpty)
+        #expect(
+            stateMachine.state == .shutterIsMovingInApp(
+                deviceIds: Self.deviceIds,
+                position: 20,
+                target: 20,
+                receivedValueCountAfterInAppTarget: 2
+            )
+        )
+    }
+
+    @Test
+    func timeoutEndsAppInitiatedMoveAfterIgnoredSecondValue() {
+        var stateMachine = ShutterStore.StateMachine(
+            state: .shutterIsMovingInApp(
+                deviceIds: Self.deviceIds,
+                position: 100,
+                target: 75,
+                receivedValueCountAfterInAppTarget: 2
+            )
+        )
+
+        let effects = stateMachine.reduce(.timeoutHasExpired)
+
+        #expect(
+            effects == [
+                .cancelTimeout(task: nil),
+                .persistTarget(deviceIds: Self.deviceIds, target: nil),
+            ]
+        )
+        #expect(
+            stateMachine.state == .featureIsStarted(
+                deviceIds: Self.deviceIds,
+                position: 100,
+                target: nil
+            )
+        )
     }
 
     private static let deviceIds: [DeviceIdentifier] = [
@@ -136,7 +370,12 @@ struct ShutterReducerTests {
         .init(
             initial: .featureIsStarted(deviceIds: deviceIds, position: 30, target: nil),
             event: .targetWasSetInApp(target: 75),
-            expected: .shutterIsMovingInApp(deviceIds: deviceIds, position: 30, target: 75),
+            expected: .shutterIsMovingInApp(
+                deviceIds: deviceIds,
+                position: 30,
+                target: 75,
+                receivedValueCountAfterInAppTarget: 0
+            ),
             expectedEffects: [
                 .sendCommand(deviceIds: deviceIds, position: 75),
                 .startTimeout,
@@ -146,7 +385,12 @@ struct ShutterReducerTests {
         .init(
             initial: .shutterIsMovingInApp(deviceIds: deviceIds, position: 40, target: 60),
             event: .targetWasSetInApp(target: 20),
-            expected: .shutterIsMovingInApp(deviceIds: deviceIds, position: 40, target: 20),
+            expected: .shutterIsMovingInApp(
+                deviceIds: deviceIds,
+                position: 40,
+                target: 20,
+                receivedValueCountAfterInAppTarget: 0
+            ),
             expectedEffects: [
                 .cancelTimeout(task: nil),
                 .sendCommand(deviceIds: deviceIds, position: 20),
@@ -414,7 +658,8 @@ struct ShutterStoreEffectTests {
             store.state == .shutterIsMovingInApp(
                 deviceIds: [id10, id11],
                 position: 30,
-                target: 75
+                target: 75,
+                receivedValueCountAfterInAppTarget: 0
             )
         )
 
@@ -501,7 +746,8 @@ struct ShutterStoreEffectTests {
             store.state == .shutterIsMovingInApp(
                 deviceIds: [id10, id11],
                 position: 30,
-                target: 25
+                target: 25,
+                receivedValueCountAfterInAppTarget: 0
             )
         )
 

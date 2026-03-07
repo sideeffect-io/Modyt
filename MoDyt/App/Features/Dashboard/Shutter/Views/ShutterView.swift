@@ -1,15 +1,26 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 struct ShutterView: View {
     @Environment(\.shutterStoreDependencies) private var shutterStoreDependencies
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     let deviceIds: [DeviceIdentifier]
 
-    @State private var animatedCheckTarget: Int?
-    @State private var lastAnimatedTarget: Int?
-    @State private var shutterIconOpacity: Double = 1
-    @State private var checkmarkOpacity: Double = 0
-    @State private var checkAnimationTask: Task<Void, Never>?
+    @State private var acknowledgedPreset: Int?
+    @State private var acknowledgementStrength: CGFloat = 0
+    @State private var acknowledgementTask: Task<Void, Never>?
+
+    private static let targetAccent = Color(red: 0.08, green: 0.51, blue: 0.80)
+    private static let quietSelectedFillOpacity: CGFloat = 0.22
+    private static let quietSelectedStrokeOpacity: CGFloat = 0.46
+    private static let acknowledgementFillBoost: CGFloat = 0.12
+    private static let acknowledgementStrokeBoost: CGFloat = 0.18
+    private static let targetTileCornerRadius: CGFloat = 8
+    private static let targetTileHorizontalInset: CGFloat = 2
+    private static let targetTileVerticalInset: CGFloat = 1
 
     private var normalizedDeviceIds: [DeviceIdentifier] {
         deviceIds.uniquePreservingOrder()
@@ -29,8 +40,7 @@ struct ShutterView: View {
             VStack(spacing: 10) {
                 ShutterLinearGauge(
                     position: store.gaugePosition,
-                    isDimmed: store.isGaugeDimmed,
-                    showsMovingOutline: store.isMovingInApp
+                    isDimmed: store.isGaugeDimmed
                 )
                 .frame(height: 24)
                 .accessibilityLabel("Current shutter position")
@@ -52,13 +62,8 @@ struct ShutterView: View {
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             .glassCard(cornerRadius: 18, interactive: true, tone: .inset)
-            .onChange(of: store.movingTarget) { _, movingTarget in
-                playCheckAnimation(for: movingTarget)
-            }
             .onDisappear {
-                checkAnimationTask?.cancel()
-                checkAnimationTask = nil
-                resetCheckAnimationState()
+                resetAcknowledgement()
             }
         }
         .id(storeIdentity)
@@ -70,114 +75,119 @@ struct ShutterView: View {
         movingTarget: Int?,
         action: @escaping () -> Void
     ) -> some View {
-        let isMoving = movingTarget == preset.rawValue
-        let isSelected = target == preset.rawValue || isMoving
-        let displaysCheckmark = isMoving && animatedCheckTarget == preset.rawValue
+        let isSelected = target == preset.rawValue || movingTarget == preset.rawValue
+        let isAcknowledging = acknowledgedPreset == preset.rawValue
+        let fillOpacity = (isSelected ? Self.quietSelectedFillOpacity : 0)
+            + (isAcknowledging ? Self.acknowledgementFillBoost * acknowledgementStrength : 0)
+        let strokeOpacity = (isSelected ? Self.quietSelectedStrokeOpacity : 0)
+            + (isAcknowledging ? Self.acknowledgementStrokeBoost * acknowledgementStrength : 0)
+        let highlightScale = isAcknowledging && !accessibilityReduceMotion
+            ? 1 + (0.015 * acknowledgementStrength)
+            : 1
 
         return Button {
+            acknowledgeTap(for: preset)
             action()
         } label: {
             ZStack {
-                ShutterPresetIcon(openPercentage: preset.rawValue)
-                    .opacity(displaysCheckmark ? shutterIconOpacity : 1)
-                    .padding(4)
+                RoundedRectangle(cornerRadius: Self.targetTileCornerRadius, style: .continuous)
+                    .fill(Self.targetAccent.opacity(Double(fillOpacity)))
+                    .padding(.horizontal, Self.targetTileHorizontalInset)
+                    .padding(.vertical, Self.targetTileVerticalInset)
 
-                if displaysCheckmark {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Color(red: 0.21, green: 0.78, blue: 0.42))
-                        .opacity(checkmarkOpacity)
-                }
+                RoundedRectangle(cornerRadius: Self.targetTileCornerRadius, style: .continuous)
+                    .stroke(
+                        Self.targetAccent.opacity(Double(strokeOpacity)),
+                        lineWidth: isSelected || isAcknowledging ? 1.15 : 0
+                    )
+                    .padding(.horizontal, Self.targetTileHorizontalInset)
+                    .padding(.vertical, Self.targetTileVerticalInset)
+
+                ShutterPresetIcon(openPercentage: preset.rawValue)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 5)
             }
-            .opacity(isSelected ? 1 : 0.86)
+            .shadow(
+                color: Self.targetAccent.opacity(Double((isSelected ? 0.10 : 0) + (0.16 * acknowledgementStrength))),
+                radius: isSelected || isAcknowledging ? 5 : 0,
+                x: 0,
+                y: 2
+            )
+            .scaleEffect(highlightScale)
             .frame(maxWidth: .infinity)
             .frame(height: 42)
+            .opacity(isSelected ? 1 : 0.88)
         }
-        .buttonStyle(.plain)
-        .contentShape(.rect)
+        .buttonStyle(ShutterPresetButtonStyle())
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .accessibilityLabel(preset.accessibilityLabel)
         .accessibilityHint("Set shutter target")
+        .accessibilityValue(isSelected ? "Selected target" : "Available target")
     }
 
-    private func playCheckAnimation(for movingTarget: Int?) {
-        guard let movingTarget else {
-            checkAnimationTask?.cancel()
-            checkAnimationTask = nil
-            resetCheckAnimationState()
-            return
+    private func acknowledgeTap(for preset: ShutterPreset) {
+#if os(iOS)
+        let feedbackGenerator = UIImpactFeedbackGenerator(style: .light)
+        feedbackGenerator.impactOccurred(intensity: 0.7)
+#endif
+
+        acknowledgementTask?.cancel()
+        acknowledgedPreset = preset.rawValue
+
+        var instantTransaction = Transaction(animation: nil)
+        instantTransaction.disablesAnimations = true
+        withTransaction(instantTransaction) {
+            acknowledgementStrength = accessibilityReduceMotion ? 0 : 1
         }
 
-        guard lastAnimatedTarget != movingTarget else { return }
-
-        checkAnimationTask?.cancel()
-        checkAnimationTask = nil
-
-        lastAnimatedTarget = movingTarget
-        animatedCheckTarget = movingTarget
-        shutterIconOpacity = 1
-        checkmarkOpacity = 0
-
-        withAnimation(.easeInOut(duration: 0.18)) {
-            shutterIconOpacity = 0
-            checkmarkOpacity = 1
+        if !accessibilityReduceMotion {
+            withAnimation(.easeOut(duration: 0.18)) {
+                acknowledgementStrength = 0
+            }
         }
 
-        checkAnimationTask = Task { @MainActor [movingTarget] in
-            do {
-                try await Task.sleep(for: .milliseconds(520))
-            } catch {
-                return
+        let acknowledgedValue = preset.rawValue
+        acknowledgementTask = Task { @MainActor [acknowledgedValue] in
+            if !accessibilityReduceMotion {
+                do {
+                    try await Task.sleep(for: .milliseconds(220))
+                } catch {
+                    return
+                }
             }
 
-            guard animatedCheckTarget == movingTarget else { return }
-
-            withAnimation(.easeInOut(duration: 0.24)) {
-                shutterIconOpacity = 1
-                checkmarkOpacity = 0
-            }
-
-            do {
-                try await Task.sleep(for: .milliseconds(220))
-            } catch {
-                return
-            }
-
-            guard animatedCheckTarget == movingTarget else { return }
-            animatedCheckTarget = nil
+            guard acknowledgedPreset == acknowledgedValue else { return }
+            acknowledgedPreset = nil
+            acknowledgementTask = nil
         }
     }
 
-    private func resetCheckAnimationState() {
-        animatedCheckTarget = nil
-        lastAnimatedTarget = nil
-        shutterIconOpacity = 1
-        checkmarkOpacity = 0
+    private func resetAcknowledgement() {
+        acknowledgementTask?.cancel()
+        acknowledgementTask = nil
+        acknowledgedPreset = nil
+        acknowledgementStrength = 0
+    }
+}
+
+private struct ShutterPresetButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .opacity(configuration.isPressed ? 0.96 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
 private struct ShutterLinearGauge: View {
     let position: Int
     let isDimmed: Bool
-    let showsMovingOutline: Bool
-
-    @State private var movingDashPhase: CGFloat = 0
 
     private static let outlineLineWidth: CGFloat = 1.3
-    private static let movingSegmentRatio: CGFloat = 0.16
     private static let fillGradient = LinearGradient(
         colors: [
             Color(red: 0.05, green: 0.50, blue: 0.78),
             Color(red: 0.27, green: 0.67, blue: 0.90),
-        ],
-        startPoint: .leading,
-        endPoint: .trailing
-    )
-
-    private static let movingOutlineGradient = LinearGradient(
-        colors: [
-            Color.white.opacity(0.95),
-            Color(red: 0.25, green: 0.80, blue: 0.58),
-            Color.white.opacity(0.9),
         ],
         startPoint: .leading,
         endPoint: .trailing
@@ -196,7 +206,6 @@ private struct ShutterLinearGauge: View {
             let width = max(proxy.size.width, 0)
             let progress = CGFloat(clampedPosition) / 100
             let fillWidth = width * progress
-            let perimeter = outlinePerimeter(for: proxy.size)
             let trackShape = Capsule(style: .continuous)
 
             ZStack(alignment: .leading) {
@@ -207,66 +216,13 @@ private struct ShutterLinearGauge: View {
                     .fill(Self.fillGradient)
                     .opacity(fillOpacity)
                     .frame(width: fillWidth)
-                    .animation(.easeInOut(duration: 0.26), value: clampedPosition)
             }
             .clipShape(trackShape.inset(by: Self.outlineLineWidth / 2))
             .overlay {
                 trackShape
                     .stroke(Color.primary.opacity(0.82), lineWidth: Self.outlineLineWidth)
             }
-            .overlay {
-                if showsMovingOutline, perimeter > 0 {
-                    trackShape
-                        .stroke(
-                            Self.movingOutlineGradient,
-                            style: movingOutlineStrokeStyle(for: perimeter)
-                        )
-                        .opacity(0.98)
-                }
-            }
-            .onAppear {
-                updateOutlineAnimation(isMoving: showsMovingOutline, perimeter: perimeter)
-            }
-            .onChange(of: showsMovingOutline) { _, isMoving in
-                updateOutlineAnimation(isMoving: isMoving, perimeter: perimeter)
-            }
-            .onChange(of: perimeter) { _, newPerimeter in
-                guard showsMovingOutline else { return }
-                updateOutlineAnimation(isMoving: true, perimeter: newPerimeter)
-            }
         }
-    }
-
-    private func movingOutlineStrokeStyle(for perimeter: CGFloat) -> StrokeStyle {
-        let segmentLength = max(perimeter * Self.movingSegmentRatio, 14)
-        let dashGap = max(perimeter * 2, segmentLength + 1)
-        return StrokeStyle(
-            lineWidth: Self.outlineLineWidth + 0.85,
-            lineCap: .round,
-            lineJoin: .round,
-            dash: [segmentLength, dashGap],
-            dashPhase: movingDashPhase
-        )
-    }
-
-    private func outlinePerimeter(for size: CGSize) -> CGFloat {
-        let width = max(size.width, 0)
-        let height = max(size.height, 0)
-        guard width > 0, height > 0 else { return 0 }
-        let straightSection = max(width - height, 0)
-        let radius = height / 2
-        return (2 * straightSection) + (2 * .pi * radius)
-    }
-
-    private func updateOutlineAnimation(isMoving: Bool, perimeter: CGFloat) {
-        if isMoving, perimeter > 0 {
-            movingDashPhase = 0
-            withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
-                movingDashPhase = -perimeter
-            }
-            return
-        }
-        movingDashPhase = 0
     }
 }
 
