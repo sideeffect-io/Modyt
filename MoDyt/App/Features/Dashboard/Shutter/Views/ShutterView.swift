@@ -3,6 +3,14 @@ import SwiftUI
 import UIKit
 #endif
 
+private func performWithoutAnimation(_ updates: () -> Void) {
+    var transaction = Transaction(animation: nil)
+    transaction.disablesAnimations = true
+    withTransaction(transaction) {
+        updates()
+    }
+}
+
 struct ShutterView: View {
     @Environment(\.shutterStoreDependencies) private var shutterStoreDependencies
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
@@ -14,13 +22,13 @@ struct ShutterView: View {
     @State private var acknowledgementTask: Task<Void, Never>?
 
     private static let targetAccent = Color(red: 0.08, green: 0.51, blue: 0.80)
-    private static let quietSelectedFillOpacity: CGFloat = 0.22
-    private static let quietSelectedStrokeOpacity: CGFloat = 0.46
-    private static let acknowledgementFillBoost: CGFloat = 0.12
-    private static let acknowledgementStrokeBoost: CGFloat = 0.18
+    private static let quietSelectedFillOpacity: CGFloat = 0.30
+    private static let quietSelectedStrokeOpacity: CGFloat = 0.62
+    private static let acknowledgementBloomOpacity: CGFloat = 0.34
+    private static let acknowledgementBloomScale: CGFloat = 0.14
+    private static let acknowledgementBloomBlur: CGFloat = 5
     private static let targetTileCornerRadius: CGFloat = 8
-    private static let targetTileHorizontalInset: CGFloat = 2
-    private static let targetTileVerticalInset: CGFloat = 1
+    private static let targetTileInset: CGFloat = 1
 
     private var normalizedDeviceIds: [DeviceIdentifier] {
         deviceIds.uniquePreservingOrder()
@@ -39,7 +47,9 @@ struct ShutterView: View {
         ) { store in
             VStack(spacing: 10) {
                 ShutterLinearGauge(
-                    position: store.gaugePosition,
+                    gaugePosition: store.gaugePosition,
+                    movingTarget: store.movingTarget,
+                    isMoving: store.isMoving,
                     isDimmed: store.isGaugeDimmed
                 )
                 .frame(height: 24)
@@ -50,7 +60,6 @@ struct ShutterView: View {
                     ForEach(ShutterPreset.allCases) { preset in
                         presetButton(
                             preset: preset,
-                            target: store.target,
                             movingTarget: store.movingTarget
                         ) {
                             store.send(.targetWasSetInApp(target: preset.rawValue))
@@ -71,19 +80,20 @@ struct ShutterView: View {
 
     private func presetButton(
         preset: ShutterPreset,
-        target: Int?,
         movingTarget: Int?,
         action: @escaping () -> Void
     ) -> some View {
-        let isSelected = target == preset.rawValue || movingTarget == preset.rawValue
+        let isSelected = movingTarget == preset.rawValue
         let isAcknowledging = acknowledgedPreset == preset.rawValue
-        let fillOpacity = (isSelected ? Self.quietSelectedFillOpacity : 0)
-            + (isAcknowledging ? Self.acknowledgementFillBoost * acknowledgementStrength : 0)
-        let strokeOpacity = (isSelected ? Self.quietSelectedStrokeOpacity : 0)
-            + (isAcknowledging ? Self.acknowledgementStrokeBoost * acknowledgementStrength : 0)
-        let highlightScale = isAcknowledging && !accessibilityReduceMotion
-            ? 1 + (0.015 * acknowledgementStrength)
-            : 1
+        let fillOpacity = isSelected ? Self.quietSelectedFillOpacity : 0
+        let strokeOpacity = isSelected ? Self.quietSelectedStrokeOpacity : 0
+        let bloomOpacity = isAcknowledging ? Self.acknowledgementBloomOpacity * acknowledgementStrength : 0
+        let bloomScale = accessibilityReduceMotion
+            ? 1
+            : 1 + (Self.acknowledgementBloomScale * acknowledgementStrength)
+        let bloomBlur = accessibilityReduceMotion
+            ? 0
+            : Self.acknowledgementBloomBlur * acknowledgementStrength
 
         return Button {
             acknowledgeTap(for: preset)
@@ -91,29 +101,32 @@ struct ShutterView: View {
         } label: {
             ZStack {
                 RoundedRectangle(cornerRadius: Self.targetTileCornerRadius, style: .continuous)
+                    .stroke(Self.targetAccent.opacity(Double(bloomOpacity)), lineWidth: 2.2)
+                    .padding(Self.targetTileInset)
+                    .scaleEffect(bloomScale)
+                    .blur(radius: bloomBlur)
+
+                RoundedRectangle(cornerRadius: Self.targetTileCornerRadius, style: .continuous)
                     .fill(Self.targetAccent.opacity(Double(fillOpacity)))
-                    .padding(.horizontal, Self.targetTileHorizontalInset)
-                    .padding(.vertical, Self.targetTileVerticalInset)
+                    .padding(Self.targetTileInset)
 
                 RoundedRectangle(cornerRadius: Self.targetTileCornerRadius, style: .continuous)
                     .stroke(
                         Self.targetAccent.opacity(Double(strokeOpacity)),
                         lineWidth: isSelected || isAcknowledging ? 1.15 : 0
                     )
-                    .padding(.horizontal, Self.targetTileHorizontalInset)
-                    .padding(.vertical, Self.targetTileVerticalInset)
+                    .padding(Self.targetTileInset)
 
                 ShutterPresetIcon(openPercentage: preset.rawValue)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 5)
             }
             .shadow(
-                color: Self.targetAccent.opacity(Double((isSelected ? 0.10 : 0) + (0.16 * acknowledgementStrength))),
-                radius: isSelected || isAcknowledging ? 5 : 0,
+                color: Self.targetAccent.opacity(Double((isSelected ? 0.18 : 0) + (0.12 * acknowledgementStrength))),
+                radius: isSelected || isAcknowledging ? 6 : 0,
                 x: 0,
                 y: 2
             )
-            .scaleEffect(highlightScale)
             .frame(maxWidth: .infinity)
             .frame(height: 42)
             .opacity(isSelected ? 1 : 0.88)
@@ -141,7 +154,7 @@ struct ShutterView: View {
         }
 
         if !accessibilityReduceMotion {
-            withAnimation(.easeOut(duration: 0.18)) {
+            withAnimation(.easeOut(duration: 0.42)) {
                 acknowledgementStrength = 0
             }
         }
@@ -150,7 +163,7 @@ struct ShutterView: View {
         acknowledgementTask = Task { @MainActor [acknowledgedValue] in
             if !accessibilityReduceMotion {
                 do {
-                    try await Task.sleep(for: .milliseconds(220))
+                    try await Task.sleep(for: .milliseconds(520))
                 } catch {
                     return
                 }
@@ -180,48 +193,331 @@ private struct ShutterPresetButtonStyle: ButtonStyle {
 }
 
 private struct ShutterLinearGauge: View {
-    let position: Int
+    @Environment(\.colorScheme) private var colorScheme
+
+    let gaugePosition: Int
+    let movingTarget: Int?
+    let isMoving: Bool
     let isDimmed: Bool
 
-    private static let outlineLineWidth: CGFloat = 1.3
-    private static let fillGradient = LinearGradient(
-        colors: [
-            Color(red: 0.05, green: 0.50, blue: 0.78),
-            Color(red: 0.27, green: 0.67, blue: 0.90),
-        ],
-        startPoint: .leading,
-        endPoint: .trailing
-    )
+    @State private var displayedGaugePosition: Int
+    @State private var retainedDestinationGaugePosition: Int?
+    @State private var fadingDestinationMarkerOpacity: CGFloat
+    @State private var isSuppressingLiveGaugeSync = false
+    @State private var completionAnimationID = 0
 
-    private var clampedPosition: Int {
-        min(max(position, 0), 100)
+    private static let outlineLineWidth: CGFloat = 1.3
+    private static let progressFillColor = Color(red: 53 / 255, green: 104 / 255, blue: 154 / 255)
+        .opacity(0.4)
+    private static let positionMarkerColor = Color(red: 53 / 255, green: 104 / 255, blue: 154 / 255)
+    private static let positionMarkerWidth: CGFloat = 12
+    private static let destinationMarkerWidth: CGFloat = 7
+    private static let destinationMarkerBaseOpacity: CGFloat = 0.7
+    private static let completionAnimation = Animation.easeInOut(duration: 0.82)
+
+    init(
+        gaugePosition: Int,
+        movingTarget: Int?,
+        isMoving: Bool,
+        isDimmed: Bool
+    ) {
+        self.gaugePosition = gaugePosition
+        self.movingTarget = movingTarget
+        self.isMoving = isMoving
+        self.isDimmed = isDimmed
+
+        let initialGaugePosition = Self.clampGaugePosition(gaugePosition)
+        let initialDestinationGaugePosition = isMoving
+            ? movingTarget.map(ShutterPositionMapper.gaugePosition(from:)).map(Self.clampGaugePosition)
+            : nil
+
+        _displayedGaugePosition = State(initialValue: initialGaugePosition)
+        _retainedDestinationGaugePosition = State(initialValue: initialDestinationGaugePosition)
+        _fadingDestinationMarkerOpacity = State(initialValue: 0)
     }
 
-    private var fillOpacity: Double {
-        isDimmed ? 0.6 : 1
+    private var clampedPosition: Int {
+        Self.clampGaugePosition(gaugePosition)
+    }
+
+    private var renderedGaugePosition: Int {
+        return displayedGaugePosition
+    }
+
+    private var destinationMarkerColor: Color {
+        colorScheme == .dark ? .white : .black
+    }
+
+    private var destinationMarkerStrokeColor: Color {
+        colorScheme == .dark ? Color.black.opacity(0.18) : Color.white.opacity(0.22)
+    }
+
+    private var renderedDestinationGaugePosition: Int? {
+        retainedDestinationGaugePosition.map(Self.clampGaugePosition)
+    }
+
+    private static func clampGaugePosition(_ value: Int) -> Int {
+        min(max(value, 0), ShutterPositionMapper.maximumGaugePosition)
+    }
+
+    private func destinationGaugePosition(for target: Int?) -> Int? {
+        target.map(ShutterPositionMapper.gaugePosition(from:))
+            .map(Self.clampGaugePosition)
+    }
+
+    private func completionGaugePosition(for destinationGaugePosition: Int?) -> Int {
+        destinationGaugePosition ?? clampedPosition
+    }
+
+    private func syncInitialPresentationState() {
+        performWithoutAnimation {
+            displayedGaugePosition = clampedPosition
+            retainedDestinationGaugePosition = isMoving ? destinationGaugePosition(for: movingTarget) : nil
+            fadingDestinationMarkerOpacity = 0
+            isSuppressingLiveGaugeSync = isMoving
+            completionAnimationID = 0
+        }
+    }
+
+    private func handleMovingChange(_ moving: Bool) {
+        if moving {
+            performWithoutAnimation {
+                displayedGaugePosition = clampedPosition
+                retainedDestinationGaugePosition = destinationGaugePosition(for: movingTarget)
+                fadingDestinationMarkerOpacity = 0
+                isSuppressingLiveGaugeSync = true
+                completionAnimationID += 1
+            }
+            return
+        }
+
+        let destinationGaugePositionForCompletion = retainedDestinationGaugePosition
+        let completionGaugePosition = completionGaugePosition(for: destinationGaugePositionForCompletion)
+        let completionRunID = self.completionAnimationID + 1
+        performWithoutAnimation {
+            fadingDestinationMarkerOpacity = destinationGaugePositionForCompletion == nil ? 0 : Self.destinationMarkerBaseOpacity
+            isSuppressingLiveGaugeSync = true
+            self.completionAnimationID = completionRunID
+        }
+
+        withAnimation(
+            Self.completionAnimation,
+            completionCriteria: .logicallyComplete
+        ) {
+            displayedGaugePosition = completionGaugePosition
+            fadingDestinationMarkerOpacity = 0
+        } completion: {
+            guard self.completionAnimationID == completionRunID else { return }
+
+            performWithoutAnimation {
+                retainedDestinationGaugePosition = nil
+                fadingDestinationMarkerOpacity = 0
+                isSuppressingLiveGaugeSync = false
+            }
+        }
+    }
+
+    private func handleMovingTargetChange(_ target: Int?) {
+        guard isMoving else { return }
+        performWithoutAnimation {
+            retainedDestinationGaugePosition = destinationGaugePosition(for: target)
+            fadingDestinationMarkerOpacity = 0
+        }
+    }
+
+    private func handleGaugePositionChange(_ position: Int) {
+        let clampedPosition = Self.clampGaugePosition(position)
+
+        guard !isMoving else { return }
+        guard !isSuppressingLiveGaugeSync else { return }
+
+        performWithoutAnimation {
+            displayedGaugePosition = clampedPosition
+        }
     }
 
     var body: some View {
         GeometryReader { proxy in
             let width = max(proxy.size.width, 0)
-            let progress = CGFloat(clampedPosition) / 100
+            let maximumGaugePosition = CGFloat(ShutterPositionMapper.maximumGaugePosition)
+            let progress = CGFloat(renderedGaugePosition) / maximumGaugePosition
             let fillWidth = width * progress
+            let displayedFillWidth = fillWidth > 0 ? max(fillWidth, Self.positionMarkerWidth) : 0
             let trackShape = Capsule(style: .continuous)
+            let clippedTrackShape = trackShape.inset(by: Self.outlineLineWidth / 2)
+            let markerOffset = min(
+                max(displayedFillWidth - Self.positionMarkerWidth, 0),
+                max(width - Self.positionMarkerWidth, 0)
+            )
+            let destinationMarkerOffset = renderedDestinationGaugePosition.map { destinationGaugePosition in
+                let destinationProgress = CGFloat(destinationGaugePosition) / maximumGaugePosition
+                let destinationFillWidth = width * destinationProgress
+                let displayedDestinationFillWidth = destinationFillWidth > 0
+                    ? max(destinationFillWidth, Self.destinationMarkerWidth)
+                    : 0
+                return min(
+                    max(displayedDestinationFillWidth - Self.destinationMarkerWidth, 0),
+                    max(width - Self.destinationMarkerWidth, 0)
+                )
+            }
 
             ZStack(alignment: .leading) {
                 trackShape
-                    .fill(Color.primary.opacity(0.08))
+                    .fill(Color.primary.opacity(isDimmed ? 0.08 : 0.1))
 
-                trackShape
-                    .fill(Self.fillGradient)
-                    .opacity(fillOpacity)
-                    .frame(width: fillWidth)
+                ZStack(alignment: .leading) {
+                    Rectangle()
+                        .fill(Self.progressFillColor)
+                        .frame(width: displayedFillWidth)
+
+                    Rectangle()
+                        .fill(Self.positionMarkerColor)
+                        .frame(width: Self.positionMarkerWidth)
+                        .shadow(color: Self.positionMarkerColor.opacity(0.28), radius: 2, x: 0, y: 0)
+                        .offset(x: markerOffset)
+
+                    if let destinationMarkerOffset {
+                        ShutterDestinationMarkerView(
+                            color: destinationMarkerColor,
+                            strokeColor: destinationMarkerStrokeColor,
+                            width: Self.destinationMarkerWidth,
+                            isPulsing: isMoving,
+                            pulseKey: retainedDestinationGaugePosition,
+                            restingOpacity: Self.destinationMarkerBaseOpacity,
+                            fadeOpacity: fadingDestinationMarkerOpacity
+                        )
+                            .offset(x: destinationMarkerOffset)
+                            .zIndex(1)
+                    }
+                }
             }
-            .clipShape(trackShape.inset(by: Self.outlineLineWidth / 2))
+            .clipShape(clippedTrackShape)
             .overlay {
                 trackShape
                     .stroke(Color.primary.opacity(0.82), lineWidth: Self.outlineLineWidth)
             }
+        }
+        .onAppear(perform: syncInitialPresentationState)
+        .onChange(of: isMoving) { _, moving in
+            handleMovingChange(moving)
+        }
+        .onChange(of: movingTarget) { _, target in
+            handleMovingTargetChange(target)
+        }
+        .onChange(of: gaugePosition) { _, position in
+            handleGaugePositionChange(position)
+        }
+    }
+}
+
+private struct ShutterDestinationMarkerView: View {
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+
+    let color: Color
+    let strokeColor: Color
+    let width: CGFloat
+    let isPulsing: Bool
+    let pulseKey: Int?
+    let restingOpacity: CGFloat
+    let fadeOpacity: CGFloat
+
+    @State private var pulseAtMinimumOpacity = false
+
+    private static let minimumOpacity: CGFloat = 0.02
+    private static let pulseAnimation = Animation.easeInOut(duration: 1.0).repeatForever(autoreverses: true)
+    private static let maximumGlowOpacity: CGFloat = 0.92
+    private static let minimumGlowOpacity: CGFloat = 0.12
+    private static let maximumGlowRadius: CGFloat = 9
+    private static let minimumGlowRadius: CGFloat = 1.5
+
+    private var pulseAnimationToken: String {
+        "\(isPulsing)-\(pulseKey.map(String.init) ?? "nil")"
+    }
+
+    private var renderedOpacity: CGFloat {
+        if isPulsing {
+            if accessibilityReduceMotion {
+                return restingOpacity
+            }
+
+            return pulseAtMinimumOpacity ? Self.minimumOpacity : restingOpacity
+        }
+
+        return fadeOpacity
+    }
+
+    private var renderedGlowOpacity: CGFloat {
+        if isPulsing {
+            if accessibilityReduceMotion {
+                return 0
+            }
+
+            return pulseAtMinimumOpacity ? Self.minimumGlowOpacity : Self.maximumGlowOpacity
+        }
+
+        guard restingOpacity > 0 else { return 0 }
+        return Self.maximumGlowOpacity * (fadeOpacity / restingOpacity)
+    }
+
+    private var renderedGlowRadius: CGFloat {
+        if isPulsing {
+            if accessibilityReduceMotion {
+                return 0
+            }
+
+            return pulseAtMinimumOpacity ? Self.minimumGlowRadius : Self.maximumGlowRadius
+        }
+
+        guard restingOpacity > 0 else { return 0 }
+        return Self.maximumGlowRadius * (fadeOpacity / restingOpacity)
+    }
+
+    var body: some View {
+        Rectangle()
+            .fill(color)
+            .frame(width: width)
+            .overlay {
+                Rectangle()
+                    .stroke(strokeColor, lineWidth: 0.6)
+            }
+            .opacity(Double(renderedOpacity))
+            .shadow(
+                color: color.opacity(Double(renderedGlowOpacity)),
+                radius: renderedGlowRadius,
+                x: 0,
+                y: 0
+            )
+            .task(id: pulseAnimationToken) {
+                await restartPulseIfNeeded()
+            }
+    }
+
+    @MainActor
+    private func restartPulseIfNeeded() async {
+        guard isPulsing else {
+            performWithoutAnimation {
+                pulseAtMinimumOpacity = false
+            }
+            return
+        }
+
+        guard !accessibilityReduceMotion else {
+            performWithoutAnimation {
+                pulseAtMinimumOpacity = false
+            }
+            return
+        }
+
+        performWithoutAnimation {
+            pulseAtMinimumOpacity = false
+        }
+
+        await Task.yield()
+
+        guard !Task.isCancelled else { return }
+
+        withAnimation(Self.pulseAnimation) {
+            pulseAtMinimumOpacity = true
         }
     }
 }
