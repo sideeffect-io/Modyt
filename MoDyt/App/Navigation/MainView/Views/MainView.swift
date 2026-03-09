@@ -94,6 +94,7 @@ struct MainView: View {
             tabContent()
                 .blur(radius: shouldBlockInteraction ? 3 : 0)
                 .allowsHitTesting(!shouldBlockInteraction)
+                .accessibilityHidden(shouldBlockInteraction)
 
             switch presentation {
             case .none:
@@ -246,6 +247,7 @@ private struct MainProgressOverlay: View {
             .glassCard(cornerRadius: 28, interactive: false)
             .padding()
         }
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -288,5 +290,6 @@ private struct MainErrorPopup: View {
             .glassCard(cornerRadius: 28, interactive: false)
             .padding()
         }
+        .accessibilityElement(children: .contain)
     }
 }

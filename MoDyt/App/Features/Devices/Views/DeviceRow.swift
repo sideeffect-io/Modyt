@@ -14,6 +14,7 @@ struct DeviceRow: View {
 
             FavoriteOrbButton(
                 isFavorite: device.isFavorite,
+                accessibilityContext: device.name,
                 action: onToggleFavorite
             )
         }

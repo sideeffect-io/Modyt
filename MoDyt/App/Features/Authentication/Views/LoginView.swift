@@ -2,8 +2,14 @@ import SwiftUI
 import DeltaDoreClient
 
 struct LoginView: View {
+    private enum Field: Hashable {
+        case email
+        case password
+    }
+
     @Bindable var store: AuthenticationStore
     let loginState: LoginState
+    @FocusState private var focusedField: Field?
 
     var body: some View {
         ScrollView {
@@ -33,27 +39,35 @@ struct LoginView: View {
         VStack(spacing: 16) {
             TextField(
                 "Email",
-                text: Binding(
-                    get: { loginState.email },
-                    set: { store.send(.loginEmailChanged($0)) }
-                )
+                text: emailBinding
             )
 #if os(iOS)
             .textInputAutocapitalization(.never)
 #endif
+            .autocorrectionDisabled()
+            .keyboardType(.emailAddress)
+            .textContentType(.username)
+            .submitLabel(.next)
+            .focused($focusedField, equals: .email)
+            .onSubmit {
+                focusedField = .password
+            }
             .textFieldStyle(.roundedBorder)
 
             SecureField(
                 "Password",
-                text: Binding(
-                    get: { loginState.password },
-                    set: { store.send(.loginPasswordChanged($0)) }
-                )
+                text: passwordBinding
             )
+            .textContentType(.password)
+            .submitLabel(.go)
+            .focused($focusedField, equals: .password)
+            .onSubmit {
+                loadSites()
+            }
             .textFieldStyle(.roundedBorder)
 
             Button {
-                store.send(.loadSitesTapped)
+                loadSites()
             } label: {
                 if loginState.isLoadingSites {
                     ProgressView()
@@ -93,9 +107,11 @@ struct LoginView: View {
                     .font(.system(.footnote, design: .rounded))
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(Array(loginState.sites.enumerated()), id: \.element.id) { index, site in
+                let lastSiteID = loginState.sites.last?.id
+
+                ForEach(loginState.sites, id: \.id) { site in
                     Button {
-                        store.send(.siteSelected(index))
+                        store.send(.siteSelected(site.id))
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "house")
@@ -107,7 +123,7 @@ struct LoginView: View {
                                     .foregroundStyle(.secondary)
                             }
                             Spacer()
-                            if loginState.selectedSiteIndex == index {
+                            if loginState.selectedSiteID == site.id {
                                 Image(systemName: "checkmark.circle.fill")
                                     .foregroundStyle(.green)
                             }
@@ -115,7 +131,7 @@ struct LoginView: View {
                         .padding(.vertical, 6)
                     }
                     .buttonStyle(.plain)
-                    if index < loginState.sites.count - 1 {
+                    if site.id != lastSiteID {
                         Divider().opacity(0.4)
                     }
                 }
@@ -142,5 +158,24 @@ struct LoginView: View {
         }
         .buttonStyle(.borderedProminent)
         .disabled(!loginState.canConnect)
+    }
+
+    private var emailBinding: Binding<String> {
+        Binding(
+            get: { loginState.email },
+            set: { store.send(.loginEmailChanged($0)) }
+        )
+    }
+
+    private var passwordBinding: Binding<String> {
+        Binding(
+            get: { loginState.password },
+            set: { store.send(.loginPasswordChanged($0)) }
+        )
+    }
+
+    private func loadSites() {
+        guard loginState.canLoadSites, !loginState.isLoadingSites else { return }
+        store.send(.loadSitesTapped)
     }
 }

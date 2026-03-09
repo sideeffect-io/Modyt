@@ -3,10 +3,13 @@ import UIKit
 
 struct DashboardDeviceCardView: View {
     @Environment(\.dashboardDeviceCardStoreDependencies) private var dashboardDeviceCardStoreDependencies
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let favorite: FavoriteItem
 
-    private let dashboardCardHeight: CGFloat = 194
+    @ScaledMetric(relativeTo: .body) private var dashboardCardMinHeight: CGFloat = 194
+    @ScaledMetric(relativeTo: .title3) private var cardIconSize: CGFloat = 22
+    @ScaledMetric(relativeTo: .title3) private var cardIconFrame: CGFloat = 36
 
     var body: some View {
         WithStoreView(
@@ -51,7 +54,7 @@ struct DashboardDeviceCardView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
         }
         .padding(16)
-        .frame(height: dashboardCardHeight, alignment: .top)
+        .frame(minHeight: dashboardCardMinHeight, alignment: .top)
         .glassCard(cornerRadius: 22)
     }
 
@@ -75,7 +78,7 @@ struct DashboardDeviceCardView: View {
             controlContent(for: favorite)
         }
         .padding(16)
-        .frame(height: dashboardCardHeight, alignment: .top)
+        .frame(minHeight: dashboardCardMinHeight, alignment: .top)
         .glassCard(cornerRadius: 22)
     }
 
@@ -84,20 +87,25 @@ struct DashboardDeviceCardView: View {
         titleLineLimit: Int,
         onFavoriteTapped: @escaping () -> Void
     ) -> some View {
-        HStack(alignment: .center, spacing: 10) {
+        let effectiveTitleLineLimit = dynamicTypeSize.isAccessibilitySize
+            ? max(titleLineLimit, 2)
+            : titleLineLimit
+
+        return HStack(alignment: .center, spacing: 10) {
             Image(systemName: iconSystemName(for: favorite))
-                .font(.system(size: 22, weight: .semibold))
-                .frame(width: 36, height: 36)
+                .font(.system(size: cardIconSize, weight: .semibold))
+                .frame(width: cardIconFrame, height: cardIconFrame)
 
             Text(favorite.name)
                 .font(.system(.headline, design: .rounded))
-                .lineLimit(titleLineLimit)
+                .lineLimit(effectiveTitleLineLimit)
                 .minimumScaleFactor(0.9)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             FavoriteOrbButton(
                 isFavorite: true,
                 size: 32,
+                accessibilityContext: favorite.name,
                 action: onFavoriteTapped
             )
         }

@@ -5,6 +5,9 @@ struct ThermostatView: View {
 
     let identifier: DeviceIdentifier
 
+    @ScaledMetric(relativeTo: .largeTitle) private var primaryValueFontSize: CGFloat = 34
+    @ScaledMetric(relativeTo: .title2) private var secondaryValueFontSize: CGFloat = 30
+
     var body: some View {
         WithStoreView(
             store: ThermostatStore(
@@ -35,7 +38,7 @@ struct ThermostatView: View {
             .accessibilityValue(accessibilityValue(for: state))
         } else {
             Text("--")
-                .font(.system(size: 34, weight: .bold, design: .rounded))
+                .font(.system(size: primaryValueFontSize, weight: .bold, design: .rounded))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .accessibilityLabel("Thermostat unavailable")
@@ -50,7 +53,7 @@ struct ThermostatView: View {
         if let temperature {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(temperature.value, format: .number.precision(.fractionLength(1)))
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .font(.system(size: primaryValueFontSize, weight: .bold, design: .rounded))
                     .monospacedDigit()
                 if let unitSymbol = temperature.unitSymbol {
                     Text(unitSymbol)
@@ -65,7 +68,7 @@ struct ThermostatView: View {
                     .font(.system(.caption, design: .rounded).weight(.semibold))
                     .foregroundStyle(.secondary)
                 Text(setpoint.value, format: .number.precision(.fractionLength(1)))
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .font(.system(size: secondaryValueFontSize, weight: .bold, design: .rounded))
                     .monospacedDigit()
                 if let unitSymbol = setpoint.unitSymbol {
                     Text(unitSymbol)
@@ -76,7 +79,7 @@ struct ThermostatView: View {
             .frame(maxWidth: .infinity, alignment: .center)
         } else {
             Text("--")
-                .font(.system(size: 34, weight: .bold, design: .rounded))
+                .font(.system(size: primaryValueFontSize, weight: .bold, design: .rounded))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .center)
         }

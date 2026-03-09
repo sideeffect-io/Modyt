@@ -6,6 +6,8 @@ struct TemperatureView: View {
 
     let identifier: DeviceIdentifier
 
+    @ScaledMetric(relativeTo: .largeTitle) private var valueFontSize: CGFloat = 40
+
     var body: some View {
         WithStoreView(
             store: TemperatureStore(
@@ -36,7 +38,7 @@ struct TemperatureView: View {
             .accessibilityValue(accessibilityValue(for: descriptor))
         } else {
             Text("--")
-                .font(.system(size: 40, weight: .bold, design: .rounded))
+                .font(.system(size: valueFontSize, weight: .bold, design: .rounded))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 .accessibilityLabel("Temperature unavailable")
@@ -78,7 +80,7 @@ struct TemperatureView: View {
     private func valueLabel(descriptor: TemperatureStore.Descriptor) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
             Text(descriptor.value, format: .number.precision(.fractionLength(1)))
-                .font(.system(size: 40, weight: .bold, design: .rounded))
+                .font(.system(size: valueFontSize, weight: .bold, design: .rounded))
                 .monospacedDigit()
 
             if let unitSymbol = descriptor.unitSymbol {

@@ -48,8 +48,13 @@ private struct SceneExecutionFeedbackRow: View {
 }
 
 private struct SceneExecutionButton: View {
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+
     let isExecuting: Bool
     let action: () -> Void
+
+    @ScaledMetric(relativeTo: .title2) private var buttonSize: CGFloat = 84
+    @ScaledMetric(relativeTo: .title2) private var iconSize: CGFloat = 34
 
     var body: some View {
         Button(action: action) {
@@ -68,7 +73,7 @@ private struct SceneExecutionButton: View {
                             .fill(.white.opacity(isExecuting ? 0.08 : 0.05))
                             .padding(1.2)
                     }
-                    .scaleEffect(isExecuting ? 1.08 : 1)
+                    .scaleEffect(isExecuting && !accessibilityReduceMotion ? 1.08 : 1)
                     .shadow(
                         color: Self.glowColor.opacity(isExecuting ? 0.42 : 0.2),
                         radius: isExecuting ? 11 : 6,
@@ -76,26 +81,15 @@ private struct SceneExecutionButton: View {
                         y: 3
                     )
                     .animation(
-                        isExecuting
+                        isExecuting && !accessibilityReduceMotion
                         ? .easeInOut(duration: 0.82).repeatForever(autoreverses: true)
                         : .easeOut(duration: 0.2),
                         value: isExecuting
                     )
 
-                Image(systemName: isExecuting ? "arrow.triangle.2.circlepath.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 34, weight: .bold))
-                    .foregroundStyle(.white)
-                    .contentTransition(.symbolEffect(.replace))
-                    .symbolEffect(.bounce, value: isExecuting)
-                    .rotationEffect(.degrees(isExecuting ? 360 : 0))
-                    .animation(
-                        isExecuting
-                        ? .linear(duration: 1.1).repeatForever(autoreverses: false)
-                        : .easeOut(duration: 0.18),
-                        value: isExecuting
-                    )
+                sceneIcon
             }
-            .frame(width: 84, height: 84)
+            .frame(width: buttonSize, height: buttonSize)
         }
         .buttonStyle(.plain)
         .disabled(isExecuting)
@@ -105,6 +99,28 @@ private struct SceneExecutionButton: View {
             ? "Wait until the scene execution finishes"
             : "Runs this scene on the gateway"
         )
+    }
+
+    @ViewBuilder
+    private var sceneIcon: some View {
+        let icon = Image(systemName: isExecuting ? "arrow.triangle.2.circlepath.circle.fill" : "play.circle.fill")
+            .font(.system(size: iconSize, weight: .bold))
+            .foregroundStyle(.white)
+            .contentTransition(.symbolEffect(.replace))
+            .rotationEffect(.degrees(isExecuting && !accessibilityReduceMotion ? 360 : 0))
+            .animation(
+                isExecuting && !accessibilityReduceMotion
+                ? .linear(duration: 1.1).repeatForever(autoreverses: false)
+                : .easeOut(duration: 0.18),
+                value: isExecuting
+            )
+
+        if accessibilityReduceMotion {
+            icon
+        } else {
+            icon
+                .symbolEffect(.bounce, value: isExecuting)
+        }
     }
 
     private static let idleFill = Color(red: 0.17, green: 0.74, blue: 0.57).opacity(0.32)

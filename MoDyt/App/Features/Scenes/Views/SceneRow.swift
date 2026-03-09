@@ -19,6 +19,7 @@ struct SceneRow: View {
 
             FavoriteOrbButton(
                 isFavorite: scene.isFavorite,
+                accessibilityContext: scene.name,
                 action: onToggleFavorite
             )
         }

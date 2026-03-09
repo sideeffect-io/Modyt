@@ -2,10 +2,15 @@ import SwiftUI
 
 struct HeatPumpView: View {
     @Environment(\.heatPumpStoreDependencies) private var heatPumpStoreDependencies
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     let identifier: DeviceIdentifier
     @State private var pendingPulseOn = false
     @State private var pendingSpinOn = false
+
+    @ScaledMetric(relativeTo: .largeTitle) private var temperatureFontSize: CGFloat = 42
+    @ScaledMetric(relativeTo: .title2) private var setPointFontSize: CGFloat = 22
+    @ScaledMetric(relativeTo: .caption) private var statusSymbolSize: CGFloat = 12
 
     var body: some View {
         WithStoreView(
@@ -20,7 +25,7 @@ struct HeatPumpView: View {
                 VStack(spacing: 12) {
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
                         Text(store.temperature, format: .number.precision(.fractionLength(1)))
-                            .font(.system(size: 42, weight: .bold, design: .rounded))
+                            .font(.system(size: temperatureFontSize, weight: .bold, design: .rounded))
                             .monospacedDigit()
 
                         Text(store.unitSymbol)
@@ -59,20 +64,20 @@ struct HeatPumpView: View {
 
                         HStack(spacing: 6) {
                             Image(systemName: "arrow.triangle.2.circlepath")
-                                .font(.system(size: 12, weight: .semibold))
-                                .frame(width: 12, height: 12)
+                                .font(.system(size: statusSymbolSize, weight: .semibold))
+                                .frame(width: statusSymbolSize, height: statusSymbolSize)
                                 .opacity(0)
                                 .accessibilityHidden(true)
 
                             Text(store.setPoint, format: .number.precision(.fractionLength(1)))
-                                .font(.system(size: 22, weight: .semibold, design: .rounded))
+                                .font(.system(size: setPointFontSize, weight: .semibold, design: .rounded))
                                 .monospacedDigit()
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
 
                             Image(systemName: "arrow.triangle.2.circlepath")
-                                .font(.system(size: 12, weight: .semibold))
-                                .frame(width: 12, height: 12)
+                                .font(.system(size: statusSymbolSize, weight: .semibold))
+                                .frame(width: statusSymbolSize, height: statusSymbolSize)
                                 .opacity(store.isSetPointBeingSet ? 1 : 0)
                                 .rotationEffect(.degrees(pendingSpinOn ? 360 : 0))
                                 .accessibilityHidden(true)
@@ -99,6 +104,9 @@ struct HeatPumpView: View {
                         .onChange(of: store.isSetPointBeingSet) { _, isPending in
                             updatePendingAnimation(isPending: isPending)
                         }
+                        .onChange(of: accessibilityReduceMotion) { _, _ in
+                            updatePendingAnimation(isPending: store.isSetPointBeingSet)
+                        }
                     }
                     .frame(maxWidth: .infinity)
                     .accessibilityElement(children: .combine)
@@ -115,6 +123,8 @@ struct HeatPumpView: View {
         if isPending {
             pendingPulseOn = false
             pendingSpinOn = false
+
+            guard !accessibilityReduceMotion else { return }
 
             withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
                 pendingPulseOn = true

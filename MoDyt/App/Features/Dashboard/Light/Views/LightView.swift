@@ -16,7 +16,6 @@ struct LightView: View {
         ) { store in
             let descriptor = store.descriptor
             let powerIsOn = descriptor.isOn
-            let percentage = Int((descriptor.normalizedLevel * 100).rounded())
 
             HStack(alignment: .center, spacing: 14) {
                 GaugeControlView(
@@ -31,6 +30,7 @@ struct LightView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
 
                 PowerClusterView(
+                    isOn: powerIsOn,
                     onToggle: {
                         requestedPowerTarget = powerIsOn ? 0.0 : 1.0
                     }
@@ -38,9 +38,7 @@ struct LightView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
             }
             .frame(maxWidth: .infinity, alignment: .center)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Driving lights")
-            .accessibilityValue("\(percentage) percent, \(powerIsOn ? "on" : "off")")
+            .accessibilityElement(children: .contain)
         }
     }
 }
@@ -55,11 +53,19 @@ private struct GaugeControlView: View {
     @State private var renderedValue: Double = 0
     @State private var hasInitialValue = false
 
+    private static let accessibilityStep: Double = 0.05
+
     var body: some View {
         let sourceValue = dragValue ?? sourceNormalizedLevel
         let clampedRenderedValue = Self.clamp(renderedValue)
         let isOn = clampedRenderedValue > 0.001
         let percentage = Int((clampedRenderedValue * 100).rounded())
+        let accessibilityBinding = Binding(
+            get: { clampedRenderedValue },
+            set: { newValue in
+                commitAccessibleValue(newValue)
+            }
+        )
 
         PathGauge(
             normalizedValue: clampedRenderedValue,
@@ -79,6 +85,11 @@ private struct GaugeControlView: View {
                 onCommit(snapped)
             }
         )
+        .accessibilityRepresentation {
+            Slider(value: accessibilityBinding, in: 0...1, step: Self.accessibilityStep) {
+                Text("Light brightness")
+            }
+        }
         .onAppear {
             guard !hasInitialValue else { return }
             renderedValue = sourceValue
@@ -117,6 +128,19 @@ private struct GaugeControlView: View {
         return abs(current - value) > 0.005
     }
 
+    private func commitAccessibleValue(_ value: Double) {
+        let snapped = Self.snap(value)
+        guard abs(renderedValue - snapped) > 0.0005 || abs(sourceNormalizedLevel - snapped) > 0.0005 else {
+            return
+        }
+
+        dragValue = nil
+        withAnimation(.easeInOut(duration: 0.22)) {
+            renderedValue = snapped
+        }
+        onCommit(snapped)
+    }
+
     private static func clamp(_ value: Double) -> Double {
         min(max(value, 0), 1)
     }
@@ -128,6 +152,7 @@ private struct GaugeControlView: View {
 }
 
 private struct PathGauge: View {
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @Environment(\.colorScheme) private var colorScheme
 
     let normalizedValue: Double
@@ -208,6 +233,9 @@ private struct PathGauge: View {
                 perimeter: Self.outlinePerimeter(radius: newRadius)
             )
         }
+        .onChange(of: accessibilityReduceMotion) { _, _ in
+            updateMovingOutlineAnimation(isMoving: showsMovingOutline, perimeter: outlinePerimeter)
+        }
     }
 
     private var trackColor: Color {
@@ -274,7 +302,7 @@ private struct PathGauge: View {
     }
 
     private func updateMovingOutlineAnimation(isMoving: Bool, perimeter: CGFloat) {
-        if isMoving, perimeter > 0 {
+        if isMoving, perimeter > 0, !accessibilityReduceMotion {
             movingDashPhase = 0
             withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
                 movingDashPhase = -perimeter
@@ -286,6 +314,7 @@ private struct PathGauge: View {
 }
 
 private struct PowerClusterView: View {
+    let isOn: Bool
     let onToggle: () -> Void
 
     var body: some View {
@@ -309,7 +338,8 @@ private struct PowerClusterView: View {
                 )
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Toggle lights")
+            .accessibilityLabel(isOn ? "Turn lights off" : "Turn lights on")
+            .accessibilityValue(isOn ? "On" : "Off")
 
             Text("Power")
                 .font(.system(.caption, design: .rounded).weight(.semibold))

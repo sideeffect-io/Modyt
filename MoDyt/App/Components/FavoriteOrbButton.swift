@@ -5,7 +5,10 @@ struct FavoriteOrbButton: View {
 
     let isFavorite: Bool
     let size: CGFloat
+    let accessibilityContext: String?
     let action: () -> Void
+
+    private static let minimumTouchTarget: CGFloat = 44
 
     var body: some View {
         Button(action: action) {
@@ -29,17 +32,38 @@ struct FavoriteOrbButton: View {
                     .contentTransition(.symbolEffect(.replace))
                     .symbolEffect(.bounce, value: isFavorite)
             }
+            .frame(width: size, height: size)
         }
         .buttonStyle(.plain)
-        .frame(width: size, height: size)
+        .frame(
+            width: max(size, Self.minimumTouchTarget),
+            height: max(size, Self.minimumTouchTarget)
+        )
+        .contentShape(.rect)
         .shadow(color: shadowColor, radius: colorScheme == .light ? 6 : 4, x: 0, y: size >= 36 ? 2 : 1)
-        .accessibilityLabel(isFavorite ? "Remove favorite" : "Add favorite")
+        .accessibilityLabel(accessibilityLabel)
     }
 
-    init(isFavorite: Bool, size: CGFloat = 36, action: @escaping () -> Void) {
+    init(
+        isFavorite: Bool,
+        size: CGFloat = 36,
+        accessibilityContext: String? = nil,
+        action: @escaping () -> Void
+    ) {
         self.isFavorite = isFavorite
         self.size = size
+        self.accessibilityContext = accessibilityContext
         self.action = action
+    }
+
+    private var accessibilityLabel: String {
+        if let accessibilityContext, accessibilityContext.isEmpty == false {
+            return isFavorite
+                ? "Remove \(accessibilityContext) from favorites"
+                : "Add \(accessibilityContext) to favorites"
+        }
+
+        return isFavorite ? "Remove favorite" : "Add favorite"
     }
 
     private var symbolSize: CGFloat {

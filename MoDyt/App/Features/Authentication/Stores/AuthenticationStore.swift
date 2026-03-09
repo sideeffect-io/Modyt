@@ -6,10 +6,15 @@ struct LoginState: Sendable, Equatable {
     var email: String = ""
     var password: String = ""
     var sites: [DeltaDoreClient.Site] = []
-    var selectedSiteIndex: Int? = nil
+    var selectedSiteID: String? = nil
     var isLoadingSites: Bool = false
     var isConnecting: Bool = false
     var errorMessage: String? = nil
+
+    var selectedSiteIndex: Int? {
+        guard let selectedSiteID else { return nil }
+        return sites.firstIndex { $0.id == selectedSiteID }
+    }
 
     var canLoadSites: Bool {
         !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -17,7 +22,7 @@ struct LoginState: Sendable, Equatable {
     }
 
     var canConnect: Bool {
-        selectedSiteIndex != nil && !isConnecting
+        selectedSiteID != nil && !isConnecting
     }
 }
 
@@ -47,7 +52,7 @@ enum AuthenticationEvent: Sendable {
     case loginPasswordChanged(String)
     case loadSitesTapped
     case sitesLoaded(Result<[DeltaDoreClient.Site], AuthenticationStoreError>)
-    case siteSelected(Int)
+    case siteSelected(String)
     case connectTapped
     case connectionSucceeded
     case connectionFailed(String)
@@ -118,7 +123,10 @@ final class AuthenticationStore: StartableStore {
                     switch result {
                     case .success(let sites):
                         login.sites = sites
-                        login.selectedSiteIndex = sites.count == 1 ? 0 : nil
+                        login.selectedSiteID = Self.selectedSiteID(
+                            from: sites,
+                            preferred: login.selectedSiteID
+                        )
                         login.errorMessage = nil
                     case .failure(let error):
                         login.errorMessage = error.message
@@ -127,9 +135,11 @@ final class AuthenticationStore: StartableStore {
                 }
                 return []
 
-            case .siteSelected(let index):
+            case .siteSelected(let siteID):
                 if case .login(var login) = state.phase {
-                    login.selectedSiteIndex = index
+                    login.selectedSiteID = login.sites.contains(where: { $0.id == siteID })
+                        ? siteID
+                        : nil
                     login.errorMessage = nil
                     state.phase = .login(login)
                 }
@@ -166,6 +176,21 @@ final class AuthenticationStore: StartableStore {
                 }
                 return []
             }
+        }
+
+        private static func selectedSiteID(
+            from sites: [DeltaDoreClient.Site],
+            preferred: String?
+        ) -> String? {
+            if sites.count == 1 {
+                return sites.first?.id
+            }
+
+            if let preferred, sites.contains(where: { $0.id == preferred }) {
+                return preferred
+            }
+
+            return nil
         }
     }
 

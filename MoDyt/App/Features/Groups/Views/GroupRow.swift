@@ -14,6 +14,7 @@ struct GroupRow: View {
 
             FavoriteOrbButton(
                 isFavorite: group.isFavorite,
+                accessibilityContext: group.name,
                 action: onToggleFavorite
             )
             .disabled(group.memberIdentifiers.isEmpty)
