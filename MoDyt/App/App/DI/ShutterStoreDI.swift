@@ -1,15 +1,36 @@
 import SwiftUI
 import DeltaDoreClient
 
-enum ShutterStoreDependencyFactory {
+enum SingleShutterStoreDependencyFactory {
     static func make(
         dependencyBag: DependencyBag = .production
-    ) -> ShutterStore.Dependencies {
+    ) -> SingleShutterStore.Dependencies {
         let deviceRepository = dependencyBag.localStorageDatasources.deviceRepository
         let gatewayClient = dependencyBag.gatewayClient
 
         return .init(
-            observeDevices: { await deviceRepository.observeByIDs($0) },
+            observeDevice: { await deviceRepository.observeByID($0) },
+            sendCommand: { deviceId, targetPosition in
+                let command = makeShutterCommand(
+                    for: deviceId,
+                    targetPosition: targetPosition
+                )
+                try? await gatewayClient.send(text: command.request)
+            },
+            sleep: { try await Task.sleep(for: $0) },
+            persistTarget: { try? await deviceRepository.setShutterTargetPosition(deviceId: $0, target: $1) }
+        )
+    }
+}
+
+enum GroupShutterStoreDependencyFactory {
+    static func make(
+        dependencyBag: DependencyBag = .production
+    ) -> GroupShutterStore.Dependencies {
+        let deviceRepository = dependencyBag.localStorageDatasources.deviceRepository
+        let gatewayClient = dependencyBag.gatewayClient
+
+        return .init(
             sendCommand: { requestedDeviceIds, targetPosition in
                 for deviceId in requestedDeviceIds.uniquePreservingOrder() {
                     let command = makeShutterCommand(
@@ -19,15 +40,24 @@ enum ShutterStoreDependencyFactory {
                     try? await gatewayClient.send(text: command.request)
                 }
             },
-            sleep: { try await Task.sleep(for: $0) },
-            persistTarget: { try? await deviceRepository.setShutterTargetPosition(deviceIds: $0, target: $1) }
+            persistTarget: { requestedDeviceIds, target in
+                let uniqueDeviceIds = requestedDeviceIds.uniquePreservingOrder()
+                guard uniqueDeviceIds.isEmpty == false else { return }
+                try? await deviceRepository.setShutterTargetPosition(
+                    deviceIds: uniqueDeviceIds,
+                    target: target
+                )
+            }
         )
     }
 }
 
 extension EnvironmentValues {
-    @Entry var shutterStoreDependencies: ShutterStore.Dependencies =
-        ShutterStoreDependencyFactory.make()
+    @Entry var singleShutterStoreDependencies: SingleShutterStore.Dependencies =
+        SingleShutterStoreDependencyFactory.make()
+
+    @Entry var groupShutterStoreDependencies: GroupShutterStore.Dependencies =
+        GroupShutterStoreDependencyFactory.make()
 }
 
 private nonisolated func makeShutterCommand(

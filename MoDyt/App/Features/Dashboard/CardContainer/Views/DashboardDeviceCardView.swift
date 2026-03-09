@@ -137,14 +137,20 @@ struct DashboardDeviceCardView: View {
         if supportsActiveControls(for: favorite) {
             switch favorite.controlKind {
             case .shutter:
-                if favorite.shutterIdentifiers.isEmpty {
+                switch DashboardShutterRoute(favorite: favorite) {
+                case .unavailable:
                     Text("Shutters unavailable")
                         .font(.system(.caption, design: .rounded))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                } else {
-                    ShutterView(
-                        deviceIds: favorite.shutterIdentifiers
+                case .single(let deviceId):
+                    SingleShutterView(
+                        deviceId: deviceId
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                case .group(let deviceIds):
+                    GroupShutterView(
+                        deviceIds: deviceIds
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 }

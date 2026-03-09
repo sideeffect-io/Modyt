@@ -75,6 +75,16 @@ extension DomainRepository where Item == Device, Upsert == DeviceUpsert {
     }
 
     func setShutterTargetPosition(
+        deviceId: DeviceIdentifier,
+        target: Int?
+    ) throws {
+        try setShutterTargetPosition(
+            deviceIds: [deviceId],
+            target: target
+        )
+    }
+
+    func setShutterTargetPosition(
         deviceIds: [DeviceIdentifier],
         target: Int?
     ) throws {

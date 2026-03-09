@@ -4,6 +4,45 @@ import Testing
 
 struct DashboardCardRoutingTests {
     @Test
+    func singleShutterFavoritesRouteToSingleShutter() {
+        let identifier = DeviceIdentifier(deviceId: 42, endpointId: 1)
+        let favorite = FavoriteItem(
+            name: "Bedroom shutter",
+            usage: .shutter,
+            type: .device(identifier: identifier),
+            order: 0
+        )
+
+        #expect(DashboardShutterRoute(favorite: favorite) == .single(identifier))
+    }
+
+    @Test
+    func groupShutterFavoritesRouteToGroupShutterWithUniqueIds() {
+        let first = DeviceIdentifier(deviceId: 42, endpointId: 1)
+        let second = DeviceIdentifier(deviceId: 43, endpointId: 1)
+        let favorite = FavoriteItem(
+            name: "All shutters",
+            usage: .shutter,
+            type: .group(groupId: "group-1", memberIdentifiers: [first, second, first]),
+            order: 0
+        )
+
+        #expect(DashboardShutterRoute(favorite: favorite) == .group([first, second]))
+    }
+
+    @Test
+    func emptyGroupShutterFavoritesRouteToUnavailable() {
+        let favorite = FavoriteItem(
+            name: "Empty group",
+            usage: .shutter,
+            type: .group(groupId: "group-1", memberIdentifiers: []),
+            order: 0
+        )
+
+        #expect(DashboardShutterRoute(favorite: favorite) == .unavailable)
+    }
+
+    @Test
     func shHvacRoutesToHeatPumpControlKind() {
         let device = makeDevice(
             usage: "sh_hvac",
