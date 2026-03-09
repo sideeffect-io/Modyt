@@ -2,40 +2,28 @@ import SwiftUI
 
 struct LightView: View {
     @Environment(\.lightStoreDependencies) private var lightStoreDependencies
+    @Environment(\.colorScheme) private var colorScheme
 
-    let uniqueId: String
+    let identifier: DeviceIdentifier
 
-    @State private var requestedPowerTarget: Double?
+    init(identifier: DeviceIdentifier) {
+        self.identifier = identifier
+    }
 
     var body: some View {
         WithStoreView(
             store: LightStore(
-                uniqueId: uniqueId,
+                identifier: identifier,
                 dependencies: lightStoreDependencies
-            ),
-        ) { store in
-            let descriptor = store.descriptor
-            let powerIsOn = descriptor.isOn
-
+            )
+        ) { _ in
             HStack(alignment: .center, spacing: 14) {
-                GaugeControlView(
-                    sourceNormalizedLevel: descriptor.normalizedLevel,
-                    showsMovingOutline: store.isChangingInApp,
-                    requestedTarget: $requestedPowerTarget,
-                    onCommit: { normalized in
-                        store.setLevelNormalized(normalized)
-                    }
-                )
-                .frame(width: 86, height: 86)
-                .frame(maxWidth: .infinity, alignment: .center)
+                LightGaugeView(colorScheme: colorScheme)
+                    .frame(width: 86, height: 86)
+                    .frame(maxWidth: .infinity, alignment: .center)
 
-                PowerClusterView(
-                    isOn: powerIsOn,
-                    onToggle: {
-                        requestedPowerTarget = powerIsOn ? 0.0 : 1.0
-                    }
-                )
-                .frame(maxWidth: .infinity, alignment: .center)
+                PowerClusterView()
+                    .frame(maxWidth: .infinity, alignment: .center)
             }
             .frame(maxWidth: .infinity, alignment: .center)
             .accessibilityElement(children: .contain)
@@ -43,132 +31,17 @@ struct LightView: View {
     }
 }
 
-private struct GaugeControlView: View {
-    let sourceNormalizedLevel: Double
-    let showsMovingOutline: Bool
-    @Binding var requestedTarget: Double?
-    let onCommit: (Double) -> Void
+private struct LightGaugeView: View {
+    let colorScheme: ColorScheme
 
-    @State private var dragValue: Double?
-    @State private var renderedValue: Double = 0
-    @State private var hasInitialValue = false
-
-    private static let accessibilityStep: Double = 0.05
+    private let normalizedValue = 0.0
+    private let isOn = false
 
     var body: some View {
-        let sourceValue = dragValue ?? sourceNormalizedLevel
-        let clampedRenderedValue = Self.clamp(renderedValue)
-        let isOn = clampedRenderedValue > 0.001
-        let percentage = Int((clampedRenderedValue * 100).rounded())
-        let accessibilityBinding = Binding(
-            get: { clampedRenderedValue },
-            set: { newValue in
-                commitAccessibleValue(newValue)
-            }
-        )
-
-        PathGauge(
-            normalizedValue: clampedRenderedValue,
-            isOn: isOn,
-            showsMovingOutline: showsMovingOutline,
-            percentage: percentage,
-            onChange: { normalized in
-                let snapped = Self.snap(normalized)
-                guard shouldAcceptDragValue(snapped) else { return }
-                dragValue = snapped
-                renderedValue = snapped
-            },
-            onCommit: { normalized in
-                let snapped = Self.snap(normalized)
-                renderedValue = snapped
-                dragValue = nil
-                onCommit(snapped)
-            }
-        )
-        .accessibilityRepresentation {
-            Slider(value: accessibilityBinding, in: 0...1, step: Self.accessibilityStep) {
-                Text("Light brightness")
-            }
-        }
-        .onAppear {
-            guard !hasInitialValue else { return }
-            renderedValue = sourceValue
-            hasInitialValue = true
-        }
-        .onChange(of: sourceValue) { _, newValue in
-            guard hasInitialValue else {
-                renderedValue = newValue
-                hasInitialValue = true
-                return
-            }
-            guard abs(renderedValue - newValue) > 0.0005 else { return }
-
-            if dragValue == nil {
-                withAnimation(.easeInOut(duration: 0.24)) {
-                    renderedValue = newValue
-                }
-            } else {
-                renderedValue = newValue
-            }
-        }
-        .onChange(of: requestedTarget) { _, target in
-            guard let target else { return }
-            let snapped = Self.snap(target)
-            dragValue = nil
-            withAnimation(.easeInOut(duration: 0.22)) {
-                renderedValue = snapped
-            }
-            onCommit(snapped)
-            requestedTarget = nil
-        }
-    }
-
-    private func shouldAcceptDragValue(_ value: Double) -> Bool {
-        guard let current = dragValue else { return true }
-        return abs(current - value) > 0.005
-    }
-
-    private func commitAccessibleValue(_ value: Double) {
-        let snapped = Self.snap(value)
-        guard abs(renderedValue - snapped) > 0.0005 || abs(sourceNormalizedLevel - snapped) > 0.0005 else {
-            return
-        }
-
-        dragValue = nil
-        withAnimation(.easeInOut(duration: 0.22)) {
-            renderedValue = snapped
-        }
-        onCommit(snapped)
-    }
-
-    private static func clamp(_ value: Double) -> Double {
-        min(max(value, 0), 1)
-    }
-
-    private static func snap(_ value: Double) -> Double {
-        let clamped = clamp(value)
-        return (clamped * 100).rounded() / 100
-    }
-}
-
-private struct PathGauge: View {
-    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
-    @Environment(\.colorScheme) private var colorScheme
-
-    let normalizedValue: Double
-    let isOn: Bool
-    let showsMovingOutline: Bool
-    let percentage: Int
-    let onChange: (Double) -> Void
-    let onCommit: (Double) -> Void
-
-    @State private var movingDashPhase: CGFloat = 0
-
-    var body: some View {
-        let progress = CGFloat(min(max(normalizedValue, 0), 1))
-        let angle = Self.startAngle + (Self.sweepAngle * Double(progress))
+        let progress = CGFloat(normalizedValue)
+        let angle = Self.startAngle + (Self.sweepAngle * normalizedValue)
         let radius = Self.diameter * 0.5 - Self.lineWidth * 0.5
-        let outlinePerimeter = Self.outlinePerimeter(radius: radius)
+        let percentage = Int((normalizedValue * 100).rounded())
 
         ZStack {
             GaugeArc(progress: 1)
@@ -179,14 +52,6 @@ private struct PathGauge: View {
                     isOn ? Self.onGradient : Self.offGradient,
                     style: StrokeStyle(lineWidth: Self.lineWidth, lineCap: .round)
                 )
-
-            if showsMovingOutline {
-                GaugeArc(progress: 1)
-                    .stroke(
-                        Self.movingOutlineGradient,
-                        style: movingOutlineStrokeStyle(perimeter: outlinePerimeter)
-                    )
-            }
 
             Circle()
                 .fill(.white)
@@ -210,53 +75,13 @@ private struct PathGauge: View {
             }
         }
         .frame(width: Self.diameter, height: Self.diameter)
-        .contentShape(Circle())
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { gesture in
-                    onChange(normalized(from: gesture.location))
-                }
-                .onEnded { gesture in
-                    onCommit(normalized(from: gesture.location))
-                }
-        )
-        .onAppear {
-            updateMovingOutlineAnimation(isMoving: showsMovingOutline, perimeter: outlinePerimeter)
-        }
-        .onChange(of: showsMovingOutline) { _, isMoving in
-            updateMovingOutlineAnimation(isMoving: isMoving, perimeter: outlinePerimeter)
-        }
-        .onChange(of: radius) { _, newRadius in
-            guard showsMovingOutline else { return }
-            updateMovingOutlineAnimation(
-                isMoving: true,
-                perimeter: Self.outlinePerimeter(radius: newRadius)
-            )
-        }
-        .onChange(of: accessibilityReduceMotion) { _, _ in
-            updateMovingOutlineAnimation(isMoving: showsMovingOutline, perimeter: outlinePerimeter)
-        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Light brightness")
+        .accessibilityValue("\(percentage)%")
     }
 
     private var trackColor: Color {
         colorScheme == .dark ? Color.white.opacity(0.26) : AppColors.cloud.opacity(0.95)
-    }
-
-    private func normalized(from location: CGPoint) -> Double {
-        let center = CGPoint(x: Self.diameter * 0.5, y: Self.diameter * 0.5)
-        let deltaX = location.x - center.x
-        let deltaY = location.y - center.y
-        let degrees = atan2(deltaY, deltaX) * 180 / .pi
-        let turn = (degrees - Self.startAngle + 360).truncatingRemainder(dividingBy: 360) / 360
-        let activeTurn = Self.sweepAngle / 360
-
-        if turn <= activeTurn {
-            return turn / activeTurn
-        }
-
-        let distanceToMax = turn - activeTurn
-        let distanceToMin = 1 - turn
-        return distanceToMax < distanceToMin ? 1 : 0
     }
 
     private static let diameter: CGFloat = 86
@@ -274,70 +99,29 @@ private struct PathGauge: View {
         colors: [Color.white.opacity(0.5), Color.white.opacity(0.2)],
         center: .center
     )
-
-    private static let movingOutlineGradient = AngularGradient(
-        colors: [
-            Color.white.opacity(0.94),
-            Color(red: 0.24, green: 0.78, blue: 0.56),
-            Color.white.opacity(0.9),
-        ],
-        center: .center
-    )
-
-    private func movingOutlineStrokeStyle(perimeter: CGFloat) -> StrokeStyle {
-        let segmentLength = max(perimeter * 0.19, 18)
-        let dashGap = max(perimeter * 2, segmentLength + 1)
-        return StrokeStyle(
-            lineWidth: Self.lineWidth + 1,
-            lineCap: .round,
-            lineJoin: .round,
-            dash: [segmentLength, dashGap],
-            dashPhase: movingDashPhase
-        )
-    }
-
-    private static func outlinePerimeter(radius: CGFloat) -> CGFloat {
-        let normalizedSweep = CGFloat(Self.sweepAngle / 360)
-        return 2 * .pi * radius * normalizedSweep
-    }
-
-    private func updateMovingOutlineAnimation(isMoving: Bool, perimeter: CGFloat) {
-        if isMoving, perimeter > 0, !accessibilityReduceMotion {
-            movingDashPhase = 0
-            withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
-                movingDashPhase = -perimeter
-            }
-            return
-        }
-        movingDashPhase = 0
-    }
 }
 
 private struct PowerClusterView: View {
-    let isOn: Bool
-    let onToggle: () -> Void
+    private let isOn = false
 
     var body: some View {
         VStack(spacing: 8) {
-            Button(action: onToggle) {
-                ZStack {
-                    Circle()
-                        .fill(Self.buttonBackground)
-                    Circle()
-                        .strokeBorder(.blue.opacity(0.55), lineWidth: 1.2)
-                    Image(systemName: "power")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(.blue.opacity(0.9))
-                }
-                .frame(width: 48, height: 48)
-                .shadow(
-                    color: .blue.opacity(0.28),
-                    radius: 6,
-                    x: 0,
-                    y: 2
-                )
+            ZStack {
+                Circle()
+                    .fill(Self.buttonBackground)
+                Circle()
+                    .strokeBorder(.blue.opacity(0.55), lineWidth: 1.2)
+                Image(systemName: "power")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.blue.opacity(0.9))
             }
-            .buttonStyle(.plain)
+            .frame(width: 48, height: 48)
+            .shadow(
+                color: .blue.opacity(0.28),
+                radius: 6,
+                x: 0,
+                y: 2
+            )
             .accessibilityLabel(isOn ? "Turn lights off" : "Turn lights on")
             .accessibilityValue(isOn ? "On" : "Off")
 
@@ -346,7 +130,7 @@ private struct PowerClusterView: View {
                 .foregroundStyle(.secondary)
         }
     }
-    
+
     private static let buttonBackground = LinearGradient(
         colors: [Color.blue.opacity(0.38), Color.blue.opacity(0.24)],
         startPoint: .topLeading,
