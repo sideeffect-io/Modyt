@@ -69,7 +69,7 @@ extension DomainRepository where Item == Scene, Upsert == SceneUpsert {
                 type: upsert.type,
                 picto: upsert.picto,
                 ruleId: upsert.ruleId,
-                payload: existing?.payload.mergedDictionary(incoming: upsert.payload) ?? [:],
+                payload: existing?.payload.mergedDictionary(incoming: upsert.payload) ?? upsert.payload,
                 isFavorite: existing?.isFavorite ?? false,
                 dashboardOrder: existing?.dashboardOrder,
                 updatedAt: timestamp
