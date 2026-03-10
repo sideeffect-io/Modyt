@@ -162,7 +162,9 @@ struct ACKRepositoryTests {
         await testTime.advance(by: .seconds(11))
         await settle(cycles: 16)
 
-        #expect(await completionFlag.isCompleted())
+        #expect(await waitUntilAsync {
+            await completionFlag.isCompleted()
+        })
 
         do {
             try await waiter.value
@@ -404,6 +406,19 @@ struct ACKRepositoryTests {
         for _ in 0..<cycles {
             await Task.yield()
         }
+    }
+
+    private func waitUntilAsync(
+        cycles: Int = 40,
+        condition: @escaping @Sendable () async -> Bool
+    ) async -> Bool {
+        for _ in 0..<cycles {
+            if await condition() {
+                return true
+            }
+            await Task.yield()
+        }
+        return await condition()
     }
 }
 

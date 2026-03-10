@@ -155,13 +155,17 @@ struct DashboardDeviceCardView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 }
             case .light:
-                if let identifier = favorite.controlDeviceIdentifier {
-                    LightView(identifier: identifier)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                } else {
+                switch DashboardLightRoute(favorite: favorite) {
+                case .unavailable:
                     Text("Lights unavailable")
                         .font(.system(.caption, design: .rounded))
                         .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                case .single(let deviceId):
+                    SingleLightView(deviceId: deviceId)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                case .group(let deviceIds):
+                    GroupLightView(deviceIds: deviceIds)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 }
             case .temperature:

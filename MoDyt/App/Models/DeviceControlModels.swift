@@ -118,4 +118,29 @@ struct DrivingLightControlDescriptor: Sendable, Equatable {
     var percentage: Int {
         Int((normalizedLevel * 100).rounded())
     }
+
+    var minimumLevel: Int {
+        Int(range.lowerBound.rounded())
+    }
+
+    var maximumLevel: Int {
+        Int(range.upperBound.rounded())
+    }
+
+    func rawLevel(forNormalizedLevel normalizedLevel: Double) -> Int {
+        let clampedNormalizedLevel = min(max(normalizedLevel, 0), 1)
+        let rawLevel = range.lowerBound + ((range.upperBound - range.lowerBound) * clampedNormalizedLevel)
+        return Int(rawLevel.rounded())
+    }
+
+    func normalizedLevel(forRawLevel rawLevel: Int) -> Double {
+        let clampedLevel = min(max(Double(rawLevel), range.lowerBound), range.upperBound)
+        let span = range.upperBound - range.lowerBound
+        guard span > 0 else { return clampedLevel > range.lowerBound ? 1 : 0 }
+        return min(max((clampedLevel - range.lowerBound) / span, 0), 1)
+    }
+
+    func isLit(level rawLevel: Int) -> Bool {
+        Double(rawLevel) > range.lowerBound
+    }
 }

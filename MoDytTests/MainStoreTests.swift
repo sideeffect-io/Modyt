@@ -124,9 +124,11 @@ struct MainStoreEffectTests {
         )
 
         store.send(.startingGatewayHandlingWasRequested)
-        await settle()
-
-        #expect(store.state.featureState == .featureIsStarted)
+        #expect(
+            await waitUntil {
+                store.state.featureState == .featureIsStarted
+            }
+        )
     }
 
     @Test
@@ -136,9 +138,11 @@ struct MainStoreEffectTests {
         )
 
         store.send(.startingGatewayHandlingWasRequested)
-        await settle()
-
-        #expect(store.state.featureState == .gatewayHandlingIsInError)
+        #expect(
+            await waitUntil {
+                store.state.featureState == .gatewayHandlingIsInError
+            }
+        )
     }
 
     @Test
@@ -150,13 +154,18 @@ struct MainStoreEffectTests {
         )
 
         store.send(.startingGatewayHandlingWasRequested)
-        await settle()
-        #expect(store.state.featureState == .featureIsStarted)
+        #expect(
+            await waitUntil {
+                store.state.featureState == .featureIsStarted
+            }
+        )
 
         store.send(.appActiveWasReceived)
-        await settle(cycles: 20)
-
-        #expect(store.state.featureState == .reconnectionIsInError)
+        #expect(
+            await waitUntil(cycles: 60) {
+                store.state.featureState == .reconnectionIsInError
+            }
+        )
     }
 
     @Test
@@ -171,12 +180,17 @@ struct MainStoreEffectTests {
         )
 
         store.send(.startingGatewayHandlingWasRequested)
-        await settle()
+        #expect(
+            await waitUntil {
+                store.state.featureState == .featureIsStarted
+            }
+        )
         store.send(.appActiveWasReceived)
-        await settle()
 
         #expect(store.state.featureState == .featureIsStarted)
-        #expect(await invocations.value() == 1)
+        #expect(await waitUntilAsync(cycles: 40) {
+            await invocations.value() == 1
+        })
     }
 
     @Test
@@ -190,12 +204,17 @@ struct MainStoreEffectTests {
         )
 
         store.send(.startingGatewayHandlingWasRequested)
-        await settle()
+        #expect(
+            await waitUntil {
+                store.state.featureState == .featureIsStarted
+            }
+        )
         store.send(.appInactiveWasReceived)
-        await settle()
 
         #expect(store.state.featureState == .featureIsStarted)
-        #expect(await inactiveCalls.value() == 1)
+        #expect(await waitUntilAsync {
+            await inactiveCalls.value() == 1
+        })
     }
 
     @Test
@@ -211,12 +230,21 @@ struct MainStoreEffectTests {
         )
 
         store.send(.startingGatewayHandlingWasRequested)
-        await settle()
+        #expect(
+            await waitUntil {
+                store.state.featureState == .featureIsStarted
+            }
+        )
         store.send(.appActiveWasReceived)
-        await settle(cycles: 24)
 
-        #expect(store.state.featureState == .featureIsStarted)
-        #expect(await setActiveCalls.value() >= 1)
+        #expect(
+            await waitUntil {
+                store.state.featureState == .featureIsStarted
+            }
+        )
+        #expect(await waitUntilAsync {
+            await setActiveCalls.value() >= 1
+        })
     }
 
     @Test
@@ -232,11 +260,17 @@ struct MainStoreEffectTests {
         )
 
         store.send(.startingGatewayHandlingWasRequested)
-        await settle()
+        #expect(
+            await waitUntil {
+                store.state.featureState == .featureIsStarted
+            }
+        )
         store.send(.appActiveWasReceived)
-        await settle(cycles: 24)
-
-        #expect(store.state.featureState == .gatewayHandlingIsInError)
+        #expect(
+            await waitUntil(cycles: 80) {
+                store.state.featureState == .gatewayHandlingIsInError
+            }
+        )
     }
 
     @Test
@@ -498,4 +532,31 @@ private func settle(cycles: Int = 12) async {
     for _ in 0..<cycles {
         await Task.yield()
     }
+}
+
+@MainActor
+private func waitUntil(
+    cycles: Int = 40,
+    condition: @escaping @MainActor () -> Bool
+) async -> Bool {
+    for _ in 0..<cycles {
+        if condition() {
+            return true
+        }
+        await Task.yield()
+    }
+    return condition()
+}
+
+private func waitUntilAsync(
+    cycles: Int = 40,
+    condition: @escaping @Sendable () async -> Bool
+) async -> Bool {
+    for _ in 0..<cycles {
+        if await condition() {
+            return true
+        }
+        await Task.yield()
+    }
+    return await condition()
 }

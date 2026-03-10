@@ -106,4 +106,17 @@ struct FavoriteItem: Sendable, Equatable {
             return []
         }
     }
+
+    var lightIdentifiers: [DeviceIdentifier] {
+        guard group == .light else { return [] }
+
+        switch type {
+        case .device(let identifier):
+            return [identifier]
+        case .group(_, let memberIdentifiers):
+            return memberIdentifiers
+        case .scene:
+            return []
+        }
+    }
 }

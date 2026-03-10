@@ -1,7 +1,7 @@
 # Agents Overview — Swift Home Automation Application
 
 This repository implements an iOS/iPadOS/macOS application for controlling a DeltaDore box using a functional programming architecture and strong testability guarantees.  
-Agents working with this repo (AI assistants, automation tools, or new team members) should understand:
+Agents working with this repo (AI assistants, automation tools, or new team members) should understand and apply:
 
 - Functional design principles (immutability, pure functions, higher order functions, side effects, composition)
 - How we structure side effects via dependency injection
@@ -9,7 +9,15 @@ Agents working with this repo (AI assistants, automation tools, or new team memb
 - Testability via injecting functions and capabilities
 - Our Git workflow (linear history, feature branches, fast-forward merges)
 
-> This high-level overview provides context. Read the doc and find detailed procedural steps and examples through dedicated **Agent Skills**.
+> This high-level overview provides context. Read the doc and find detailed procedural steps and examples through dedicated **Agent Skills**:
+- `$functional-programming-developer` for guidance about architecture, layers, testability, design patterns, dependency injection and functional programming best practices in Swift.
+- `$git-user` for guidance about Git workflow.
+- `$imagegen` for guidance about image generation using the OpenAI API.
+- `$mobile-ios-design` for guidance about how to design mobile apps UI components, about the UX best practices and patterns.
+- `$security-threat-model` for guidance about cybersecurity and threat modeling.
+- `$swift-concurrency-developer` for guidance about the best practices when doing async/concurrent programming in Swift.
+- `$swift-testing-expert` for guidance about testing strategies and best practices in Swift.
+- `$swiftui-expert` for guidance about patterns, syntax, strategy and best practices to write UI components in SwiftUI.
 
 ---
 

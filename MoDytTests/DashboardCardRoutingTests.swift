@@ -43,6 +43,45 @@ struct DashboardCardRoutingTests {
     }
 
     @Test
+    func singleLightFavoritesRouteToSingleLight() {
+        let identifier = DeviceIdentifier(deviceId: 52, endpointId: 1)
+        let favorite = FavoriteItem(
+            name: "Reading lamp",
+            usage: .light,
+            type: .device(identifier: identifier),
+            order: 0
+        )
+
+        #expect(DashboardLightRoute(favorite: favorite) == .single(identifier))
+    }
+
+    @Test
+    func groupLightFavoritesRouteToGroupLightWithUniqueIds() {
+        let first = DeviceIdentifier(deviceId: 52, endpointId: 1)
+        let second = DeviceIdentifier(deviceId: 53, endpointId: 1)
+        let favorite = FavoriteItem(
+            name: "Living room lights",
+            usage: .light,
+            type: .group(groupId: "group-light-1", memberIdentifiers: [first, second, first]),
+            order: 0
+        )
+
+        #expect(DashboardLightRoute(favorite: favorite) == .group([first, second]))
+    }
+
+    @Test
+    func emptyGroupLightFavoritesRouteToUnavailable() {
+        let favorite = FavoriteItem(
+            name: "Empty light group",
+            usage: .light,
+            type: .group(groupId: "group-light-1", memberIdentifiers: []),
+            order: 0
+        )
+
+        #expect(DashboardLightRoute(favorite: favorite) == .unavailable)
+    }
+
+    @Test
     func shHvacRoutesToHeatPumpControlKind() {
         let device = makeDevice(
             usage: "sh_hvac",
