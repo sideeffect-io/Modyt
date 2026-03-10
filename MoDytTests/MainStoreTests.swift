@@ -115,6 +115,35 @@ struct MainReducerTransitionTests {
     ]
 }
 
+struct MainMessageStreamObservationStateTests {
+    @Test
+    func finishingOldTaskDoesNotClearNewActiveTask() {
+        var state = MainMessageStreamObservationState()
+
+        let initialRegistration = state.register(taskID: 1)
+        state.cancel()
+        let replacementRegistration = state.register(taskID: 2)
+        let oldTaskDidFinish = state.finish(taskID: 1)
+
+        #expect(initialRegistration)
+        #expect(replacementRegistration)
+        #expect(oldTaskDidFinish == false)
+        #expect(state.activeTaskID == 2)
+    }
+
+    @Test
+    func finishingCurrentTaskClearsActiveTask() {
+        var state = MainMessageStreamObservationState()
+
+        let registration = state.register(taskID: 7)
+        let finishedCurrentTask = state.finish(taskID: 7)
+
+        #expect(registration)
+        #expect(finishedCurrentTask)
+        #expect(state.activeTaskID == nil)
+    }
+}
+
 @MainActor
 struct MainStoreEffectTests {
     @Test

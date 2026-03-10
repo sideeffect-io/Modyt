@@ -25,7 +25,10 @@ public extension DeltaDoreClient.Dependencies {
                 configuration: resolution.configuration,
                 onDisconnect: resolution.onDisconnect
             )
-            try await connection.connect()
+            try await connectAndValidate(
+                connection,
+                configuration: resolution.configuration
+            )
             return DeltaDoreClient.ConnectionSession(connection: connection)
         }
 
@@ -43,7 +46,8 @@ public extension DeltaDoreClient.Dependencies {
             connectStored: { options in
                 let resolverOptions = TydomConnectionResolver.Options(
                     mode: mapStoredMode(options.mode),
-                    credentialPolicy: .useStoredDataOnly
+                    credentialPolicy: .useStoredDataOnly,
+                    timings: storedResolverTimings(for: options.mode)
                 )
                 let resolution = try await resolver.resolve(resolverOptions)
                 return try await buildSession(resolution)
@@ -71,6 +75,9 @@ public extension DeltaDoreClient.Dependencies {
             },
             clearStoredData: {
                 await resolver.clearPersistedData()
+            },
+            probeConnection: { connection, timeout in
+                await probeConnectionWithRetry(connection, timeout: timeout)
             }
         )
     }
@@ -93,5 +100,62 @@ public extension DeltaDoreClient {
                 now: now
             )
         )
+    }
+}
+
+private func storedResolverTimings(
+    for mode: DeltaDoreClient.StoredCredentialsFlowOptions.Mode
+) -> TydomConnectionResolver.Options.Timings {
+    switch mode {
+    case .auto, .forceLocal:
+        return .silentStoredFlow
+    case .forceRemote:
+        return .init(
+            discoveryTimeout: 2.0,
+            probeTimeout: 0.35,
+            infoTimeout: 1.0,
+            localConnectTimeout: 1.5,
+            remoteConnectTimeout: 6.0
+        )
+    }
+}
+
+private func probeConnectionWithRetry(
+    _ connection: TydomConnection,
+    timeout: TimeInterval
+) async -> Bool {
+    let probeTimeout = max(0.2, timeout)
+    for attempt in 0..<2 {
+        do {
+            try await probeConnectionLiveness(
+                using: connection,
+                timeout: probeTimeout
+            )
+            return true
+        } catch {
+            if attempt == 0 {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+        }
+    }
+    return false
+}
+
+func connectAndValidate(
+    _ connection: TydomConnection,
+    configuration: TydomConnection.Configuration
+) async throws {
+    let validationTimeout = max(0.5, min(configuration.timeout, 2.0))
+    do {
+        try await connection.connect(
+            startReceiving: false,
+            requestTimeout: validationTimeout
+        )
+        try await connection.waitForWebSocketOpen(timeout: validationTimeout)
+        _ = try await connection.pingAndWaitForResponse(timeout: validationTimeout)
+        await connection.startStreamingIfNeeded()
+    } catch {
+        await connection.disconnect(shouldNotifyOnDisconnect: false)
+        throw error
     }
 }

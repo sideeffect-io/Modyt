@@ -348,21 +348,30 @@ public struct TydomConnectionStateMachine {
 
             guard let first = candidates.first else {
                 let decision = TydomConnectionState.Decision(
-                    mode: .remote(),
+                    mode: .local(host: credentials.cachedLocalIP ?? ""),
                     reason: .localDiscoveryFailed
                 )
+                let lastError = state.override == .forceLocal
+                    ? "Local discovery failed"
+                    : nil
+                let phase: TydomConnectionState.Phase = state.override == .forceLocal
+                    ? .failed
+                    : .connectingRemote
+                let actions: [TydomConnectionAction] = state.override == .forceLocal
+                    ? [.emitDecision(decision)]
+                    : [.emitDecision(decision), .connectRemote]
                 return (
                     TydomConnectionState(
-                        phase: .connectingRemote,
+                        phase: phase,
                         override: state.override,
                         credentials: credentials,
                         selectedGatewayMac: credentials.mac,
                         lastDecision: decision,
-                        lastError: nil,
+                        lastError: lastError,
                         pendingLocalCandidates: [],
                         connectedConnection: state.connectedConnection
                     ),
-                    [.emitDecision(decision), .connectRemote]
+                    actions
                 )
             }
 
@@ -445,21 +454,30 @@ public struct TydomConnectionStateMachine {
             }
 
             let decision = TydomConnectionState.Decision(
-                mode: .remote(),
+                mode: .local(host: host ?? state.credentials?.cachedLocalIP ?? ""),
                 reason: .localFailed
             )
+            let lastError = state.override == .forceLocal
+                ? "Local connection failed"
+                : nil
+            let phase: TydomConnectionState.Phase = state.override == .forceLocal
+                ? .failed
+                : .connectingRemote
+            let actions: [TydomConnectionAction] = state.override == .forceLocal
+                ? [.emitDecision(decision)]
+                : [.emitDecision(decision), .connectRemote]
             return (
                 TydomConnectionState(
-                    phase: .connectingRemote,
+                    phase: phase,
                     override: state.override,
                     credentials: state.credentials,
                     selectedGatewayMac: state.selectedGatewayMac,
                     lastDecision: decision,
-                    lastError: nil,
+                    lastError: lastError,
                     pendingLocalCandidates: [],
                     connectedConnection: state.connectedConnection
                 ),
-                [.emitDecision(decision), .connectRemote]
+                actions
             )
 
         case .remoteConnectResult(let success, let connection):

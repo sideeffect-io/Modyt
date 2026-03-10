@@ -4,13 +4,15 @@ import Observation
 struct SingleLightPendingPresentation: Sendable, Equatable {
     let normalizedLevel: Double
     let isOn: Bool
+    let normalizedColor: Double
 }
 
 struct SingleLightPendingCommand: Sendable, Equatable {
-    let request: LightGatewayCommandRequest
+    let command: SingleLightGatewayCommand
     let presentation: SingleLightPendingPresentation
     let expectedPowerState: Bool?
     let expectedLevel: Int?
+    let expectedColor: Int?
 
     func matches(_ descriptor: DrivingLightControlDescriptor?) -> Bool {
         guard let descriptor else { return false }
@@ -21,6 +23,11 @@ struct SingleLightPendingCommand: Sendable, Equatable {
 
         if let expectedLevel,
            Int(descriptor.level.rounded()) != expectedLevel {
+            return false
+        }
+
+        if let expectedColor,
+           Int((descriptor.color?.value ?? Double.nan).rounded()) != expectedColor {
             return false
         }
 
@@ -71,16 +78,23 @@ enum SingleLightState: Sendable, Equatable {
             ?? descriptor?.isOn
             ?? false
     }
+
+    var displayedNormalizedColor: Double {
+        pendingCommand?.presentation.normalizedColor
+            ?? descriptor?.normalizedColor
+            ?? DrivingLightControlDescriptor.defaultNormalizedColor
+    }
 }
 
 enum SingleLightEvent: Sendable, Equatable {
     case descriptorWasReceived(DrivingLightControlDescriptor?)
     case levelWasCommitted(Double)
+    case colorWasCommitted(Double)
     case powerWasSet(Bool)
 }
 
 enum SingleLightEffect: Sendable, Equatable {
-    case sendCommand(LightGatewayCommandRequest)
+    case sendCommand(SingleLightGatewayCommand)
 }
 
 @Observable
@@ -127,6 +141,14 @@ final class SingleLightStore: StartableStore {
                     isOn: isOn
                 )
 
+            case let (.featureIsStarted(deviceId, descriptor), .colorWasCommitted(normalizedColor)),
+                 let (.commandIsPending(deviceId, descriptor, _), .colorWasCommitted(normalizedColor)):
+                return setColor(
+                    deviceId: deviceId,
+                    descriptor: descriptor,
+                    normalizedColor: normalizedColor
+                )
+
             default:
                 return []
             }
@@ -146,21 +168,24 @@ final class SingleLightStore: StartableStore {
                 signalName: levelKey,
                 value: .int(rawLevel)
             )
+            let command = SingleLightGatewayCommand.data(request)
             let pendingCommand = SingleLightPendingCommand(
-                request: request,
+                command: command,
                 presentation: .init(
                     normalizedLevel: descriptor.normalizedLevel(forRawLevel: rawLevel),
-                    isOn: descriptor.powerKey == nil ? descriptor.isLit(level: rawLevel) : descriptor.isOn
+                    isOn: descriptor.powerKey == nil ? descriptor.isLit(level: rawLevel) : descriptor.isOn,
+                    normalizedColor: descriptor.normalizedColor
                 ),
                 expectedPowerState: nil,
-                expectedLevel: rawLevel
+                expectedLevel: rawLevel,
+                expectedColor: nil
             )
             state = .commandIsPending(
                 deviceId: deviceId,
                 descriptor: descriptor,
                 pendingCommand: pendingCommand
             )
-            return [.sendCommand(request)]
+            return [.sendCommand(command)]
         }
 
         private mutating func setPower(
@@ -176,21 +201,24 @@ final class SingleLightStore: StartableStore {
                     signalName: powerKey,
                     value: .bool(isOn)
                 )
+                let command = SingleLightGatewayCommand.data(request)
                 let pendingCommand = SingleLightPendingCommand(
-                    request: request,
+                    command: command,
                     presentation: .init(
                         normalizedLevel: descriptor.normalizedLevel,
-                        isOn: isOn
+                        isOn: isOn,
+                        normalizedColor: descriptor.normalizedColor
                     ),
                     expectedPowerState: isOn,
-                    expectedLevel: nil
+                    expectedLevel: nil,
+                    expectedColor: nil
                 )
                 state = .commandIsPending(
                     deviceId: deviceId,
                     descriptor: descriptor,
                     pendingCommand: pendingCommand
                 )
-                return [.sendCommand(request)]
+                return [.sendCommand(command)]
             }
 
             guard let levelKey = descriptor.levelKey else { return [] }
@@ -201,31 +229,71 @@ final class SingleLightStore: StartableStore {
                 signalName: levelKey,
                 value: .int(rawLevel)
             )
+            let command = SingleLightGatewayCommand.data(request)
             let pendingCommand = SingleLightPendingCommand(
-                request: request,
+                command: command,
                 presentation: .init(
                     normalizedLevel: descriptor.normalizedLevel(forRawLevel: rawLevel),
-                    isOn: isOn
+                    isOn: isOn,
+                    normalizedColor: descriptor.normalizedColor
                 ),
                 expectedPowerState: nil,
-                expectedLevel: rawLevel
+                expectedLevel: rawLevel,
+                expectedColor: nil
             )
             state = .commandIsPending(
                 deviceId: deviceId,
                 descriptor: descriptor,
                 pendingCommand: pendingCommand
             )
-            return [.sendCommand(request)]
+            return [.sendCommand(command)]
+        }
+
+        private mutating func setColor(
+            deviceId: DeviceIdentifier,
+            descriptor: DrivingLightControlDescriptor?,
+            normalizedColor: Double
+        ) -> [SingleLightEffect] {
+            guard let descriptor,
+                  let color = descriptor.color else { return [] }
+
+            let rawColor = color.rawValue(forNormalizedValue: normalizedColor)
+            let command = SingleLightGatewayCommand.color(
+                LightGatewayColorCommandRequest(
+                    deviceId: deviceId,
+                    signalName: color.key,
+                    value: .int(rawColor),
+                    colorModeSignalName: color.modeKey,
+                    colorModeValue: color.modeValue
+                )
+            )
+            let pendingCommand = SingleLightPendingCommand(
+                command: command,
+                presentation: .init(
+                    normalizedLevel: descriptor.normalizedLevel,
+                    isOn: descriptor.isOn,
+                    normalizedColor: color.normalizedValue(forRawValue: rawColor)
+                ),
+                expectedPowerState: nil,
+                expectedLevel: nil,
+                expectedColor: rawColor
+            )
+            state = .commandIsPending(
+                deviceId: deviceId,
+                descriptor: descriptor,
+                pendingCommand: pendingCommand
+            )
+            return [.sendCommand(command)]
         }
     }
 
     struct Dependencies {
         let observeLight: @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
-        let sendCommand: @Sendable (LightGatewayCommandRequest) async -> Void
+        let sendCommand: @Sendable (SingleLightGatewayCommand) async -> Void
 
         init(
             observeLight: @escaping @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable,
-            sendCommand: @escaping @Sendable (LightGatewayCommandRequest) async -> Void
+            sendCommand: @escaping @Sendable (SingleLightGatewayCommand) async -> Void
         ) {
             self.observeLight = observeLight
             self.sendCommand = sendCommand
@@ -250,8 +318,16 @@ final class SingleLightStore: StartableStore {
         state.displayedIsOn
     }
 
+    var displayedNormalizedColor: Double {
+        state.displayedNormalizedColor
+    }
+
     var isInteractionEnabled: Bool {
         descriptor != nil
+    }
+
+    var isColorInteractionEnabled: Bool {
+        descriptor?.color != nil
     }
 
     private let observationTask = TaskHandle()
@@ -294,9 +370,9 @@ final class SingleLightStore: StartableStore {
     private func handle(_ effects: [SingleLightEffect]) {
         for effect in effects {
             switch effect {
-            case .sendCommand(let request):
+            case .sendCommand(let command):
                 Task { [worker] in
-                    await worker.sendCommand(request)
+                    await worker.sendCommand(command)
                 }
             }
         }
@@ -304,11 +380,11 @@ final class SingleLightStore: StartableStore {
 
     private actor Worker {
         private let observeLightSource: @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
-        private let sendCommandAction: @Sendable (LightGatewayCommandRequest) async -> Void
+        private let sendCommandAction: @Sendable (SingleLightGatewayCommand) async -> Void
 
         init(
             observeLight: @escaping @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable,
-            sendCommand: @escaping @Sendable (LightGatewayCommandRequest) async -> Void
+            sendCommand: @escaping @Sendable (SingleLightGatewayCommand) async -> Void
         ) {
             self.observeLightSource = observeLight
             self.sendCommandAction = sendCommand
@@ -330,8 +406,8 @@ final class SingleLightStore: StartableStore {
             }
         }
 
-        func sendCommand(_ request: LightGatewayCommandRequest) async {
-            await sendCommandAction(request)
+        func sendCommand(_ command: SingleLightGatewayCommand) async {
+            await sendCommandAction(command)
         }
     }
 }

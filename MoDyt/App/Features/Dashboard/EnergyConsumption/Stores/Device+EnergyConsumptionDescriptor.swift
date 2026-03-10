@@ -6,19 +6,65 @@ extension Device {
             return nil
         }
 
-        for key in Self.preferredEnergyConsumptionKeys {
+        for key in Self.preferredDirectEnergyConsumptionKeys {
             if let descriptor = makeEnergyConsumptionDescriptor(forKey: key) {
                 return descriptor
             }
         }
 
-        for key in data.keys.sorted() {
+        if let descriptor = aggregatedEnergyDistributionDescriptor() {
+            return descriptor
+        }
+
+        for key in Self.preferredCumulativeEnergyConsumptionKeys {
+            if let descriptor = makeEnergyConsumptionDescriptor(forKey: key) {
+                return descriptor
+            }
+        }
+
+        let rankedLikelyKeys = data.keys
+            .filter(Self.isLikelyEnergyConsumptionKey)
+            .sorted { lhs, rhs in
+                let lhsPriority = Self.energyConsumptionPriority(forKey: lhs)
+                let rhsPriority = Self.energyConsumptionPriority(forKey: rhs)
+                if lhsPriority != rhsPriority {
+                    return lhsPriority < rhsPriority
+                }
+                return lhs.localizedStandardCompare(rhs) == .orderedAscending
+            }
+
+        for key in rankedLikelyKeys {
             guard Self.isLikelyEnergyConsumptionKey(key) else { continue }
             guard let descriptor = makeEnergyConsumptionDescriptor(forKey: key) else { continue }
             return descriptor
         }
 
         return nil
+    }
+
+    private func aggregatedEnergyDistributionDescriptor() -> EnergyConsumptionStore.Descriptor? {
+        let componentKeys = data.keys
+            .filter(Self.isEnergyDistributionComponentKey)
+            .sorted()
+
+        guard componentKeys.count >= 2 else {
+            return nil
+        }
+
+        let rawTotal = componentKeys
+            .compactMap(numericEnergyValue(forKey:))
+            .reduce(0, +)
+
+        guard rawTotal > 0 else {
+            return nil
+        }
+
+        return EnergyConsumptionStore.Descriptor(
+            key: "energyDistrib_TOTAL",
+            value: rawTotal / 1_000,
+            range: Self.defaultEnergyConsumptionRange,
+            unitSymbol: "kWh"
+        )
     }
 
     private func makeEnergyConsumptionDescriptor(forKey key: String) -> EnergyConsumptionStore.Descriptor? {
@@ -114,12 +160,65 @@ extension Device {
             || normalized.contains("energy")
     }
 
-    private static let preferredEnergyConsumptionKeys = [
-        "energyIndex_ELEC",
-        "energyIndex",
+    private static func isEnergyDistributionComponentKey(_ key: String) -> Bool {
+        let normalized = key.uppercased()
+        guard normalized.hasPrefix("ENERGYDISTRIB_") else {
+            return false
+        }
+
+        return normalized.hasSuffix("_HEATING")
+            || normalized.hasSuffix("_COOLING")
+            || normalized.hasSuffix("_HOTWATER")
+            || normalized.hasSuffix("_OUTLET")
+            || normalized.hasSuffix("_OTHER")
+    }
+
+    private static func energyConsumptionPriority(forKey key: String) -> Int {
+        let normalized = key.lowercased()
+
+        if normalized == "consumption" || normalized.contains("daily") {
+            return 0
+        }
+        if normalized.contains("energyhisto") && normalized.contains("total") {
+            return 10
+        }
+        if normalized.contains("energydistrib") && normalized.contains("total") {
+            return 20
+        }
+        if normalized.contains("energyindex") && normalized.contains("total") {
+            return 30
+        }
+        if normalized.contains("energyhisto") {
+            return 40
+        }
+        if normalized.contains("energyindex") {
+            return 50
+        }
+        if normalized.contains("energydistrib") {
+            return 60
+        }
+        if normalized.contains("consumption") || normalized.contains("kwh") {
+            return 70
+        }
+        return 80
+    }
+
+    private static let preferredDirectEnergyConsumptionKeys = [
+        "dailyConsumption",
+        "dailyEnergy",
+        "consumption",
+        "energyHisto_ELEC_TOTAL",
         "energyHisto_ELEC",
         "energyHisto",
-        "consumption",
+        "energyDistrib_ELEC_TOTAL"
+    ]
+
+    private static let preferredCumulativeEnergyConsumptionKeys = [
+        "energyIndex_ELEC_TOTAL",
+        "energyIndex_ELEC",
+        "energyTotIndexWatt",
+        "energyIndexTi1",
+        "energyIndex",
         "energy"
     ]
 

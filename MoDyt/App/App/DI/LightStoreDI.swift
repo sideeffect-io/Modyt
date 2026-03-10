@@ -10,9 +10,11 @@ enum SingleLightStoreDependencyFactory {
 
         return .init(
             observeLight: { await deviceRepository.observeByID($0) },
-            sendCommand: { request in
-                let command = makeLightCommand(for: request)
-                try? await gatewayClient.send(text: command.request)
+            sendCommand: { command in
+                for request in gatewayRequests(for: command) {
+                    let gatewayCommand = makeLightCommand(for: request)
+                    try? await gatewayClient.send(text: gatewayCommand.request)
+                }
             }
         )
     }
@@ -91,6 +93,25 @@ private extension LightGatewayCommandValue {
             return .bool(value)
         case .int(let value):
             return .int(value)
+        case .string(let value):
+            return .string(value)
         }
+    }
+}
+
+private nonisolated func gatewayRequests(
+    for command: SingleLightGatewayCommand
+) -> [LightGatewayCommandRequest] {
+    switch command {
+    case .data(let request):
+        return [request]
+    case .color(let request):
+        return [
+            LightGatewayCommandRequest(
+                deviceId: request.deviceId,
+                signalName: request.signalName,
+                value: request.value
+            )
+        ]
     }
 }

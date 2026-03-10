@@ -93,6 +93,10 @@ public actor TydomConnection {
         rawMessageStream
     }
 
+    public func mode() -> Configuration.Mode {
+        configuration.mode
+    }
+
     public func setAppActive(_ isActive: Bool) async {
         await activityStore.setActive(isActive)
         if isActive, let socketTask, receiveTask == nil {
@@ -179,6 +183,10 @@ public actor TydomConnection {
     }
 
     public func disconnect() async {
+        await disconnect(shouldNotifyOnDisconnect: true)
+    }
+
+    func disconnect(shouldNotifyOnDisconnect: Bool) async {
         messageContinuation?.finish()
         rawMessageContinuation?.finish()
         isWebSocketOpen = false
@@ -195,6 +203,7 @@ public actor TydomConnection {
         session = nil
         webSocketDelegate = nil
         log("Disconnected.")
+        guard shouldNotifyOnDisconnect else { return }
         Task { await dependencies.onDisconnect() }
     }
 
@@ -503,6 +512,14 @@ public actor TydomConnection {
                 _ = try? await self.send(TydomCommand.ping())
             }
         }
+    }
+
+    func startStreamingIfNeeded() {
+        guard let socketTask else { return }
+        if receiveTask == nil {
+            startReceiving(from: socketTask)
+        }
+        startKeepAlive()
     }
 
     func waitForWebSocketOpen(timeout: TimeInterval) async throws {

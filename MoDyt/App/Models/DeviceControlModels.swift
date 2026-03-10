@@ -101,18 +101,232 @@ struct DeviceControlDescriptor: Sendable, Equatable {
     let range: ClosedRange<Double>
 }
 
+struct DrivingLightColorDescriptor: Sendable, Equatable {
+    let key: String
+    let modeKey: String?
+    let modeValue: String?
+    let value: Double
+    let range: ClosedRange<Double>
+
+    var normalizedValue: Double {
+        normalizedValue(forRawValue: Int(value.rounded()))
+    }
+
+    func rawValue(forNormalizedValue normalizedValue: Double) -> Int {
+        switch encoding {
+        case .packedXY:
+            return packedXYRawValue(forNormalizedValue: normalizedValue)
+        case .hueDegrees:
+            return linearRawValue(forNormalizedValue: normalizedValue, in: 0...360)
+        case .linear:
+            return linearRawValue(forNormalizedValue: normalizedValue, in: range)
+        }
+    }
+
+    func normalizedValue(forRawValue rawValue: Int) -> Double {
+        switch encoding {
+        case .packedXY:
+            return normalizedPackedXYValue(forRawValue: rawValue)
+        case .hueDegrees:
+            return linearNormalizedValue(forRawValue: rawValue, in: 0...360)
+        case .linear:
+            return linearNormalizedValue(forRawValue: rawValue, in: range)
+        }
+    }
+
+    private enum Encoding {
+        case packedXY
+        case hueDegrees
+        case linear
+    }
+
+    private var encoding: Encoding {
+        let normalizedKey = key.lowercased()
+        if normalizedKey == "colorxy" {
+            return .packedXY
+        }
+        if normalizedKey.contains("hue") {
+            return .hueDegrees
+        }
+        return .linear
+    }
+
+    private func linearRawValue(
+        forNormalizedValue normalizedValue: Double,
+        in range: ClosedRange<Double>
+    ) -> Int {
+        let clampedNormalizedValue = min(max(normalizedValue, 0), 1)
+        let rawValue = range.lowerBound + ((range.upperBound - range.lowerBound) * clampedNormalizedValue)
+        return Int(rawValue.rounded())
+    }
+
+    private func linearNormalizedValue(
+        forRawValue rawValue: Int,
+        in range: ClosedRange<Double>
+    ) -> Double {
+        let clampedValue = min(max(Double(rawValue), range.lowerBound), range.upperBound)
+        let span = range.upperBound - range.lowerBound
+        guard span > 0 else { return 0 }
+        return min(max((clampedValue - range.lowerBound) / span, 0), 1)
+    }
+
+    private func packedXYRawValue(forNormalizedValue normalizedValue: Double) -> Int {
+        let clampedNormalizedValue = min(max(normalizedValue, 0), 1)
+        let rgb = Self.rgbComponents(forHue: clampedNormalizedValue)
+        let xy = Self.xyCoordinates(for: rgb)
+        let xWord = Self.packedXYWord(for: xy.x)
+        let yWord = Self.packedXYWord(for: xy.y)
+        let packedValue = (yWord << 16) | xWord
+        return Int(packedValue)
+    }
+
+    private func normalizedPackedXYValue(forRawValue rawValue: Int) -> Double {
+        let xy = Self.xyCoordinates(forPackedValue: rawValue)
+        let rgb = Self.rgbComponents(forXY: xy.x, y: xy.y)
+        return Self.normalizedHue(for: rgb) ?? DrivingLightControlDescriptor.defaultNormalizedColor
+    }
+
+    private static func packedXYWord(for coordinate: Double) -> UInt32 {
+        let clampedCoordinate = min(max(coordinate, 0), 1)
+        let scaledWord = UInt32((clampedCoordinate * packedXYComponentDenominator).rounded())
+        return min(scaledWord, packedXYComponentWordMax)
+    }
+
+    private static func xyCoordinates(forPackedValue rawValue: Int) -> (x: Double, y: Double) {
+        let packedValue = UInt32(clamping: rawValue)
+
+        // Captured Tydom `colorXY` values decode plausibly when x is stored in the low word.
+        let xWord = Double(packedValue & 0xFFFF)
+        let yWord = Double((packedValue >> 16) & 0xFFFF)
+
+        return (
+            x: min(max(xWord / packedXYComponentDenominator, 0), 1),
+            y: min(max(yWord / packedXYComponentDenominator, 0), 1)
+        )
+    }
+
+    private static func rgbComponents(forHue normalizedHue: Double) -> (red: Double, green: Double, blue: Double) {
+        let hue = normalizedHue * 6
+        let segment = Int(floor(hue)) % 6
+        let progress = hue - floor(hue)
+        let q = 1 - progress
+        let t = progress
+
+        switch segment {
+        case 0:
+            return (1, t, 0)
+        case 1:
+            return (q, 1, 0)
+        case 2:
+            return (0, 1, t)
+        case 3:
+            return (0, q, 1)
+        case 4:
+            return (t, 0, 1)
+        default:
+            return (1, 0, q)
+        }
+    }
+
+    private static func xyCoordinates(for rgb: (red: Double, green: Double, blue: Double)) -> (x: Double, y: Double) {
+        let red = linearizedComponent(rgb.red)
+        let green = linearizedComponent(rgb.green)
+        let blue = linearizedComponent(rgb.blue)
+
+        let xComponent = (red * 0.41239079926595934) + (green * 0.357584339383878) + (blue * 0.1804807884018343)
+        let yComponent = (red * 0.21263900587151027) + (green * 0.715168678767756) + (blue * 0.07219231536073371)
+        let zComponent = (red * 0.01933081871559182) + (green * 0.11919477979462598) + (blue * 0.9505321522496607)
+        let total = xComponent + yComponent + zComponent
+
+        guard total > 0.00001 else {
+            return (0.3127, 0.3290)
+        }
+
+        return (
+            x: xComponent / total,
+            y: yComponent / total
+        )
+    }
+
+    private static func rgbComponents(forXY x: Double, y: Double) -> (red: Double, green: Double, blue: Double) {
+        guard y > 0.00001 else { return (1, 1, 1) }
+
+        let luminance = 1.0
+        let xComponent = (luminance / y) * x
+        let zComponent = (luminance / y) * (1 - x - y)
+
+        var red = (xComponent * 3.240969941904521) - (luminance * 1.537383177570093) - (zComponent * 0.498610760293)
+        var green = (-xComponent * 0.96924363628087) + (luminance * 1.87596750150772) + (zComponent * 0.041555057407175)
+        var blue = (xComponent * 0.055630079696993) - (luminance * 0.20397695888897) + (zComponent * 1.056971514242878)
+
+        red = max(red, 0)
+        green = max(green, 0)
+        blue = max(blue, 0)
+
+        let scale = max(red, green, blue, 1)
+        return (
+            red: gammaCorrectedComponent(red / scale),
+            green: gammaCorrectedComponent(green / scale),
+            blue: gammaCorrectedComponent(blue / scale)
+        )
+    }
+
+    private static func normalizedHue(for rgb: (red: Double, green: Double, blue: Double)) -> Double? {
+        let maximum = max(rgb.red, rgb.green, rgb.blue)
+        let minimum = min(rgb.red, rgb.green, rgb.blue)
+        let delta = maximum - minimum
+
+        guard delta > 0.00001 else { return nil }
+
+        let hue: Double
+        switch maximum {
+        case rgb.red:
+            hue = ((rgb.green - rgb.blue) / delta).truncatingRemainder(dividingBy: 6)
+        case rgb.green:
+            hue = ((rgb.blue - rgb.red) / delta) + 2
+        default:
+            hue = ((rgb.red - rgb.green) / delta) + 4
+        }
+
+        let normalizedHue = hue / 6
+        return normalizedHue >= 0 ? normalizedHue : normalizedHue + 1
+    }
+
+    private static func linearizedComponent(_ component: Double) -> Double {
+        if component <= 0.04045 {
+            return component / 12.92
+        }
+        return pow((component + 0.055) / 1.055, 2.4)
+    }
+
+    private static func gammaCorrectedComponent(_ component: Double) -> Double {
+        if component <= 0.0031308 {
+            return 12.92 * component
+        }
+        return (1.055 * pow(component, 1 / 2.4)) - 0.055
+    }
+
+    private static let packedXYComponentDenominator = 65_536.0
+    private static let packedXYComponentWordMax = UInt32(UInt16.max)
+}
+
 struct DrivingLightControlDescriptor: Sendable, Equatable {
     let powerKey: String?
     let levelKey: String?
     let isOn: Bool
     let level: Double
     let range: ClosedRange<Double>
+    let color: DrivingLightColorDescriptor?
 
     var normalizedLevel: Double {
         let span = range.upperBound - range.lowerBound
         guard span > 0 else { return isOn ? 1 : 0 }
         let normalized = (level - range.lowerBound) / span
         return min(max(normalized, 0), 1)
+    }
+
+    var normalizedColor: Double {
+        color?.normalizedValue ?? Self.defaultNormalizedColor
     }
 
     var percentage: Int {
@@ -143,4 +357,6 @@ struct DrivingLightControlDescriptor: Sendable, Equatable {
     func isLit(level rawLevel: Int) -> Bool {
         Double(rawLevel) > range.lowerBound
     }
+
+    static let defaultNormalizedColor = 0.12
 }

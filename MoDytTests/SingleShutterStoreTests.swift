@@ -49,12 +49,12 @@ struct SingleShutterStateDerivedValueTests {
     private static let deviceId = DeviceIdentifier(deviceId: 10, endpointId: 1)
 
     @Test
-    func movingStateUsesLivePositionForGaugeAndSeparateDestinationMarker() {
-        let state = SingleShutterState.shutterIsMovingInApp(
+    func localTargetMovementUsesLivePositionForGaugeAndSeparateDestinationMarker() {
+        let state = SingleShutterState.shutterIsMovingToLocalTarget(
             deviceId: Self.deviceId,
             position: 40,
             target: 75,
-            receivedValueCountAfterInAppTarget: 0
+            ignoresNextMatchingPosition: true
         )
 
         #expect(state.gaugePosition == ShutterPositionMapper.gaugePosition(from: 40))
@@ -64,26 +64,26 @@ struct SingleShutterStateDerivedValueTests {
     }
 
     @Test
-    func externalMovingStateDoesNotReportUserInitiatedMovement() {
-        let state = SingleShutterState.shutterIsMovingInApp(
+    func pendingLocalTargetOutsideMovementDoesNotExposeDestinationMarker() {
+        let state = SingleShutterState.featureIsStarted(
             deviceId: Self.deviceId,
             position: 70,
-            target: 25
+            pendingLocalTarget: 25
         )
 
         #expect(state.gaugePosition == ShutterPositionMapper.gaugePosition(from: 70))
-        #expect(state.destinationGaugePosition == ShutterPositionMapper.gaugePosition(from: 25))
-        #expect(state.movementDirection == .closing)
-        #expect(!state.isUserInitiatedMovement)
+        #expect(state.destinationGaugePosition == nil)
+        #expect(state.movementDirection == .idle)
+        #expect(state.movingTarget == nil)
+        #expect(!state.isMovingInApp)
     }
 
     @Test
     func movingStateHidesDestinationMarkerWhenWithinCompletionTolerance() {
-        let state = SingleShutterState.shutterIsMovingInApp(
+        let state = SingleShutterState.shutterIsMovingToLocalTarget(
             deviceId: Self.deviceId,
             position: 98,
-            target: 100,
-            receivedValueCountAfterInAppTarget: 2
+            target: 100
         )
 
         #expect(state.destinationGaugePosition == nil)
@@ -103,9 +103,8 @@ struct SingleShutterReducerTests {
     func reducerAppliesConfiguredTransition(_ transition: TransitionCase) {
         var stateMachine = SingleShutterStore.StateMachine(state: transition.initial)
         let effects = stateMachine.reduce(transition.event)
-        let nextState = stateMachine.state
 
-        #expect(nextState == transition.expected)
+        #expect(stateMachine.state == transition.expected)
         #expect(effects == transition.expectedEffects)
     }
 
@@ -118,18 +117,20 @@ struct SingleShutterReducerTests {
             secondTask.cancel()
         }
 
-        let lhs = SingleShutterState.shutterIsMovingInApp(
+        let lhs = SingleShutterState.shutterIsMovingToLocalTarget(
             deviceId: Self.deviceId,
             position: 33,
             target: 80,
-            timeoutTask: firstTask
+            timeoutTask: firstTask,
+            ignoresNextMatchingPosition: true
         )
 
-        let rhs = SingleShutterState.shutterIsMovingInApp(
+        let rhs = SingleShutterState.shutterIsMovingToLocalTarget(
             deviceId: Self.deviceId,
             position: 33,
             target: 80,
-            timeoutTask: secondTask
+            timeoutTask: secondTask,
+            ignoresNextMatchingPosition: true
         )
 
         #expect(lhs == rhs)
@@ -140,202 +141,53 @@ struct SingleShutterReducerTests {
         let timeoutTask = Task<Void, Never> {}
         defer { timeoutTask.cancel() }
 
-        let initial = SingleShutterState.shutterIsMovingInApp(
+        let initial = SingleShutterState.shutterIsMovingToLocalTarget(
             deviceId: Self.deviceId,
             position: 33,
             target: 80,
-            timeoutTask: nil,
-            receivedValueCountAfterInAppTarget: 1
+            ignoresNextMatchingPosition: true
         )
 
         var stateMachine = SingleShutterStore.StateMachine(state: initial)
         let effects = stateMachine.reduce(.timeoutTaskWasCreated(task: timeoutTask))
-        let nextState = stateMachine.state
 
         #expect(effects.isEmpty)
-        #expect(nextState.timeoutTask != nil)
+        #expect(stateMachine.state.timeoutTask != nil)
         #expect(
-            nextState == .shutterIsMovingInApp(
+            stateMachine.state == .shutterIsMovingToLocalTarget(
                 deviceId: Self.deviceId,
                 position: 33,
                 target: 80,
-                receivedValueCountAfterInAppTarget: 1
+                ignoresNextMatchingPosition: true
             )
         )
     }
 
     @Test
-    func appInitiatedMoveIgnoresSecondReceivedValue() {
+    func movingToLocalTargetIgnoresFirstMatchingPositionOnly() {
         var stateMachine = SingleShutterStore.StateMachine(
-            state: .featureIsStarted(
-                deviceId: Self.deviceId,
-                position: 100,
-                target: nil
-            )
-        )
-
-        let startEffects = stateMachine.reduce(.targetWasSetInApp(target: 75))
-        #expect(
-            startEffects == [
-                .sendCommand(deviceId: Self.deviceId, position: 75),
-                .startTimeout,
-                .persistTarget(deviceId: Self.deviceId, target: 75),
-            ]
-        )
-        #expect(
-            stateMachine.state == .shutterIsMovingInApp(
+            state: .shutterIsMovingToLocalTarget(
                 deviceId: Self.deviceId,
                 position: 100,
                 target: 75,
-                receivedValueCountAfterInAppTarget: 0
+                ignoresNextMatchingPosition: true
             )
         )
 
-        let firstEffects = stateMachine.reduce(.valueWasReceived(position: 100, target: 75))
-        #expect(firstEffects.isEmpty)
+        let ignoredEffects = stateMachine.reduce(.positionWasReceived(position: 75))
+        #expect(ignoredEffects.isEmpty)
         #expect(
-            stateMachine.state == .shutterIsMovingInApp(
+            stateMachine.state == .shutterIsMovingToLocalTarget(
                 deviceId: Self.deviceId,
                 position: 100,
                 target: 75,
-                receivedValueCountAfterInAppTarget: 1
+                ignoresNextMatchingPosition: false
             )
         )
 
-        let secondEffects = stateMachine.reduce(.valueWasReceived(position: 75, target: 75))
-        #expect(secondEffects.isEmpty)
+        let completionEffects = stateMachine.reduce(.positionWasReceived(position: 75))
         #expect(
-            stateMachine.state == .shutterIsMovingInApp(
-                deviceId: Self.deviceId,
-                position: 100,
-                target: 75,
-                receivedValueCountAfterInAppTarget: 2
-            )
-        )
-
-        let thirdEffects = stateMachine.reduce(.valueWasReceived(position: 98, target: 75))
-        #expect(thirdEffects.isEmpty)
-        #expect(
-            stateMachine.state == .shutterIsMovingInApp(
-                deviceId: Self.deviceId,
-                position: 98,
-                target: 75,
-                receivedValueCountAfterInAppTarget: 3
-            )
-        )
-    }
-
-    @Test
-    func externalTargetChangeIgnoresNextEchoedTargetValue() {
-        var stateMachine = SingleShutterStore.StateMachine(
-            state: .featureIsStarted(
-                deviceId: Self.deviceId,
-                position: 10,
-                target: nil
-            )
-        )
-
-        let startEffects = stateMachine.reduce(.valueWasReceived(position: 20, target: 55))
-        #expect(startEffects == [.startTimeout])
-        #expect(
-            stateMachine.state == .shutterIsMovingInApp(
-                deviceId: Self.deviceId,
-                position: 20,
-                target: 55,
-                receivedValueCountAfterInAppTarget: 1
-            )
-        )
-
-        let secondEffects = stateMachine.reduce(.valueWasReceived(position: 55, target: 55))
-        #expect(secondEffects.isEmpty)
-        #expect(
-            stateMachine.state == .shutterIsMovingInApp(
-                deviceId: Self.deviceId,
-                position: 20,
-                target: 55,
-                receivedValueCountAfterInAppTarget: 2
-            )
-        )
-
-        let thirdEffects = stateMachine.reduce(.valueWasReceived(position: 50, target: 55))
-        #expect(thirdEffects.isEmpty)
-        #expect(
-            stateMachine.state == .shutterIsMovingInApp(
-                deviceId: Self.deviceId,
-                position: 50,
-                target: 55,
-                receivedValueCountAfterInAppTarget: 3
-            )
-        )
-    }
-
-    @Test
-    func retargetResetsReceivedValueCounter() {
-        var stateMachine = SingleShutterStore.StateMachine(
-            state: .shutterIsMovingInApp(
-                deviceId: Self.deviceId,
-                position: 40,
-                target: 60,
-                receivedValueCountAfterInAppTarget: 1
-            )
-        )
-
-        let retargetEffects = stateMachine.reduce(.targetWasSetInApp(target: 20))
-        #expect(
-            retargetEffects == [
-                .cancelTimeout(task: nil),
-                .sendCommand(deviceId: Self.deviceId, position: 20),
-                .startTimeout,
-                .persistTarget(deviceId: Self.deviceId, target: 20),
-            ]
-        )
-        #expect(
-            stateMachine.state == .shutterIsMovingInApp(
-                deviceId: Self.deviceId,
-                position: 40,
-                target: 20,
-                receivedValueCountAfterInAppTarget: 0
-            )
-        )
-
-        let firstEffects = stateMachine.reduce(.valueWasReceived(position: 40, target: 20))
-        #expect(firstEffects.isEmpty)
-        #expect(
-            stateMachine.state == .shutterIsMovingInApp(
-                deviceId: Self.deviceId,
-                position: 40,
-                target: 20,
-                receivedValueCountAfterInAppTarget: 1
-            )
-        )
-
-        let secondEffects = stateMachine.reduce(.valueWasReceived(position: 20, target: 20))
-        #expect(secondEffects.isEmpty)
-        #expect(
-            stateMachine.state == .shutterIsMovingInApp(
-                deviceId: Self.deviceId,
-                position: 40,
-                target: 20,
-                receivedValueCountAfterInAppTarget: 2
-            )
-        )
-    }
-
-    @Test
-    func timeoutEndsAppInitiatedMoveAfterIgnoredSecondValue() {
-        var stateMachine = SingleShutterStore.StateMachine(
-            state: .shutterIsMovingInApp(
-                deviceId: Self.deviceId,
-                position: 100,
-                target: 75,
-                receivedValueCountAfterInAppTarget: 2
-            )
-        )
-
-        let effects = stateMachine.reduce(.timeoutHasExpired)
-
-        #expect(
-            effects == [
+            completionEffects == [
                 .cancelTimeout(task: nil),
                 .persistTarget(deviceId: Self.deviceId, target: nil),
             ]
@@ -343,8 +195,34 @@ struct SingleShutterReducerTests {
         #expect(
             stateMachine.state == .featureIsStarted(
                 deviceId: Self.deviceId,
-                position: 100,
-                target: nil
+                position: 75,
+                pendingLocalTarget: nil
+            )
+        )
+    }
+
+    @Test
+    func settingCurrentTargetOnlySendsCommandWithoutEnteringMovingState() {
+        var stateMachine = SingleShutterStore.StateMachine(
+            state: .featureIsStarted(
+                deviceId: Self.deviceId,
+                position: 75,
+                pendingLocalTarget: nil
+            )
+        )
+
+        let effects = stateMachine.reduce(.targetWasSetInApp(target: 75))
+
+        #expect(
+            effects == [
+                .sendCommand(deviceId: Self.deviceId, position: 75)
+            ]
+        )
+        #expect(
+            stateMachine.state == .featureIsStarted(
+                deviceId: Self.deviceId,
+                position: 75,
+                pendingLocalTarget: nil
             )
         )
     }
@@ -353,36 +231,38 @@ struct SingleShutterReducerTests {
 
     private static let transitionCases: [TransitionCase] = [
         .init(
-            initial: .featureIsIdle(deviceId: deviceId, position: 0, target: nil),
-            event: .valueWasReceived(position: 35, target: nil),
-            expected: .featureIsStarted(deviceId: deviceId, position: 35, target: nil),
+            initial: .featureIsIdle(deviceId: deviceId, position: 0, pendingLocalTarget: nil),
+            event: .positionWasReceived(position: 35),
+            expected: .featureIsStarted(deviceId: deviceId, position: 35, pendingLocalTarget: nil),
             expectedEffects: []
         ),
         .init(
-            initial: .featureIsStarted(deviceId: deviceId, position: 20, target: 10),
-            event: .valueWasReceived(position: 60, target: nil),
-            expected: .featureIsStarted(deviceId: deviceId, position: 60, target: nil),
-            expectedEffects: []
+            initial: .featureIsIdle(deviceId: deviceId, position: 0, pendingLocalTarget: 55),
+            event: .positionWasReceived(position: 55),
+            expected: .featureIsStarted(deviceId: deviceId, position: 55, pendingLocalTarget: nil),
+            expectedEffects: [
+                .persistTarget(deviceId: deviceId, target: nil)
+            ]
         ),
         .init(
-            initial: .featureIsStarted(deviceId: deviceId, position: 10, target: nil),
-            event: .valueWasReceived(position: 20, target: 55),
-            expected: .shutterIsMovingInApp(
+            initial: .featureIsStarted(deviceId: deviceId, position: 20, pendingLocalTarget: nil),
+            event: .pendingLocalTargetWasObserved(target: 55),
+            expected: .shutterIsMovingToLocalTarget(
                 deviceId: deviceId,
                 position: 20,
                 target: 55,
-                receivedValueCountAfterInAppTarget: 1
+                ignoresNextMatchingPosition: true
             ),
             expectedEffects: [.startTimeout]
         ),
         .init(
-            initial: .featureIsStarted(deviceId: deviceId, position: 30, target: nil),
+            initial: .featureIsStarted(deviceId: deviceId, position: 30, pendingLocalTarget: nil),
             event: .targetWasSetInApp(target: 75),
-            expected: .shutterIsMovingInApp(
+            expected: .shutterIsMovingToLocalTarget(
                 deviceId: deviceId,
                 position: 30,
                 target: 75,
-                receivedValueCountAfterInAppTarget: 0
+                ignoresNextMatchingPosition: true
             ),
             expectedEffects: [
                 .sendCommand(deviceId: deviceId, position: 75),
@@ -391,74 +271,74 @@ struct SingleShutterReducerTests {
             ]
         ),
         .init(
-            initial: .shutterIsMovingInApp(deviceId: deviceId, position: 40, target: 60),
-            event: .targetWasSetInApp(target: 20),
-            expected: .shutterIsMovingInApp(
+            initial: .shutterIsMovingToLocalTarget(
+                deviceId: deviceId,
+                position: 40,
+                target: 60,
+                ignoresNextMatchingPosition: false
+            ),
+            event: .pendingLocalTargetWasObserved(target: 20),
+            expected: .shutterIsMovingToLocalTarget(
                 deviceId: deviceId,
                 position: 40,
                 target: 20,
-                receivedValueCountAfterInAppTarget: 0
+                ignoresNextMatchingPosition: true
             ),
             expectedEffects: [
                 .cancelTimeout(task: nil),
-                .sendCommand(deviceId: deviceId, position: 20),
                 .startTimeout,
-                .persistTarget(deviceId: deviceId, target: 20),
             ]
         ),
         .init(
-            initial: .shutterIsMovingInApp(deviceId: deviceId, position: 40, target: 60),
-            event: .valueWasReceived(position: 45, target: 20),
-            expected: .shutterIsMovingInApp(deviceId: deviceId, position: 45, target: 20),
-            expectedEffects: [.cancelTimeout(task: nil), .startTimeout]
-        ),
-        .init(
-            initial: .shutterIsMovingInApp(deviceId: deviceId, position: 20, target: 40),
-            event: .valueWasReceived(position: 70, target: 70),
-            expected: .featureIsStarted(deviceId: deviceId, position: 70, target: nil),
+            initial: .shutterIsMovingToLocalTarget(
+                deviceId: deviceId,
+                position: 40,
+                target: 60,
+                ignoresNextMatchingPosition: false
+            ),
+            event: .pendingLocalTargetWasObserved(target: nil),
+            expected: .featureIsStarted(
+                deviceId: deviceId,
+                position: 40,
+                pendingLocalTarget: nil
+            ),
             expectedEffects: [
-                .cancelTimeout(task: nil),
-                .persistTarget(deviceId: deviceId, target: nil),
+                .cancelTimeout(task: nil)
             ]
         ),
         .init(
-            initial: .shutterIsMovingInApp(deviceId: deviceId, position: 0, target: 100),
-            event: .valueWasReceived(position: 100, target: 100),
-            expected: .featureIsStarted(deviceId: deviceId, position: 100, target: nil),
-            expectedEffects: [
-                .cancelTimeout(task: nil),
-                .persistTarget(deviceId: deviceId, target: nil),
-            ]
-        ),
-        .init(
-            initial: .shutterIsMovingInApp(deviceId: deviceId, position: 0, target: 100),
-            event: .valueWasReceived(position: 98, target: 100),
-            expected: .featureIsStarted(deviceId: deviceId, position: 98, target: nil),
-            expectedEffects: [
-                .cancelTimeout(task: nil),
-                .persistTarget(deviceId: deviceId, target: nil),
-            ]
-        ),
-        .init(
-            initial: .shutterIsMovingInApp(deviceId: deviceId, position: 70, target: 80),
-            event: .timeoutHasExpired,
-            expected: .featureIsStarted(deviceId: deviceId, position: 70, target: nil),
-            expectedEffects: [
-                .cancelTimeout(task: nil),
-                .persistTarget(deviceId: deviceId, target: nil),
-            ]
-        ),
-        .init(
-            initial: .shutterIsMovingInApp(deviceId: deviceId, position: 70, target: 80),
-            event: .targetWasSetInApp(target: 80),
-            expected: .shutterIsMovingInApp(deviceId: deviceId, position: 70, target: 80),
+            initial: .shutterIsMovingToLocalTarget(
+                deviceId: deviceId,
+                position: 45,
+                target: 20,
+                ignoresNextMatchingPosition: false
+            ),
+            event: .positionWasReceived(position: 25),
+            expected: .shutterIsMovingToLocalTarget(
+                deviceId: deviceId,
+                position: 25,
+                target: 20,
+                ignoresNextMatchingPosition: false
+            ),
             expectedEffects: []
         ),
         .init(
-            initial: .featureIsStarted(deviceId: deviceId, position: 42, target: nil),
+            initial: .shutterIsMovingToLocalTarget(
+                deviceId: deviceId,
+                position: 70,
+                target: 80,
+                ignoresNextMatchingPosition: false
+            ),
             event: .timeoutHasExpired,
-            expected: .featureIsStarted(deviceId: deviceId, position: 42, target: nil),
-            expectedEffects: []
+            expected: .featureIsStarted(
+                deviceId: deviceId,
+                position: 70,
+                pendingLocalTarget: nil
+            ),
+            expectedEffects: [
+                .cancelTimeout(task: nil),
+                .persistTarget(deviceId: deviceId, target: nil),
+            ]
         ),
     ]
 }
@@ -484,15 +364,13 @@ struct SingleShutterStoreEffectTests {
         )
         store.start()
 
-        streamBox.yield(
-            makeShutter(identifier: id10, position: 25, target: nil)
-        )
+        streamBox.yield(makeShutter(identifier: id10, position: 25, target: nil))
 
         let didObserve = await waitUntil {
             store.state == .featureIsStarted(
                 deviceId: id10,
                 position: 25,
-                target: nil
+                pendingLocalTarget: nil
             )
         }
 
@@ -537,7 +415,7 @@ struct SingleShutterStoreEffectTests {
             store.state == .featureIsStarted(
                 deviceId: id10,
                 position: 0,
-                target: nil
+                pendingLocalTarget: nil
             )
         }
 
@@ -545,33 +423,182 @@ struct SingleShutterStoreEffectTests {
     }
 
     @Test
-    func observationUsesRawSingleShutterTarget() async {
+    func initialPendingLocalTargetStartsLocalTargetMovement() async {
         let streamBox = DeviceStreamBox()
+        let sleepDurations = RecordedSleepDurations()
 
         let store = SingleShutterStore(
             dependencies: .init(
                 observeDevice: { _ in streamBox.stream },
                 sendCommand: { _, _ in },
-                sleep: { _ in },
+                sleep: { duration in
+                    await sleepDurations.record(duration)
+                    try await Task.sleep(for: .seconds(5))
+                },
                 persistTarget: { _, _ in }
             ),
             deviceId: id10
         )
         store.start()
 
-        streamBox.yield(
-            makeShutter(identifier: id10, position: 100, target: 70)
-        )
+        streamBox.yield(makeShutter(identifier: id10, position: 100, target: 70))
 
         let didObserve = await waitUntil {
-            store.state == .featureIsStarted(
+            store.state == .shutterIsMovingToLocalTarget(
                 deviceId: id10,
                 position: 100,
-                target: 70
+                target: 70,
+                ignoresNextMatchingPosition: true
             )
         }
 
         #expect(didObserve)
+        #expect(store.gaugePosition == ShutterPositionMapper.gaugePosition(from: 100))
+        #expect(store.movingTarget == 70)
+
+        let durations = await sleepDurations.values()
+        #expect(durations == [.seconds(60)])
+        #expect(store.state.timeoutTask != nil)
+    }
+
+    @Test
+    func initialPendingLocalTargetAlreadyAtDestinationIsCleared() async {
+        let streamBox = DeviceStreamBox()
+        let targets = RecordedSingleShutterTargets()
+
+        let store = SingleShutterStore(
+            dependencies: .init(
+                observeDevice: { _ in streamBox.stream },
+                sendCommand: { _, _ in },
+                sleep: { _ in
+                    try await Task.sleep(for: .seconds(5))
+                },
+                persistTarget: { deviceId, target in
+                    await targets.record(deviceId: deviceId, target: target)
+                }
+            ),
+            deviceId: id10
+        )
+        store.start()
+
+        streamBox.yield(makeShutter(identifier: id10, position: 75, target: 75))
+
+        let didObserve = await waitUntil {
+            store.state == .featureIsStarted(
+                deviceId: id10,
+                position: 75,
+                pendingLocalTarget: nil
+            )
+        }
+
+        #expect(didObserve)
+
+        let persistedTargets = await targets.values()
+        #expect(persistedTargets == [
+            .init(deviceId: id10, target: nil)
+        ])
+    }
+
+    @Test
+    func sceneLikePositionOnlyCloseNeverExposesTargetOrGetsStuckMoving() async {
+        let streamBox = DeviceStreamBox()
+
+        let store = SingleShutterStore(
+            dependencies: .init(
+                observeDevice: { _ in streamBox.stream },
+                sendCommand: { _, _ in },
+                sleep: { _ in
+                    try await Task.sleep(for: .seconds(5))
+                },
+                persistTarget: { _, _ in }
+            ),
+            deviceId: id10
+        )
+        store.start()
+
+        streamBox.yield(makeShutter(identifier: id10, position: 100, target: nil))
+        let didStart = await waitUntil {
+            store.state == .featureIsStarted(
+                deviceId: id10,
+                position: 100,
+                pendingLocalTarget: nil
+            )
+        }
+        #expect(didStart)
+
+        streamBox.yield(makeShutter(identifier: id10, position: 80, target: nil))
+        let didObserveFirstMove = await waitUntil {
+            store.position == 80 && store.movingTarget == nil && !store.isMoving
+        }
+        #expect(didObserveFirstMove)
+
+        streamBox.yield(makeShutter(identifier: id10, position: 40, target: nil))
+        let didObserveSecondMove = await waitUntil {
+            store.position == 40 && store.movingTarget == nil && !store.isMoving
+        }
+        #expect(didObserveSecondMove)
+
+        streamBox.yield(makeShutter(identifier: id10, position: 0, target: nil))
+        let didFinishClose = await waitUntil {
+            store.state == .featureIsStarted(
+                deviceId: id10,
+                position: 0,
+                pendingLocalTarget: nil
+            )
+        }
+        #expect(didFinishClose)
+
+        #expect(store.movingTarget == nil)
+        #expect(!store.isMoving)
+        #expect(store.gaugePosition == ShutterPositionMapper.gaugePosition(from: 0))
+    }
+
+    @Test
+    func observingPendingLocalTargetFromAnotherCardKeepsGaugeAndTargetSeparate() async {
+        let streamBox = DeviceStreamBox()
+        let sleepDurations = RecordedSleepDurations()
+
+        let store = SingleShutterStore(
+            dependencies: .init(
+                observeDevice: { _ in streamBox.stream },
+                sendCommand: { _, _ in },
+                sleep: { duration in
+                    await sleepDurations.record(duration)
+                    try await Task.sleep(for: .seconds(5))
+                },
+                persistTarget: { _, _ in }
+            ),
+            deviceId: id10
+        )
+        store.start()
+
+        streamBox.yield(makeShutter(identifier: id10, position: 100, target: nil))
+        let didStart = await waitUntil {
+            store.state == .featureIsStarted(
+                deviceId: id10,
+                position: 100,
+                pendingLocalTarget: nil
+            )
+        }
+        #expect(didStart)
+
+        streamBox.yield(makeShutter(identifier: id10, position: 100, target: 0))
+
+        let didObserveLocalTarget = await waitUntil {
+            store.state == .shutterIsMovingToLocalTarget(
+                deviceId: id10,
+                position: 100,
+                target: 0,
+                ignoresNextMatchingPosition: true
+            )
+        }
+        #expect(didObserveLocalTarget)
+        #expect(store.gaugePosition == ShutterPositionMapper.gaugePosition(from: 100))
+        #expect(store.movingTarget == 0)
+        #expect(store.movementDirection == .closing)
+
+        let durations = await sleepDurations.values()
+        #expect(durations == [.seconds(60)])
     }
 
     @Test
@@ -589,7 +616,7 @@ struct SingleShutterStoreEffectTests {
                 },
                 sleep: { duration in
                     await sleepDurations.record(duration)
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    try await Task.sleep(for: .seconds(5))
                 },
                 persistTarget: { deviceId, target in
                     await targets.record(deviceId: deviceId, target: target)
@@ -599,15 +626,12 @@ struct SingleShutterStoreEffectTests {
         )
         store.start()
 
-        streamBox.yield(
-            makeShutter(identifier: id10, position: 20, target: nil)
-        )
-
+        streamBox.yield(makeShutter(identifier: id10, position: 20, target: nil))
         let didStart = await waitUntil {
             store.state == .featureIsStarted(
                 deviceId: id10,
                 position: 20,
-                target: nil
+                pendingLocalTarget: nil
             )
         }
         #expect(didStart)
@@ -623,11 +647,11 @@ struct SingleShutterStoreEffectTests {
         #expect(didEmitEffects)
 
         #expect(
-            store.state == .shutterIsMovingInApp(
+            store.state == .shutterIsMovingToLocalTarget(
                 deviceId: id10,
                 position: 20,
                 target: 75,
-                receivedValueCountAfterInAppTarget: 0
+                ignoresNextMatchingPosition: true
             )
         )
 
@@ -643,7 +667,6 @@ struct SingleShutterStoreEffectTests {
 
         let durations = await sleepDurations.values()
         #expect(durations == [.seconds(60)])
-
         #expect(store.state.timeoutTask != nil)
     }
 
@@ -677,21 +700,17 @@ struct SingleShutterStoreEffectTests {
         )
         store.start()
 
-        streamBox.yield(
-            makeShutter(identifier: id10, position: 20, target: nil)
-        )
-
+        streamBox.yield(makeShutter(identifier: id10, position: 20, target: nil))
         let didStart = await waitUntil {
             store.state == .featureIsStarted(
                 deviceId: id10,
                 position: 20,
-                target: nil
+                pendingLocalTarget: nil
             )
         }
         #expect(didStart)
 
         store.send(.targetWasSetInApp(target: 75))
-
         let firstTimeoutStarted = await waitUntilAsync {
             await timeoutLifecycle.startCount() == 1
         }
@@ -710,11 +729,11 @@ struct SingleShutterStoreEffectTests {
         #expect(firstTimeoutCancelled)
 
         #expect(
-            store.state == .shutterIsMovingInApp(
+            store.state == .shutterIsMovingToLocalTarget(
                 deviceId: id10,
                 position: 20,
                 target: 25,
-                receivedValueCountAfterInAppTarget: 0
+                ignoresNextMatchingPosition: true
             )
         )
 
@@ -730,7 +749,7 @@ struct SingleShutterStoreEffectTests {
     }
 
     @Test
-    func leavingMovingStateCancelsTimeoutAndPersistsNilTarget() async {
+    func appInitiatedObservationShortSequenceClearsTargetWithoutTimeout() async {
         let streamBox = DeviceStreamBox()
         let targets = RecordedSingleShutterTargets()
         let timeoutLifecycle = TimeoutLifecycleRecorder()
@@ -756,210 +775,58 @@ struct SingleShutterStoreEffectTests {
         )
         store.start()
 
-        streamBox.yield(
-            makeShutter(identifier: id10, position: 20, target: nil)
-        )
-
+        streamBox.yield(makeShutter(identifier: id10, position: 100, target: nil))
         let didStart = await waitUntil {
             store.state == .featureIsStarted(
                 deviceId: id10,
-                position: 20,
-                target: nil
+                position: 100,
+                pendingLocalTarget: nil
             )
         }
         #expect(didStart)
 
         store.send(.targetWasSetInApp(target: 75))
 
-        let timeoutStarted = await waitUntilAsync {
-            await timeoutLifecycle.startCount() == 1
+        streamBox.yield(makeShutter(identifier: id10, position: 100, target: 75))
+        let didObservePendingTarget = await waitUntil {
+            store.state == .shutterIsMovingToLocalTarget(
+                deviceId: id10,
+                position: 100,
+                target: 75,
+                ignoresNextMatchingPosition: true
+            )
         }
-        #expect(timeoutStarted)
+        #expect(didObservePendingTarget)
 
-        store.send(.valueWasReceived(position: 75, target: 75))
+        streamBox.yield(makeShutter(identifier: id10, position: 90, target: 75))
+        let didObserveProgress = await waitUntil {
+            store.state == .shutterIsMovingToLocalTarget(
+                deviceId: id10,
+                position: 90,
+                target: 75,
+                ignoresNextMatchingPosition: false
+            )
+        }
+        #expect(didObserveProgress)
 
-        let didStopMoving = await waitUntil {
+        streamBox.yield(makeShutter(identifier: id10, position: 75, target: 75))
+        let didFinishMove = await waitUntil {
             store.state == .featureIsStarted(
                 deviceId: id10,
                 position: 75,
-                target: nil
+                pendingLocalTarget: nil
             )
         }
-        #expect(didStopMoving)
+        #expect(didFinishMove)
 
         let timeoutCancelled = await waitUntilAsync {
             await timeoutLifecycle.cancelCount() >= 1
         }
         #expect(timeoutCancelled)
 
-        #expect(store.state.timeoutTask == nil)
-
-        let didPersistTwoTargets = await waitUntilAsync {
-            await targets.values().count == 2
-        }
-        #expect(didPersistTwoTargets)
-
         let persistedTargets = await targets.values()
         #expect(persistedTargets.contains(.init(deviceId: id10, target: 75)))
         #expect(persistedTargets.contains(.init(deviceId: id10, target: nil)))
-    }
-
-    @Test
-    func appInitiatedObservationDoesNotExposeIgnoredEchoedTargetPosition() async {
-        let streamBox = DeviceStreamBox()
-
-        let store = SingleShutterStore(
-            dependencies: .init(
-                observeDevice: { _ in streamBox.stream },
-                sendCommand: { _, _ in },
-                sleep: { _ in
-                    try await Task.sleep(for: .seconds(5))
-                },
-                persistTarget: { _, _ in }
-            ),
-            deviceId: id10
-        )
-        store.start()
-
-        streamBox.yield(
-            makeShutter(identifier: id10, position: 100, target: nil)
-        )
-
-        let didStart = await waitUntil {
-            store.state == .featureIsStarted(
-                deviceId: id10,
-                position: 100,
-                target: nil
-            )
-        }
-        #expect(didStart)
-
-        store.send(.targetWasSetInApp(target: 75))
-
-        let didEnterMovingState = await waitUntil {
-            store.state == .shutterIsMovingInApp(
-                deviceId: id10,
-                position: 100,
-                target: 75,
-                receivedValueCountAfterInAppTarget: 0
-            )
-        }
-        #expect(didEnterMovingState)
-
-        streamBox.yield(
-            makeShutter(identifier: id10, position: 100, target: 75)
-        )
-
-        let didObserveFirstEcho = await waitUntil {
-            store.state == .shutterIsMovingInApp(
-                deviceId: id10,
-                position: 100,
-                target: 75,
-                receivedValueCountAfterInAppTarget: 1
-            )
-        }
-        #expect(didObserveFirstEcho)
-
-        streamBox.yield(
-            makeShutter(identifier: id10, position: 75, target: 75)
-        )
-
-        let didIgnoreSecondEcho = await waitUntil {
-            store.state == .shutterIsMovingInApp(
-                deviceId: id10,
-                position: 100,
-                target: 75,
-                receivedValueCountAfterInAppTarget: 2
-            )
-        }
-        #expect(didIgnoreSecondEcho)
-
-        streamBox.yield(
-            makeShutter(identifier: id10, position: 98, target: 75)
-        )
-
-        let didObserveRealMovement = await waitUntil {
-            store.state == .shutterIsMovingInApp(
-                deviceId: id10,
-                position: 98,
-                target: 75,
-                receivedValueCountAfterInAppTarget: 3
-            )
-        }
-        #expect(didObserveRealMovement)
-    }
-
-    @Test
-    func externalObservationDoesNotExposeIgnoredEchoedTargetPosition() async {
-        let streamBox = DeviceStreamBox()
-
-        let store = SingleShutterStore(
-            dependencies: .init(
-                observeDevice: { _ in streamBox.stream },
-                sendCommand: { _, _ in },
-                sleep: { _ in
-                    try await Task.sleep(for: .seconds(5))
-                },
-                persistTarget: { _, _ in }
-            ),
-            deviceId: id10
-        )
-        store.start()
-
-        streamBox.yield(
-            makeShutter(identifier: id10, position: 100, target: nil)
-        )
-
-        let didStart = await waitUntil {
-            store.state == .featureIsStarted(
-                deviceId: id10,
-                position: 100,
-                target: nil
-            )
-        }
-        #expect(didStart)
-
-        streamBox.yield(
-            makeShutter(identifier: id10, position: 100, target: 75)
-        )
-
-        let didEnterMovingState = await waitUntil {
-            store.state == .shutterIsMovingInApp(
-                deviceId: id10,
-                position: 100,
-                target: 75,
-                receivedValueCountAfterInAppTarget: 1
-            )
-        }
-        #expect(didEnterMovingState)
-
-        streamBox.yield(
-            makeShutter(identifier: id10, position: 75, target: 75)
-        )
-
-        let didIgnoreEchoedCompletion = await waitUntil {
-            store.state == .shutterIsMovingInApp(
-                deviceId: id10,
-                position: 100,
-                target: 75,
-                receivedValueCountAfterInAppTarget: 2
-            )
-        }
-        #expect(didIgnoreEchoedCompletion)
-
-        streamBox.yield(
-            makeShutter(identifier: id10, position: 98, target: 75)
-        )
-
-        let didObserveRealMovement = await waitUntil {
-            store.state == .shutterIsMovingInApp(
-                deviceId: id10,
-                position: 98,
-                target: 75,
-                receivedValueCountAfterInAppTarget: 3
-            )
-        }
-        #expect(didObserveRealMovement)
     }
 
     private func makeShutter(

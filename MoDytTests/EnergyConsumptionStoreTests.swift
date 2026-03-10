@@ -43,9 +43,50 @@ struct EnergyConsumptionDescriptorTests {
     }
 
     @Test
-    func energyDescriptorReturnsNilForUnsupportedUsage() {
+    func energyDescriptorAggregatesDistributionBucketsBeforeCumulativeIndex() {
         let device = makeTestDevice(
             identifier: .init(deviceId: 33, endpointId: 1),
+            usage: "conso",
+            kind: "energy",
+            data: [
+                "energyDistrib_ELEC_HEATING": .number(15_509),
+                "energyDistrib_ELEC_COOLING": .number(0),
+                "energyDistrib_ELEC_HOTWATER": .number(213_185),
+                "energyDistrib_ELEC_OUTLET": .number(27_852),
+                "energyDistrib_ELEC_OTHER": .number(180_924),
+                "energyIndex_ELEC_TOTAL": .number(66_288_359)
+            ]
+        )
+
+        let descriptor = device.energyConsumptionDescriptor()
+
+        #expect(descriptor?.key == "energyDistrib_TOTAL")
+        #expect(abs((descriptor?.value ?? 0) - 437.47) < 0.001)
+        #expect(descriptor?.unitSymbol == "kWh")
+    }
+
+    @Test
+    func energyDescriptorPrefersKnownTotalKeysOverLexicographicBuckets() {
+        let device = makeTestDevice(
+            identifier: .init(deviceId: 34, endpointId: 1),
+            usage: "conso",
+            kind: "energy",
+            data: [
+                "energyDistrib_ELEC_COOLING": .number(0),
+                "energyIndex_ELEC_TOTAL": .number(123.4)
+            ]
+        )
+
+        let descriptor = device.energyConsumptionDescriptor()
+
+        #expect(descriptor?.key == "energyIndex_ELEC_TOTAL")
+        #expect(descriptor?.value == 123.4)
+    }
+
+    @Test
+    func energyDescriptorReturnsNilForUnsupportedUsage() {
+        let device = makeTestDevice(
+            identifier: .init(deviceId: 35, endpointId: 1),
             usage: "light",
             kind: "light",
             data: ["energyIndex": .number(20)]

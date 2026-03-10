@@ -49,11 +49,13 @@ extension TydomConnectionResolver.Environment {
                     onDisconnect: onDisconnect
                 )
                 do {
-                    try await connection.connect()
+                    try await connectAndValidate(
+                        connection,
+                        configuration: configuration
+                    )
                     log("Connect success host=\(configuration.host)")
                     return connection
                 } catch {
-                    await connection.disconnect()
                     log("Connect error host=\(configuration.host) error=\(error)")
                     return nil
                 }

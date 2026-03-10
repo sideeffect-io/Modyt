@@ -57,12 +57,34 @@ struct MainGatewayDataRequestPipeline: Sendable {
     }
 }
 
+struct MainMessageStreamObservationState: Sendable, Equatable {
+    private(set) var activeTaskID: Int?
+
+    mutating func register(taskID: Int) -> Bool {
+        guard activeTaskID == nil else { return false }
+        activeTaskID = taskID
+        return true
+    }
+
+    mutating func finish(taskID: Int) -> Bool {
+        guard activeTaskID == taskID else { return false }
+        activeTaskID = nil
+        return true
+    }
+
+    mutating func cancel() {
+        activeTaskID = nil
+    }
+}
+
 actor MainRuntime {
     private let gatewayClient: DeltaDoreClient
     private let router: TydomMessageRepositoryRouter
     private let log: @Sendable (String) -> Void
 
     private var messageStreamTask: Task<Void, Never>?
+    private var messageStreamObservation = MainMessageStreamObservationState()
+    private var nextMessageStreamTaskID: Int = 0
 
     init(
         gatewayClient: DeltaDoreClient,
@@ -109,12 +131,24 @@ actor MainRuntime {
     }
 
     func checkGatewayConnection() async -> MainEvent? {
-        let isAlive = await gatewayClient.isCurrentConnectionAlive(timeout: 2.0)
-        if isAlive {
+        do {
+            let renewal = try await gatewayClient.renewStoredConnectionIfNeeded(
+                preferLocal: true,
+                livenessTimeout: 2.0
+            )
+            if renewal == .reconnected {
+                cancelMessageStream()
+                startGatewayMessagesHandling()
+                try await requestGatewayData()
+            }
             await gatewayClient.setCurrentConnectionAppActive(true)
             return nil
-        } else {
+        } catch {
             cancelMessageStream()
+            if error is CancellationError {
+                return .reconnectionWasRequested
+            }
+            log("MainRuntime checkGatewayConnection failed error=\(error)")
         }
         return .reconnectionWasRequested
     }
@@ -146,7 +180,9 @@ actor MainRuntime {
     }
 
     private func startGatewayMessagesHandling() {
-        guard messageStreamTask == nil else { return }
+        let taskID = nextMessageStreamTaskID
+        nextMessageStreamTaskID += 1
+        guard messageStreamObservation.register(taskID: taskID) else { return }
 
         messageStreamTask = Task { [gatewayClient, router, log, weak self] in
             let stream = await gatewayClient.decodedMessages(logger: log)
@@ -154,16 +190,18 @@ actor MainRuntime {
                 guard !Task.isCancelled else { break }
                 await router.ingest(message)
             }
-            await self?.messageStreamDidTerminate()
+            await self?.messageStreamDidTerminate(taskID: taskID)
         }
     }
 
-    private func messageStreamDidTerminate() {
+    private func messageStreamDidTerminate(taskID: Int) {
+        guard messageStreamObservation.finish(taskID: taskID) else { return }
         messageStreamTask = nil
     }
 
     private func cancelMessageStream() {
         messageStreamTask?.cancel()
         messageStreamTask = nil
+        messageStreamObservation.cancel()
     }
 }

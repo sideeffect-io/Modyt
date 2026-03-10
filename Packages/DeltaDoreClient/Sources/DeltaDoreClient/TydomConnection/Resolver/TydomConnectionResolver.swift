@@ -58,6 +58,55 @@ struct TydomConnectionResolver: Sendable {
             case allowCloudDataFetch
         }
 
+        struct Timings: Sendable, Equatable {
+            let discoveryTimeout: TimeInterval
+            let probeTimeout: TimeInterval
+            let infoTimeout: TimeInterval
+            let localConnectTimeout: TimeInterval
+            let remoteConnectTimeout: TimeInterval
+
+            init(
+                discoveryTimeout: TimeInterval,
+                probeTimeout: TimeInterval,
+                infoTimeout: TimeInterval,
+                localConnectTimeout: TimeInterval,
+                remoteConnectTimeout: TimeInterval
+            ) {
+                self.discoveryTimeout = discoveryTimeout
+                self.probeTimeout = probeTimeout
+                self.infoTimeout = infoTimeout
+                self.localConnectTimeout = localConnectTimeout
+                self.remoteConnectTimeout = remoteConnectTimeout
+            }
+
+            init(timeout: TimeInterval) {
+                self.init(
+                    discoveryTimeout: min(timeout, 10),
+                    probeTimeout: min(timeout, 0.6),
+                    infoTimeout: min(timeout, 10),
+                    localConnectTimeout: timeout,
+                    remoteConnectTimeout: timeout
+                )
+            }
+
+            static let silentStoredFlow = Self(
+                discoveryTimeout: 2.0,
+                probeTimeout: 0.35,
+                infoTimeout: 1.0,
+                localConnectTimeout: 1.5,
+                remoteConnectTimeout: 6.0
+            )
+
+            func timeout(for mode: TydomConnection.Configuration.Mode) -> TimeInterval {
+                switch mode {
+                case .local:
+                    return localConnectTimeout
+                case .remote:
+                    return remoteConnectTimeout
+                }
+            }
+        }
+
         let mode: Mode
         let credentialPolicy: CredentialPolicy
         let localHostOverride: String?
@@ -66,6 +115,7 @@ struct TydomConnectionResolver: Sendable {
         let siteIndex: Int?
         let allowInsecureTLS: Bool?
         let timeout: TimeInterval
+        let timings: Timings
         let onDecision: (@Sendable (TydomConnectionState.Decision) async -> Void)?
 
         init(
@@ -77,6 +127,7 @@ struct TydomConnectionResolver: Sendable {
             siteIndex: Int? = nil,
             allowInsecureTLS: Bool? = nil,
             timeout: TimeInterval = 10.0,
+            timings: Timings? = nil,
             onDecision: (@Sendable (TydomConnectionState.Decision) async -> Void)? = nil
         ) {
             self.mode = mode
@@ -87,6 +138,7 @@ struct TydomConnectionResolver: Sendable {
             self.siteIndex = siteIndex
             self.allowInsecureTLS = allowInsecureTLS
             self.timeout = timeout
+            self.timings = timings ?? Timings(timeout: timeout)
             self.onDecision = onDecision
         }
     }
@@ -344,7 +396,7 @@ struct TydomConnectionResolver: Sendable {
     ) -> TydomConnectionOrchestrator.Dependencies {
         let discovery = environment.discovery
         let allowInsecureTLS = options.allowInsecureTLS
-        let timeout = options.timeout
+        let timings = options.timings
         let localHostOverride = options.localHostOverride
         let remoteHost = environment.remoteHost
 
@@ -357,7 +409,7 @@ struct TydomConnectionResolver: Sendable {
                 password: credentials.password,
                 cloudCredentials: nil,
                 allowInsecureTLS: allowInsecureTLS,
-                timeout: timeout
+                timeout: timings.timeout(for: mode)
             )
             let connection = await self.environment.connect(
                 config,
@@ -389,11 +441,11 @@ struct TydomConnectionResolver: Sendable {
                     "Discovery request mac=\(credentials.mac) cachedIP=\(credentials.cachedLocalIP ?? "nil")"
                 )
                 let config = TydomGatewayDiscoveryConfig(
-                    discoveryTimeout: min(timeout, 10),
-                    probeTimeout: min(timeout, 0.6),
+                    discoveryTimeout: timings.discoveryTimeout,
+                    probeTimeout: timings.probeTimeout,
                     probeConcurrency: 256,
                     probePorts: [443],
-                    infoTimeout: min(timeout, 10),
+                    infoTimeout: timings.infoTimeout,
                     infoConcurrency: 32,
                     allowInsecureTLS: allowInsecureTLS ?? true,
                     validateWithInfo: true
@@ -440,7 +492,7 @@ struct TydomConnectionResolver: Sendable {
                 password: credentials.password,
                 cloudCredentials: nil,
                 allowInsecureTLS: options.allowInsecureTLS,
-                timeout: options.timeout
+                timeout: options.timings.timeout(for: decision.mode)
             )
         case .remote(let host):
             let resolvedHost = environment.remoteHost.isEmpty == false ? environment.remoteHost : host
@@ -450,7 +502,7 @@ struct TydomConnectionResolver: Sendable {
                 password: credentials.password,
                 cloudCredentials: nil,
                 allowInsecureTLS: options.allowInsecureTLS,
-                timeout: options.timeout
+                timeout: options.timings.timeout(for: decision.mode)
             )
         }
     }

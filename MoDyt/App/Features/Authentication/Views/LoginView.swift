@@ -10,6 +10,7 @@ struct LoginView: View {
     private struct LayoutMetrics {
         let isWide: Bool
         let outerPadding: CGFloat
+        let bottomPadding: CGFloat
         let sectionSpacing: CGFloat
         let columnSpacing: CGFloat
         let contentMaxWidth: CGFloat
@@ -19,7 +20,6 @@ struct LoginView: View {
         let formPadding: CGFloat
         let illustrationPadding: CGFloat
         let siteListMaxHeight: CGFloat
-        let minCanvasHeight: CGFloat
 
         init(containerSize: CGSize) {
             let width = max(containerSize.width, 320)
@@ -29,6 +29,7 @@ struct LoginView: View {
 
             isWide = wideEnoughForSplit
             outerPadding = width >= 900 ? 32 : 20
+            bottomPadding = wideEnoughForSplit ? 36 : 28
             sectionSpacing = wideEnoughForSplit ? 28 : 22
             columnSpacing = wideEnoughForSplit ? 28 : 0
             contentMaxWidth = min(width - (outerPadding * 2), wideEnoughForSplit ? 1140 : 720)
@@ -39,12 +40,11 @@ struct LoginView: View {
                 ? max(320, contentMaxWidth - resolvedFormWidth - columnSpacing)
                 : contentMaxWidth
             heroHeight = wideEnoughForSplit
-                ? min(max(height * 0.60, 360), 460)
+                ? min(max(heroWidth / 1.28, 360), 460)
                 : min(max(width * 0.64, 260), 360)
             formPadding = wideEnoughForSplit ? 28 : 24
             illustrationPadding = wideEnoughForSplit ? 28 : 24
             siteListMaxHeight = wideEnoughForSplit ? 308 : 276
-            minCanvasHeight = height - 24
         }
     }
 
@@ -61,15 +61,14 @@ struct LoginView: View {
         GeometryReader { proxy in
             let metrics = LayoutMetrics(containerSize: proxy.size)
 
-            ScrollView(.vertical, showsIndicators: false) {
-                content(metrics: metrics)
-                .frame(maxWidth: metrics.contentMaxWidth)
-                .frame(minHeight: metrics.minCanvasHeight, alignment: .center)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, metrics.outerPadding)
-                .padding(.vertical, 28)
+            SwiftUI.Group {
+                if metrics.isWide {
+                    page(metrics: metrics)
+                        .ignoresSafeArea(.keyboard, edges: .bottom)
+                } else {
+                    page(metrics: metrics)
+                }
             }
-            .scrollDismissesKeyboard(.interactively)
         }
         .sensoryFeedback(.selection, trigger: loginState.selectedSiteID)
         .sensoryFeedback(.warning, trigger: loginState.errorMessage)
@@ -78,10 +77,23 @@ struct LoginView: View {
         }
     }
 
+    private func page(metrics: LayoutMetrics) -> some View {
+        content(metrics: metrics)
+            .frame(maxWidth: metrics.contentMaxWidth)
+            .padding(.horizontal, metrics.outerPadding)
+            .padding(.top, 28)
+            .padding(.bottom, metrics.bottomPadding)
+            .frame(
+                maxWidth: .infinity,
+                maxHeight: .infinity,
+                alignment: metrics.isWide ? .center : .top
+            )
+    }
+
     @ViewBuilder
     private func content(metrics: LayoutMetrics) -> some View {
         if metrics.isWide {
-            HStack(alignment: .center, spacing: metrics.columnSpacing) {
+            HStack(alignment: .bottom, spacing: metrics.columnSpacing) {
                 heroPanel(metrics: metrics)
                     .frame(maxWidth: metrics.heroWidth, alignment: .leading)
 
@@ -118,30 +130,8 @@ struct LoginView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            illustrationPanel(metrics: metrics)
-
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) {
-                    heroCallout(
-                        text: "Responsive layout",
-                        systemImage: "rectangle.split.2x1.fill"
-                    )
-                    heroCallout(
-                        text: "Site-aware login",
-                        systemImage: "house.and.flag.fill"
-                    )
-                }
-
-                VStack(alignment: .leading, spacing: 12) {
-                    heroCallout(
-                        text: "Responsive layout",
-                        systemImage: "rectangle.split.2x1.fill"
-                    )
-                    heroCallout(
-                        text: "Site-aware login",
-                        systemImage: "house.and.flag.fill"
-                    )
-                }
+            if metrics.isWide {
+                illustrationPanel(metrics: metrics)
             }
         }
         .opacity(hasAnimatedIn ? 1 : 0)
@@ -207,17 +197,39 @@ struct LoginView: View {
                 yOffset: metrics.heroHeight * 0.26
             )
 
-            Image("LoginIllustration")
-                .resizable()
-                .scaledToFit()
-                .padding(metrics.illustrationPadding)
-                .padding(.top, 24)
-                .shadow(
-                    color: AppColors.aurora.opacity(colorScheme == .dark ? 0.30 : 0.12),
-                    radius: 28,
-                    x: 0,
-                    y: 12
-                )
+            GeometryReader { proxy in
+                Image("LoginIllustration")
+                    .resizable()
+                    .scaledToFill()
+                    .frame(
+                        width: proxy.size.width,
+                        height: proxy.size.height
+                    )
+                    .clipped()
+                    .overlay {
+                        LinearGradient(
+                            colors: colorScheme == .dark
+                                ? [
+                                    Color.black.opacity(0.16),
+                                    Color.clear,
+                                    Color.black.opacity(0.26)
+                                ]
+                                : [
+                                    Color.white.opacity(0.10),
+                                    Color.clear,
+                                    Color.black.opacity(0.10)
+                                ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    }
+                    .shadow(
+                        color: AppColors.aurora.opacity(colorScheme == .dark ? 0.24 : 0.10),
+                        radius: 24,
+                        x: 0,
+                        y: 10
+                    )
+            }
 
             VStack(alignment: .leading, spacing: 8) {
                 LoginBadge(
@@ -248,25 +260,6 @@ struct LoginView: View {
             .frame(width: diameter, height: diameter)
             .blur(radius: diameter * 0.18)
             .offset(x: xOffset, y: yOffset)
-    }
-
-    private func heroCallout(text: String, systemImage: String) -> some View {
-        Label(text, systemImage: systemImage)
-            .font(.system(.footnote, design: .rounded).weight(.semibold))
-            .foregroundStyle(.primary.opacity(colorScheme == .dark ? 0.82 : 0.72))
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background {
-                Capsule(style: .continuous)
-                    .fill(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.36))
-                    .overlay {
-                        Capsule(style: .continuous)
-                            .strokeBorder(
-                                Color.white.opacity(colorScheme == .dark ? 0.08 : 0.42),
-                                lineWidth: 1
-                            )
-                    }
-            }
     }
 
     private func formPanel(metrics: LayoutMetrics) -> some View {
@@ -914,9 +907,8 @@ private struct PrimaryAuthenticationButtonStyle: ButtonStyle {
                     )
             }
             .opacity(isEnabled ? 1 : 0.58)
-            .scaleEffect(configuration.isPressed ? 0.985 : (isEnabled ? 1 : 0.992))
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
             .animation(.snappy(duration: 0.18), value: configuration.isPressed)
-            .animation(.snappy(duration: 0.22), value: isEnabled)
     }
 
     private var backgroundGradient: LinearGradient {

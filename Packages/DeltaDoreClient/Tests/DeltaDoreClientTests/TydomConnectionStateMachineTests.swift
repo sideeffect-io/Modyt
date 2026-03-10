@@ -100,3 +100,55 @@ import Testing
     #expect(next.phase == .discoveringLocal)
     #expect(actions.contains(.discoverLocal))
 }
+
+@Test func stateMachine_overrideLocalFailsWhenDiscoveryFindsNoGateway() async {
+    // Given
+    let credentials = TydomGatewayCredentials(
+        mac: "AABBCCDDEEFF",
+        password: "pass",
+        cachedLocalIP: nil,
+        updatedAt: Date()
+    )
+    let state = TydomConnectionState(
+        phase: .discoveringLocal,
+        override: .forceLocal,
+        credentials: credentials
+    )
+
+    // When
+    let (next, actions) = TydomConnectionStateMachine.reduce(
+        state: state,
+        event: .localDiscoveryFound([])
+    )
+
+    // Then
+    #expect(next.phase == .failed)
+    #expect(next.lastError == "Local discovery failed")
+    #expect(actions.contains(.connectRemote) == false)
+}
+
+@Test func stateMachine_overrideLocalFailsAfterLastLocalCandidateFails() async {
+    // Given
+    let credentials = TydomGatewayCredentials(
+        mac: "AABBCCDDEEFF",
+        password: "pass",
+        cachedLocalIP: "192.168.1.10",
+        updatedAt: Date()
+    )
+    let state = TydomConnectionState(
+        phase: .connectingLocal,
+        override: .forceLocal,
+        credentials: credentials
+    )
+
+    // When
+    let (next, actions) = TydomConnectionStateMachine.reduce(
+        state: state,
+        event: .localConnectResult(success: false, host: "192.168.1.10", connection: nil)
+    )
+
+    // Then
+    #expect(next.phase == .failed)
+    #expect(next.lastError == "Local connection failed")
+    #expect(actions.contains(.connectRemote) == false)
+}

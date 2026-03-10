@@ -178,6 +178,124 @@ import Testing
     #expect(storedMac == secondNormalized)
 }
 
+@Test func resolver_forceLocalDoesNotFallbackToRemote() async {
+    // Given
+    let gatewayMac = "AA:BB:CC:DD:EE:FF"
+    let credentials = TydomGatewayCredentials(
+        mac: gatewayMac,
+        password: "secret",
+        cachedLocalIP: nil,
+        updatedAt: Date()
+    )
+    let gatewayId = TydomMac.normalize(gatewayMac)
+    let credentialStore = TydomGatewayCredentialStore.inMemory(initial: [gatewayId: credentials])
+    let gatewayMacStore = TydomGatewayMacStore.inMemory(initial: gatewayMac)
+    let cloudCredentialStore = TydomCloudCredentialStore.inMemory()
+    let remoteConnectAttempts = CallCounter()
+    let discovery = TydomGatewayDiscovery(dependencies: .init(
+        subnetHosts: { [] },
+        probeHost: { _, _, _ in false },
+        probeWebSocketInfo: { _, _, _, _, _ in false }
+    ))
+    let environment = TydomConnectionResolver.Environment(
+        credentialStore: credentialStore,
+        gatewayMacStore: gatewayMacStore,
+        cloudCredentialStore: cloudCredentialStore,
+        discovery: discovery,
+        remoteHost: "mediation.tydom.com",
+        now: { Date() },
+        makeSession: { URLSession(configuration: .ephemeral) },
+        fetchSites: { _, _ in [] },
+        fetchSitesPayload: { _, _ in Data() },
+        fetchGatewayPassword: { _, _, _, _ in "secret" },
+        connect: { configuration, onDisconnect in
+            if case .remote = configuration.mode {
+                await remoteConnectAttempts.increment()
+            }
+            return TydomConnection(configuration: configuration, onDisconnect: onDisconnect)
+        },
+        log: { _ in }
+    )
+    let resolver = TydomConnectionResolver(environment: environment)
+
+    // When / Then
+    do {
+        _ = try await resolver.resolve(
+            .init(mode: .local, credentialPolicy: .useStoredDataOnly)
+        )
+        #expect(Bool(false), "Expected local-only resolution to fail")
+    } catch {
+        #expect(await remoteConnectAttempts.count() == 0)
+    }
+}
+
+@Test func resolver_autoUsesConfiguredLocalAndRemoteTimeouts() async throws {
+    // Given
+    let gatewayMac = "AA:BB:CC:DD:EE:FF"
+    let credentials = TydomGatewayCredentials(
+        mac: gatewayMac,
+        password: "secret",
+        cachedLocalIP: "192.168.1.10",
+        updatedAt: Date()
+    )
+    let gatewayId = TydomMac.normalize(gatewayMac)
+    let credentialStore = TydomGatewayCredentialStore.inMemory(initial: [gatewayId: credentials])
+    let gatewayMacStore = TydomGatewayMacStore.inMemory(initial: gatewayMac)
+    let cloudCredentialStore = TydomCloudCredentialStore.inMemory()
+    let attempts = ConnectAttemptRecorder()
+    let discovery = TydomGatewayDiscovery(dependencies: .init(
+        subnetHosts: { [] },
+        probeHost: { _, _, _ in false },
+        probeWebSocketInfo: { _, _, _, _, _ in false }
+    ))
+    let environment = TydomConnectionResolver.Environment(
+        credentialStore: credentialStore,
+        gatewayMacStore: gatewayMacStore,
+        cloudCredentialStore: cloudCredentialStore,
+        discovery: discovery,
+        remoteHost: "mediation.tydom.com",
+        now: { Date() },
+        makeSession: { URLSession(configuration: .ephemeral) },
+        fetchSites: { _, _ in [] },
+        fetchSitesPayload: { _, _ in Data() },
+        fetchGatewayPassword: { _, _, _, _ in "secret" },
+        connect: { configuration, onDisconnect in
+            await attempts.record(mode: configuration.mode, timeout: configuration.timeout)
+            switch configuration.mode {
+            case .local:
+                return nil
+            case .remote:
+                return TydomConnection(configuration: configuration, onDisconnect: onDisconnect)
+            }
+        },
+        log: { _ in }
+    )
+    let resolver = TydomConnectionResolver(environment: environment)
+    let timings = TydomConnectionResolver.Options.Timings(
+        discoveryTimeout: 1.0,
+        probeTimeout: 0.2,
+        infoTimeout: 0.5,
+        localConnectTimeout: 1.25,
+        remoteConnectTimeout: 4.5
+    )
+
+    // When
+    let resolution = try await resolver.resolve(
+        .init(
+            mode: .auto,
+            credentialPolicy: .useStoredDataOnly,
+            timings: timings
+        )
+    )
+
+    // Then
+    #expect(resolution.configuration.mode == .remote(host: "mediation.tydom.com"))
+    #expect(await attempts.values() == [
+        "local:192.168.1.10@1.25",
+        "remote:mediation.tydom.com@4.5"
+    ])
+}
+
 private actor CallCounter {
     private var value: Int = 0
 
@@ -187,5 +305,22 @@ private actor CallCounter {
 
     func count() -> Int {
         value
+    }
+}
+
+private actor ConnectAttemptRecorder {
+    private var recorded: [String] = []
+
+    func record(mode: TydomConnection.Configuration.Mode, timeout: TimeInterval) {
+        switch mode {
+        case .local(let host):
+            recorded.append("local:\(host)@\(timeout)")
+        case .remote(let host):
+            recorded.append("remote:\(host)@\(timeout)")
+        }
+    }
+
+    func values() -> [String] {
+        recorded
     }
 }

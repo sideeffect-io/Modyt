@@ -10,6 +10,11 @@ public struct DeltaDoreClient: Sendable {
         case connectWithNewCredentials
     }
 
+    public enum StoredConnectionRenewalResult: Sendable, Equatable {
+        case unchanged
+        case reconnected
+    }
+
     public struct StoredCredentialsFlowOptions: Sendable {
         public enum Mode: Sendable { case auto, forceLocal, forceRemote }
         public let mode: Mode
@@ -47,6 +52,7 @@ public struct DeltaDoreClient: Sendable {
         public var listSites: @Sendable (TydomConnection.CloudCredentials) async throws -> [Site]
         public var listSitesPayload: @Sendable (TydomConnection.CloudCredentials) async throws -> Data
         public var clearStoredData: @Sendable () async -> Void
+        public var probeConnection: @Sendable (TydomConnection, TimeInterval) async -> Bool
 
         public init(
             inspectFlow: @escaping @Sendable () async -> ConnectionFlowStatus,
@@ -54,7 +60,8 @@ public struct DeltaDoreClient: Sendable {
             connectNew: @escaping @Sendable (NewCredentialsFlowOptions, SiteIndexSelector?) async throws -> ConnectionSession,
             listSites: @escaping @Sendable (TydomConnection.CloudCredentials) async throws -> [Site],
             listSitesPayload: @escaping @Sendable (TydomConnection.CloudCredentials) async throws -> Data,
-            clearStoredData: @escaping @Sendable () async -> Void
+            clearStoredData: @escaping @Sendable () async -> Void,
+            probeConnection: @escaping @Sendable (TydomConnection, TimeInterval) async -> Bool
         ) {
             self.inspectFlow = inspectFlow
             self.connectStored = connectStored
@@ -62,6 +69,7 @@ public struct DeltaDoreClient: Sendable {
             self.listSites = listSites
             self.listSitesPayload = listSitesPayload
             self.clearStoredData = clearStoredData
+            self.probeConnection = probeConnection
         }
 
     }
@@ -81,7 +89,7 @@ public struct DeltaDoreClient: Sendable {
         options: StoredCredentialsFlowOptions
     ) async throws -> ConnectionSession {
         let session = try await dependencies.connectStored(options)
-        await runtimeSession.setConnection(session.connection)
+        await installConnection(session.connection)
         return session
     }
 
@@ -90,7 +98,7 @@ public struct DeltaDoreClient: Sendable {
         selectSiteIndex: SiteIndexSelector? = nil
     ) async throws -> ConnectionSession {
         let session = try await dependencies.connectNew(options, selectSiteIndex)
-        await runtimeSession.setConnection(session.connection)
+        await installConnection(session.connection)
         return session
     }
 
@@ -108,7 +116,8 @@ public struct DeltaDoreClient: Sendable {
 
     public func clearStoredData() async {
         await dependencies.clearStoredData()
-        await runtimeSession.clearConnection()
+        guard let connection = await runtimeSession.takeConnection() else { return }
+        await connection.disconnect(shouldNotifyOnDisconnect: false)
     }
 
     public func decodedMessages(
@@ -134,37 +143,112 @@ public struct DeltaDoreClient: Sendable {
         await connection.setAppActive(isActive)
     }
 
-    public func isCurrentConnectionAlive(timeout: TimeInterval = 2.0) async -> Bool {
-        guard let connection = await runtimeSession.currentConnection() else { return false }
-        let probeTimeout = max(0.2, timeout)
-        for attempt in 0..<2 {
-            do {
-                try await probeConnectionLiveness(
-                    using: connection,
-                    timeout: probeTimeout
-                )
-                return true
-            } catch {
-                if attempt == 0 {
-                    try? await Task.sleep(nanoseconds: 200_000_000)
+    public func renewStoredConnectionIfNeeded(
+        preferLocal: Bool = true,
+        livenessTimeout: TimeInterval = 2.0
+    ) async throws -> StoredConnectionRenewalResult {
+        guard let currentConnection = await runtimeSession.currentConnection() else {
+            let session = try await dependencies.connectStored(.init(mode: .auto))
+            await installConnection(session.connection)
+            await session.connection.setAppActive(true)
+            return .reconnected
+        }
+
+        switch await currentConnection.mode() {
+        case .local:
+            if await dependencies.probeConnection(currentConnection, livenessTimeout) {
+                await currentConnection.setAppActive(true)
+                return .unchanged
+            }
+
+        case .remote:
+            if preferLocal {
+                let (localSession, currentConnectionIsAlive) = await withTaskGroup(
+                    of: RemoteRenewalAttempt.self,
+                    returning: (ConnectionSession?, Bool).self
+                ) { group in
+                    group.addTask {
+                        .localUpgrade(try? await dependencies.connectStored(.init(mode: .forceLocal)))
+                    }
+                    group.addTask {
+                        .currentConnectionIsAlive(
+                            await dependencies.probeConnection(currentConnection, livenessTimeout)
+                        )
+                    }
+
+                    var localSession: ConnectionSession?
+                    var currentConnectionIsAlive = false
+
+                    for await result in group {
+                        switch result {
+                        case .localUpgrade(let session):
+                            localSession = session
+                        case .currentConnectionIsAlive(let isAlive):
+                            currentConnectionIsAlive = isAlive
+                        }
+                    }
+
+                    return (localSession, currentConnectionIsAlive)
                 }
+
+                if let localSession {
+                    let candidateMode = await localSession.connection.mode()
+                    if case .local = candidateMode {
+                        await installConnection(localSession.connection)
+                        await localSession.connection.setAppActive(true)
+                        return .reconnected
+                    }
+                    await localSession.connection.disconnect(shouldNotifyOnDisconnect: false)
+                }
+
+                if currentConnectionIsAlive {
+                    await currentConnection.setAppActive(true)
+                    return .unchanged
+                }
+            } else if await dependencies.probeConnection(currentConnection, livenessTimeout) {
+                await currentConnection.setAppActive(true)
+                return .unchanged
             }
         }
-        return false
+
+        let session = try await dependencies.connectStored(.init(mode: .auto))
+        await installConnection(session.connection)
+        await session.connection.setAppActive(true)
+        return .reconnected
+    }
+
+    public func isCurrentConnectionAlive(timeout: TimeInterval = 2.0) async -> Bool {
+        guard let connection = await runtimeSession.currentConnection() else { return false }
+        return await dependencies.probeConnection(connection, timeout)
     }
 
     public func disconnectCurrentConnection() async {
-        guard let connection = await runtimeSession.currentConnection() else { return }
+        guard let connection = await runtimeSession.takeConnection() else { return }
         await connection.disconnect()
-        await runtimeSession.clearConnection()
+    }
+
+    func currentConnectionMode() async -> TydomConnection.Configuration.Mode? {
+        guard let connection = await runtimeSession.currentConnection() else { return nil }
+        return await connection.mode()
+    }
+
+    private func installConnection(_ connection: TydomConnection) async {
+        let previousConnection = await runtimeSession.replaceConnection(connection)
+        guard let previousConnection, previousConnection !== connection else { return }
+        await previousConnection.disconnect(shouldNotifyOnDisconnect: false)
     }
 }
 
-private enum ConnectionProbeError: Error {
+private enum RemoteRenewalAttempt: Sendable {
+    case localUpgrade(DeltaDoreClient.ConnectionSession?)
+    case currentConnectionIsAlive(Bool)
+}
+
+enum ConnectionProbeError: Error {
     case timeout
 }
 
-private func probeConnectionLiveness(
+func probeConnectionLiveness(
     using connection: TydomConnection,
     timeout: TimeInterval
 ) async throws {
@@ -184,16 +268,20 @@ private func probeConnectionLiveness(
 private actor RuntimeSessionStore {
     private var connection: TydomConnection?
 
-    func setConnection(_ connection: TydomConnection) {
-        self.connection = connection
-    }
-
     func currentConnection() -> TydomConnection? {
         connection
     }
 
-    func clearConnection() {
+    func replaceConnection(_ connection: TydomConnection) -> TydomConnection? {
+        let previousConnection = self.connection
+        self.connection = connection
+        return previousConnection
+    }
+
+    func takeConnection() -> TydomConnection? {
+        let currentConnection = connection
         connection = nil
+        return currentConnection
     }
 }
 
