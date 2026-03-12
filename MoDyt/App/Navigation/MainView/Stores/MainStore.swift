@@ -44,103 +44,104 @@ enum MainEffect: Sendable, Equatable {
 @MainActor
 final class MainStore: StartableStore {
     struct StateMachine {
-        var state: MainState = .initial
+        static func reduce(
+            _ state: MainState,
+            _ event: MainEvent
+        ) -> Transition<MainState, MainEffect> {
+            var state = state
 
-        mutating func reduce(_ event: MainEvent) -> [MainEffect] {
             switch (state.featureState, event) {
             case (.featureIsIdle, .startingGatewayHandlingWasRequested):
                 state.featureState = .gatewayHandlingIsStarting
-                return [.handleGatewayMessages]
+                return .init(state: state, effects: [.handleGatewayMessages])
 
             case (.gatewayHandlingIsStarting, .gatewayHandlingWasAFailure):
                 state.featureState = .gatewayHandlingIsInError
-                return []
+                return .init(state: state)
 
             case (.gatewayHandlingIsInError, .startingGatewayHandlingWasRequested):
                 state.featureState = .gatewayHandlingIsStarting
-                return [.handleGatewayMessages]
+                return .init(state: state, effects: [.handleGatewayMessages])
 
             case (.gatewayHandlingIsInError, .disconnectionWasRequested):
                 state.featureState = .disconnectionIsInProgress
-                return [.disconnect]
+                return .init(state: state, effects: [.disconnect])
 
             case (.disconnectionIsInProgress, .disconnectionWasSuccessful):
                 state.featureState = .userIsDisconnected
-                return []
+                return .init(state: state)
 
             case (.gatewayHandlingIsStarting, .gatewayHandlingWasSuccessful):
                 state.featureState = .featureIsStarted
-                return [.setAppActive]
+                return .init(state: state, effects: [.setAppActive])
 
             case (.featureIsStarted, .appInactiveWasReceived):
-                return [.setAppInactive]
+                return .init(state: state, effects: [.setAppInactive])
 
             case (.featureIsStarted, .appActiveWasReceived):
-                return [.checkGatewayConnection]
+                return .init(state: state, effects: [.checkGatewayConnection])
 
             case (.featureIsStarted, .reconnectionWasRequested):
                 state.featureState = .reconnectionIsInProgress
-                return [.reconnectToGateway]
+                return .init(state: state, effects: [.reconnectToGateway])
 
             case (.reconnectionIsInProgress, .reconnectionWasAFailure):
                 state.featureState = .reconnectionIsInError
-                return []
+                return .init(state: state)
 
             case (.reconnectionIsInError, .reconnectionWasRequested):
                 state.featureState = .reconnectionIsInProgress
-                return [.reconnectToGateway]
+                return .init(state: state, effects: [.reconnectToGateway])
 
             case (.reconnectionIsInError, .disconnectionWasRequested):
                 state.featureState = .disconnectionIsInProgress
-                return [.disconnect]
+                return .init(state: state, effects: [.disconnect])
 
             case (.reconnectionIsInProgress, .reconnectionWasSuccessful):
                 state.featureState = .gatewayHandlingIsStarting
-                return [.handleGatewayMessages]
+                return .init(state: state, effects: [.handleGatewayMessages])
 
             default:
-                return []
+                return .init(state: state)
             }
         }
     }
 
-    struct Dependencies {
-        let handleGatewayMessages: @Sendable () async -> MainEvent
-        let disconnect: @Sendable () async -> Void
-        let setAppInactive: @Sendable () async -> Void
-        let setAppActive: @Sendable () async -> Void
-        let checkGatewayConnection: @Sendable () async -> MainEvent?
-        let reconnectToGateway: @Sendable () async -> MainEvent
-    }
+    private(set) var state: MainState = .initial
 
-    private(set) var stateMachine: StateMachine = StateMachine()
-
-    var state: MainState {
-        stateMachine.state
-    }
-
-    private let gatewayHandlingTask = TaskHandle()
-    private let disconnectTask = TaskHandle()
-    private let appActivityTask = TaskHandle()
-    private let checkConnectionTask = TaskHandle()
-    private let reconnectTask = TaskHandle()
-    private let worker: Worker
+    private let handleGatewayMessages: HandleMainGatewayMessagesEffectExecutor
+    private let disconnect: DisconnectMainEffectExecutor
+    private let setAppInactive: SetMainAppInactiveEffectExecutor
+    private let setAppActive: SetMainAppActiveEffectExecutor
+    private let checkGatewayConnection: CheckMainGatewayConnectionEffectExecutor
+    private let reconnectToGateway: ReconnectMainGatewayEffectExecutor
+    private var gatewayHandlingTask: Task<Void, Never>?
+    private var disconnectTask: Task<Void, Never>?
+    private var appActivityTask: Task<Void, Never>?
+    private var checkConnectionTask: Task<Void, Never>?
+    private var reconnectTask: Task<Void, Never>?
     private var hasStarted = false
 
-    init(dependencies: Dependencies) {
-        self.worker = Worker(
-            handleGatewayMessages: dependencies.handleGatewayMessages,
-            disconnect: dependencies.disconnect,
-            setAppInactive: dependencies.setAppInactive,
-            setAppActive: dependencies.setAppActive,
-            checkGatewayConnection: dependencies.checkGatewayConnection,
-            reconnectToGateway: dependencies.reconnectToGateway
-        )
+    init(
+        handleGatewayMessages: HandleMainGatewayMessagesEffectExecutor,
+        disconnect: DisconnectMainEffectExecutor,
+        setAppInactive: SetMainAppInactiveEffectExecutor,
+        setAppActive: SetMainAppActiveEffectExecutor,
+        checkGatewayConnection: CheckMainGatewayConnectionEffectExecutor,
+        reconnectToGateway: ReconnectMainGatewayEffectExecutor
+    ) {
+        self.handleGatewayMessages = handleGatewayMessages
+        self.disconnect = disconnect
+        self.setAppInactive = setAppInactive
+        self.setAppActive = setAppActive
+        self.checkGatewayConnection = checkGatewayConnection
+        self.reconnectToGateway = reconnectToGateway
     }
 
     func send(_ event: MainEvent) {
-        let effects = stateMachine.reduce(event)
-        handle(effects)
+        let transition = StateMachine.reduce(state, event)
+        state = transition.state
+        handle(transition.effects)
     }
 
     func start() {
@@ -149,12 +150,12 @@ final class MainStore: StartableStore {
         send(.startingGatewayHandlingWasRequested)
     }
 
-    deinit {
-        gatewayHandlingTask.cancel()
-        disconnectTask.cancel()
-        appActivityTask.cancel()
-        checkConnectionTask.cancel()
-        reconnectTask.cancel()
+    isolated deinit {
+        gatewayHandlingTask?.cancel()
+        disconnectTask?.cancel()
+        appActivityTask?.cancel()
+        checkConnectionTask?.cancel()
+        reconnectTask?.cancel()
     }
 
     private func handle(_ effects: [MainEffect]) {
@@ -166,45 +167,103 @@ final class MainStore: StartableStore {
     private func handle(_ effect: MainEffect) {
         switch effect {
         case .handleGatewayMessages:
-            gatewayHandlingTask.task = Task { [weak self, worker] in
-                let result = await worker.handleGatewayMessages()
-                guard !Task.isCancelled else { return }
-                self?.receive(result)
-            }
+            replaceTask(
+                &gatewayHandlingTask,
+                with: makeTrackedEventTask(
+                    operation: { [handleGatewayMessages] in
+                        await handleGatewayMessages()
+                    },
+                    onEvent: { [weak self] event in
+                        self?.receive(event)
+                    },
+                    onFinish: { [weak self] in
+                        self?.gatewayHandlingTask = nil
+                    }
+                )
+            )
 
         case .disconnect:
             cancelNonDisconnectTasks()
-            disconnectTask.task = Task { [weak self, worker] in
-                await worker.disconnect()
-                guard !Task.isCancelled else { return }
-                self?.receive(.disconnectionWasSuccessful)
-            }
+            replaceTask(
+                &disconnectTask,
+                with: makeTrackedEventTask(
+                    operation: { [disconnect] in
+                        await disconnect()
+                    },
+                    onEvent: { [weak self] event in
+                        self?.receive(event)
+                    },
+                    onFinish: { [weak self] in
+                        self?.disconnectTask = nil
+                    }
+                )
+            )
 
         case .setAppInactive:
-            appActivityTask.task = Task { [worker] in
-                await worker.setAppInactive()
-            }
+            replaceTask(
+                &appActivityTask,
+                with: makeTrackedEventTask(
+                    operation: { [setAppInactive] in
+                        await setAppInactive()
+                        return nil
+                    },
+                    onEvent: { [weak self] event in
+                        self?.receive(event)
+                    },
+                    onFinish: { [weak self] in
+                        self?.appActivityTask = nil
+                    }
+                )
+            )
 
         case .setAppActive:
-            appActivityTask.task = Task { [worker] in
-                await worker.setAppActive()
-            }
+            replaceTask(
+                &appActivityTask,
+                with: makeTrackedEventTask(
+                    operation: { [setAppActive] in
+                        await setAppActive()
+                        return nil
+                    },
+                    onEvent: { [weak self] event in
+                        self?.receive(event)
+                    },
+                    onFinish: { [weak self] in
+                        self?.appActivityTask = nil
+                    }
+                )
+            )
 
         case .checkGatewayConnection:
-            checkConnectionTask.task = Task { [weak self, worker] in
-                let event = await worker.checkGatewayConnection()
-                guard !Task.isCancelled else { return }
-                if let event {
-                    self?.receive(event)
-                }
-            }
+            replaceTask(
+                &checkConnectionTask,
+                with: makeTrackedEventTask(
+                    operation: { [checkGatewayConnection] in
+                        await checkGatewayConnection()
+                    },
+                    onEvent: { [weak self] event in
+                        self?.receive(event)
+                    },
+                    onFinish: { [weak self] in
+                        self?.checkConnectionTask = nil
+                    }
+                )
+            )
 
         case .reconnectToGateway:
-            reconnectTask.task = Task { [weak self, worker] in
-                let result = await worker.reconnectToGateway()
-                guard !Task.isCancelled else { return }
-                self?.receive(result)
-            }
+            replaceTask(
+                &reconnectTask,
+                with: makeTrackedEventTask(
+                    operation: { [reconnectToGateway] in
+                        await reconnectToGateway()
+                    },
+                    onEvent: { [weak self] event in
+                        self?.receive(event)
+                    },
+                    onFinish: { [weak self] in
+                        self?.reconnectTask = nil
+                    }
+                )
+            )
         }
     }
 
@@ -213,58 +272,9 @@ final class MainStore: StartableStore {
     }
 
     private func cancelNonDisconnectTasks() {
-        gatewayHandlingTask.cancel()
-        appActivityTask.cancel()
-        checkConnectionTask.cancel()
-        reconnectTask.cancel()
-    }
-
-    private actor Worker {
-        private let handleGatewayMessagesAction: @Sendable () async -> MainEvent
-        private let disconnectAction: @Sendable () async -> Void
-        private let setAppInactiveAction: @Sendable () async -> Void
-        private let setAppActiveAction: @Sendable () async -> Void
-        private let checkGatewayConnectionAction: @Sendable () async -> MainEvent?
-        private let reconnectToGatewayAction: @Sendable () async -> MainEvent
-
-        init(
-            handleGatewayMessages: @escaping @Sendable () async -> MainEvent,
-            disconnect: @escaping @Sendable () async -> Void,
-            setAppInactive: @escaping @Sendable () async -> Void,
-            setAppActive: @escaping @Sendable () async -> Void,
-            checkGatewayConnection: @escaping @Sendable () async -> MainEvent?,
-            reconnectToGateway: @escaping @Sendable () async -> MainEvent
-        ) {
-            self.handleGatewayMessagesAction = handleGatewayMessages
-            self.disconnectAction = disconnect
-            self.setAppInactiveAction = setAppInactive
-            self.setAppActiveAction = setAppActive
-            self.checkGatewayConnectionAction = checkGatewayConnection
-            self.reconnectToGatewayAction = reconnectToGateway
-        }
-
-        func handleGatewayMessages() async -> MainEvent {
-            await handleGatewayMessagesAction()
-        }
-
-        func disconnect() async {
-            await disconnectAction()
-        }
-
-        func setAppInactive() async {
-            await setAppInactiveAction()
-        }
-
-        func setAppActive() async {
-            await setAppActiveAction()
-        }
-
-        func checkGatewayConnection() async -> MainEvent? {
-            await checkGatewayConnectionAction()
-        }
-
-        func reconnectToGateway() async -> MainEvent {
-            await reconnectToGatewayAction()
-        }
+        cancelTask(&gatewayHandlingTask)
+        cancelTask(&appActivityTask)
+        cancelTask(&checkConnectionTask)
+        cancelTask(&reconnectTask)
     }
 }

@@ -14,12 +14,13 @@ struct GroupShutterReducerTests {
 
     @Test(arguments: transitionCases)
     func reducerAppliesConfiguredTransition(_ transition: TransitionCase) {
-        var stateMachine = GroupShutterStore.StateMachine(state: transition.initial)
-        let effects = stateMachine.reduce(transition.event)
-        let nextState = stateMachine.state
+        let transitionResult = GroupShutterStore.StateMachine.reduce(
+            transition.initial,
+            transition.event
+        )
 
-        #expect(nextState == transition.expected)
-        #expect(effects == transition.expectedEffects)
+        #expect(transitionResult.state == transition.expected)
+        #expect(transitionResult.effects == transition.expectedEffects)
     }
 
     private static let transitionCases: [TransitionCase] = [
@@ -28,8 +29,8 @@ struct GroupShutterReducerTests {
             event: .targetWasSetInApp(target: 75),
             expected: .featureIsIdle(deviceIds: [id10, id11]),
             expectedEffects: [
-                .sendCommand(deviceIds: [id10, id11], position: 75),
-                .persistTarget(deviceIds: [id10, id11], target: 75),
+                .sendCommand(position: 75),
+                .persistTarget(target: 75),
             ]
         ),
         .init(
@@ -52,15 +53,17 @@ struct GroupShutterStoreTests {
         let targets = RecordedGroupShutterTargets()
 
         let store = GroupShutterStore(
-            dependencies: .init(
+            deviceIds: [id10, id11],
+            sendCommand: .init(
                 sendCommand: { deviceIds, position in
                     await commands.record(deviceIds: deviceIds, position: position)
-                },
+                }
+            ),
+            persistTarget: .init(
                 persistTarget: { deviceIds, target in
                     await targets.record(deviceIds: deviceIds, target: target)
                 }
-            ),
-            deviceIds: [id10, id11]
+            )
         )
 
         store.start()
@@ -76,15 +79,17 @@ struct GroupShutterStoreTests {
         let targets = RecordedGroupShutterTargets()
 
         let store = GroupShutterStore(
-            dependencies: .init(
+            deviceIds: [id10, id11],
+            sendCommand: .init(
                 sendCommand: { deviceIds, position in
                     await commands.record(deviceIds: deviceIds, position: position)
-                },
+                }
+            ),
+            persistTarget: .init(
                 persistTarget: { deviceIds, target in
                     await targets.record(deviceIds: deviceIds, target: target)
                 }
-            ),
-            deviceIds: [id10, id11]
+            )
         )
 
         store.send(.targetWasSetInApp(target: 75))
@@ -110,15 +115,17 @@ struct GroupShutterStoreTests {
         let targets = RecordedGroupShutterTargets()
 
         let store = GroupShutterStore(
-            dependencies: .init(
+            deviceIds: [id10, id11, id10, id11],
+            sendCommand: .init(
                 sendCommand: { deviceIds, position in
                     await commands.record(deviceIds: deviceIds, position: position)
-                },
+                }
+            ),
+            persistTarget: .init(
                 persistTarget: { deviceIds, target in
                     await targets.record(deviceIds: deviceIds, target: target)
                 }
-            ),
-            deviceIds: [id10, id11, id10, id11]
+            )
         )
 
         store.send(.targetWasSetInApp(target: 25))
@@ -144,15 +151,17 @@ struct GroupShutterStoreTests {
         let targets = RecordedGroupShutterTargets()
 
         let store = GroupShutterStore(
-            dependencies: .init(
+            deviceIds: [],
+            sendCommand: .init(
                 sendCommand: { deviceIds, position in
                     await commands.record(deviceIds: deviceIds, position: position)
-                },
+                }
+            ),
+            persistTarget: .init(
                 persistTarget: { deviceIds, target in
                     await targets.record(deviceIds: deviceIds, target: target)
                 }
-            ),
-            deviceIds: []
+            )
         )
 
         store.send(.targetWasSetInApp(target: 50))

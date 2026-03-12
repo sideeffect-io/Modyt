@@ -15,11 +15,13 @@ struct ScenesStoreReducerTests {
 
     @Test(arguments: transitionCases)
     func reducerAppliesConfiguredTransition(_ transition: TransitionCase) {
-        var stateMachine = ScenesStore.StateMachine(state: transition.initial)
-        let effects = stateMachine.reduce(transition.event)
+        let transitionResult = ScenesStore.StateMachine.reduce(
+            transition.initial,
+            transition.event
+        )
 
-        #expect(stateMachine.state == transition.expected)
-        #expect(effects == transition.expectedEffects)
+        #expect(transitionResult.state == transition.expected)
+        #expect(transitionResult.effects == transition.expectedEffects)
     }
 
     private static let transitionCases: [TransitionCase] = [
@@ -31,7 +33,7 @@ struct ScenesStoreReducerTests {
         ),
         .init(
             initial: .initial,
-            event: .scenesUpdated(scenes),
+            event: .scenesObserved(scenes),
             expected: ScenesState(scenes: scenes),
             expectedEffects: []
         ),
@@ -61,12 +63,16 @@ struct ScenesStoreEffectTests {
             makeTestScene(id: "1", name: "Zeta"),
         ]
         let store = ScenesStore(
-            dependencies: .init(
+            observeScenes: .init(
                 observeScenes: {
                     await observeCalls.increment()
                     return streamBox.stream
-                },
-                toggleFavorite: { _ in },
+                }
+            ),
+            toggleFavorite: .init(
+                toggleFavorite: { _ in }
+            ),
+            refreshAll: .init(
                 refreshAll: {}
             )
         )
@@ -92,9 +98,13 @@ struct ScenesStoreEffectTests {
     func refreshRequestedForwardsRefreshAll() async {
         let refreshCalls = TestCounter()
         let store = ScenesStore(
-            dependencies: .init(
-                observeScenes: { AsyncStream { $0.finish() } },
-                toggleFavorite: { _ in },
+            observeScenes: .init(
+                observeScenes: { AsyncStream { $0.finish() } }
+            ),
+            toggleFavorite: .init(
+                toggleFavorite: { _ in }
+            ),
+            refreshAll: .init(
                 refreshAll: { await refreshCalls.increment() }
             )
         )
@@ -110,9 +120,13 @@ struct ScenesStoreEffectTests {
     func toggleFavoriteForwardsIdentifier() async {
         let recorder = TestRecorder<String>()
         let store = ScenesStore(
-            dependencies: .init(
-                observeScenes: { AsyncStream { $0.finish() } },
-                toggleFavorite: { await recorder.record($0) },
+            observeScenes: .init(
+                observeScenes: { AsyncStream { $0.finish() } }
+            ),
+            toggleFavorite: .init(
+                toggleFavorite: { await recorder.record($0) }
+            ),
+            refreshAll: .init(
                 refreshAll: {}
             )
         )

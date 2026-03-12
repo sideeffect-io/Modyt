@@ -1,5 +1,4 @@
 import SwiftUI
-import DeltaDoreClient
 
 struct LoginView: View {
     private enum Field: Hashable {
@@ -9,7 +8,11 @@ struct LoginView: View {
 
     private struct LayoutMetrics {
         let isWide: Bool
+        let isCompactHeight: Bool
+        let usesInsetCards: Bool
+        let pinsPrimaryAction: Bool
         let outerPadding: CGFloat
+        let topPadding: CGFloat
         let bottomPadding: CGFloat
         let sectionSpacing: CGFloat
         let columnSpacing: CGFloat
@@ -18,33 +21,40 @@ struct LoginView: View {
         let heroHeight: CGFloat
         let formWidth: CGFloat
         let formPadding: CGFloat
-        let illustrationPadding: CGFloat
         let siteListMaxHeight: CGFloat
 
-        init(containerSize: CGSize) {
+        init(
+            containerSize: CGSize,
+            horizontalSizeClass: UserInterfaceSizeClass?,
+            verticalSizeClass: UserInterfaceSizeClass?
+        ) {
             let width = max(containerSize.width, 320)
             let height = max(containerSize.height, 480)
-            let isLandscape = width > height
-            let wideEnoughForSplit = width >= 980 || (isLandscape && width >= 720)
+            let compactHeight = verticalSizeClass == .compact || height < 520
+            let regularWidth = horizontalSizeClass == .regular
+            let wideEnoughForSplit = regularWidth && width >= 900
 
             isWide = wideEnoughForSplit
-            outerPadding = width >= 900 ? 32 : 20
-            bottomPadding = wideEnoughForSplit ? 36 : 28
-            sectionSpacing = wideEnoughForSplit ? 28 : 22
+            isCompactHeight = compactHeight
+            usesInsetCards = wideEnoughForSplit
+            pinsPrimaryAction = !wideEnoughForSplit
+            outerPadding = wideEnoughForSplit ? 32 : (compactHeight ? 16 : 20)
+            topPadding = wideEnoughForSplit ? 28 : (compactHeight ? 20 : 32)
+            bottomPadding = wideEnoughForSplit ? 36 : (compactHeight ? 20 : 28)
+            sectionSpacing = wideEnoughForSplit ? 28 : (compactHeight ? 16 : 20)
             columnSpacing = wideEnoughForSplit ? 28 : 0
-            contentMaxWidth = min(width - (outerPadding * 2), wideEnoughForSplit ? 1140 : 720)
+            contentMaxWidth = min(width - (outerPadding * 2), wideEnoughForSplit ? 1140 : 680)
 
             let resolvedFormWidth = min(wideEnoughForSplit ? 520 : contentMaxWidth, contentMaxWidth)
             formWidth = resolvedFormWidth
             heroWidth = wideEnoughForSplit
-                ? max(320, contentMaxWidth - resolvedFormWidth - columnSpacing)
+                ? max(340, contentMaxWidth - resolvedFormWidth - columnSpacing)
                 : contentMaxWidth
             heroHeight = wideEnoughForSplit
                 ? min(max(heroWidth / 1.28, 360), 460)
-                : min(max(width * 0.64, 260), 360)
-            formPadding = wideEnoughForSplit ? 28 : 24
-            illustrationPadding = wideEnoughForSplit ? 28 : 24
-            siteListMaxHeight = wideEnoughForSplit ? 308 : 276
+                : min(max(width * (compactHeight ? 0.30 : 0.46), compactHeight ? 140 : 200), compactHeight ? 168 : 260)
+            formPadding = wideEnoughForSplit ? 28 : (compactHeight ? 18 : 22)
+            siteListMaxHeight = wideEnoughForSplit ? 308 : (compactHeight ? 200 : 276)
         }
     }
 
@@ -53,20 +63,25 @@ struct LoginView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     @FocusState private var focusedField: Field?
     @State private var hasAnimatedIn = false
 
     var body: some View {
         GeometryReader { proxy in
-            let metrics = LayoutMetrics(containerSize: proxy.size)
+            let metrics = LayoutMetrics(
+                containerSize: proxy.size,
+                horizontalSizeClass: horizontalSizeClass,
+                verticalSizeClass: verticalSizeClass
+            )
 
             SwiftUI.Group {
                 if metrics.isWide {
-                    page(metrics: metrics)
-                        .ignoresSafeArea(.keyboard, edges: .bottom)
+                    widePage(metrics: metrics)
                 } else {
-                    page(metrics: metrics)
+                    compactPage(metrics: metrics)
                 }
             }
         }
@@ -77,17 +92,33 @@ struct LoginView: View {
         }
     }
 
-    private func page(metrics: LayoutMetrics) -> some View {
+    private func widePage(metrics: LayoutMetrics) -> some View {
         content(metrics: metrics)
             .frame(maxWidth: metrics.contentMaxWidth)
             .padding(.horizontal, metrics.outerPadding)
-            .padding(.top, 28)
+            .padding(.top, metrics.topPadding)
             .padding(.bottom, metrics.bottomPadding)
             .frame(
                 maxWidth: .infinity,
                 maxHeight: .infinity,
-                alignment: metrics.isWide ? .center : .top
+                alignment: .center
             )
+            .ignoresSafeArea(.keyboard, edges: .bottom)
+    }
+
+    private func compactPage(metrics: LayoutMetrics) -> some View {
+        ScrollView(showsIndicators: false) {
+            content(metrics: metrics)
+                .frame(maxWidth: metrics.contentMaxWidth, alignment: .leading)
+                .padding(.horizontal, metrics.outerPadding)
+                .padding(.top, metrics.topPadding)
+                .padding(.bottom, metrics.bottomPadding + (shouldShowCompactActionBar ? 92 : 0))
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            compactActionBar(metrics: metrics)
+        }
     }
 
     @ViewBuilder
@@ -109,26 +140,42 @@ struct LoginView: View {
     }
 
     private func heroPanel(metrics: LayoutMetrics) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 12) {
-                LoginBadge(
-                    text: "Secure Tydom Access",
-                    systemImage: "lock.shield.fill",
-                    tone: .accent
-                )
+        VStack(alignment: .leading, spacing: metrics.isWide ? 18 : 14) {
+            VStack(alignment: .leading, spacing: metrics.isCompactHeight ? 10 : 12) {
+                if metrics.isWide {
+                    LoginBadge(
+                        text: "Secure Tydom Access",
+                        systemImage: "lock.shield.fill",
+                        tone: .accent
+                    )
+                }
 
                 Text("MoDyt")
-                    .font(.system(metrics.isWide ? .largeTitle : .title, design: .rounded).weight(.bold))
+                    .font(
+                        .system(
+                            metrics.isWide ? .largeTitle : (metrics.isCompactHeight ? .title2 : .title),
+                            design: .rounded
+                        )
+                        .weight(.bold)
+                    )
 
                 Text("Control your home with live Tydom data.")
-                    .font(.system(metrics.isWide ? .title3 : .body, design: .rounded))
+                    .font(
+                        .system(
+                            metrics.isWide ? .title3 : (metrics.isCompactHeight ? .body : .title3),
+                            design: .rounded
+                        )
+                    )
                     .foregroundStyle(.secondary)
 
-                Text("Sign in once, load the sites tied to your account, then connect to the right gateway without stretching the whole interface across the screen.")
-                    .font(.system(.body, design: .rounded))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if let supportingText = heroSupportingText(metrics: metrics) {
+                    Text(supportingText)
+                        .font(.system(metrics.isCompactHeight ? .footnote : .body, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
+            .frame(maxWidth: metrics.isWide ? 420 : .infinity, alignment: .leading)
 
             if metrics.isWide {
                 illustrationPanel(metrics: metrics)
@@ -237,7 +284,7 @@ struct LoginView: View {
                     systemImage: "sparkles",
                     tone: .neutral
                 )
-                Text("A calmer entry point for large screens and landscape.")
+                Text("A calmer entry point for larger screens.")
                     .font(.system(.footnote, design: .rounded).weight(.medium))
                     .foregroundStyle(.primary.opacity(colorScheme == .dark ? 0.78 : 0.74))
                     .frame(maxWidth: 220, alignment: .leading)
@@ -263,28 +310,15 @@ struct LoginView: View {
     }
 
     private func formPanel(metrics: LayoutMetrics) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Sign in")
-                        .font(.system(.title2, design: .rounded).weight(.bold))
+        VStack(alignment: .leading, spacing: metrics.isWide ? 20 : 18) {
+            formHeader(metrics: metrics)
 
-                    Text("Use the same credentials and site selection flow you already have today, with a layout that stays balanced on iPhone and iPad.")
-                        .font(.system(.body, design: .rounded))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            credentialsSection(metrics: metrics)
 
-                Spacer(minLength: 0)
-
-                LoginBadge(
-                    text: statusBadgeText,
-                    systemImage: statusBadgeSymbol,
-                    tone: loginState.canConnect ? .accent : .neutral
-                )
+            if !metrics.usesInsetCards {
+                compactSectionDivider
             }
 
-            credentialsSection
             sitesSection(metrics: metrics)
 
             if let error = loginState.errorMessage {
@@ -305,7 +339,9 @@ struct LoginView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            connectButton
+            if !metrics.pinsPrimaryAction {
+                connectButton
+            }
         }
         .padding(metrics.formPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -340,8 +376,43 @@ struct LoginView: View {
         .animation(.spring(duration: 0.55, bounce: 0.10), value: loginState.sites)
     }
 
-    private var credentialsSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
+    @ViewBuilder
+    private func formHeader(metrics: LayoutMetrics) -> some View {
+        if metrics.isWide {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Sign in")
+                        .font(.system(.title2, design: .rounded).weight(.bold))
+
+                    Text("Use the same credentials and site selection flow you already have today, with a layout that stays balanced on iPhone and iPad.")
+                        .font(.system(.body, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+
+                LoginBadge(
+                    text: statusBadgeText,
+                    systemImage: statusBadgeSymbol,
+                    tone: loginState.canConnect ? .accent : .neutral
+                )
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Sign in")
+                    .font(.system(.title3, design: .rounded).weight(.bold))
+
+                Text(compactSignInDescription(metrics: metrics))
+                    .font(.system(metrics.isCompactHeight ? .footnote : .body, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func credentialsSection(metrics: LayoutMetrics) -> some View {
+        sectionCard(metrics: metrics) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Credentials")
                     .font(.system(.headline, design: .rounded).weight(.semibold))
@@ -359,16 +430,16 @@ struct LoginView: View {
                 ) {
                     TextField("Email", text: emailBinding)
 #if os(iOS)
-                        .textInputAutocapitalization(.never)
+                    .textInputAutocapitalization(.never)
 #endif
-                        .autocorrectionDisabled()
-                        .keyboardType(.emailAddress)
-                        .textContentType(.username)
-                        .submitLabel(.next)
-                        .focused($focusedField, equals: .email)
-                        .onSubmit {
-                            focusedField = .password
-                        }
+                    .autocorrectionDisabled()
+                    .keyboardType(.emailAddress)
+                    .textContentType(.username)
+                    .submitLabel(.next)
+                    .focused($focusedField, equals: .email)
+                    .onSubmit {
+                        focusedField = .password
+                    }
                 }
 
                 CredentialField(
@@ -420,12 +491,10 @@ struct LoginView: View {
                 .disabled(!loginState.canLoadSites || loginState.isLoadingSites)
             }
         }
-        .padding(20)
-        .glassCard(cornerRadius: 26, interactive: false, tone: .inset)
     }
 
     private func sitesSection(metrics: LayoutMetrics) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        sectionCard(metrics: metrics) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Site")
@@ -473,7 +542,23 @@ struct LoginView: View {
                     Spacer(minLength: 0)
                 }
                 .padding(16)
-                .glassCard(cornerRadius: 22, interactive: false, tone: .inset)
+                .background {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(
+                            Color.white.opacity(
+                                colorScheme == .dark
+                                    ? 0.06
+                                    : (metrics.usesInsetCards ? 0.42 : 0.52)
+                            )
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                .strokeBorder(
+                                    Color.white.opacity(colorScheme == .dark ? 0.08 : 0.36),
+                                    lineWidth: 1
+                                )
+                        }
+                }
             } else {
                 ScrollView(showsIndicators: loginState.sites.count > 3) {
                     LazyVStack(spacing: 12) {
@@ -486,11 +571,9 @@ struct LoginView: View {
                 .frame(height: min(CGFloat(max(loginState.sites.count, 1)) * 82, metrics.siteListMaxHeight))
             }
         }
-        .padding(20)
-        .glassCard(cornerRadius: 26, interactive: false, tone: .inset)
     }
 
-    private func siteRow(_ site: DeltaDoreClient.Site) -> some View {
+    private func siteRow(_ site: AuthenticationSite) -> some View {
         let isSelected = loginState.selectedSiteID == site.id
 
         return Button {
@@ -530,7 +613,7 @@ struct LoginView: View {
 
                 Spacer(minLength: 12)
 
-                Text(isSelected ? "Selected" : site.gateways.count.formatted())
+                Text(isSelected ? "Selected" : site.gatewayCount.formatted())
                     .font(.system(.caption, design: .rounded).weight(.bold))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
@@ -636,6 +719,10 @@ struct LoginView: View {
         loginState.sites.first(where: { $0.id == loginState.selectedSiteID })?.name
     }
 
+    private var shouldShowCompactActionBar: Bool {
+        loginState.canConnect || loginState.isConnecting
+    }
+
     private var statusBadgeText: String {
         if loginState.isConnecting {
             return "Connecting"
@@ -704,8 +791,71 @@ struct LoginView: View {
         )
     }
 
-    private func gatewayLabel(for site: DeltaDoreClient.Site) -> String {
-        "\(site.gateways.count) \(site.gateways.count == 1 ? "gateway" : "gateways")"
+    private func gatewayLabel(for site: AuthenticationSite) -> String {
+        "\(site.gatewayCount) \(site.gatewayCount == 1 ? "gateway" : "gateways")"
+    }
+
+    @ViewBuilder
+    private func sectionCard<Content: View>(
+        metrics: LayoutMetrics,
+        spacing: CGFloat = 16,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        if metrics.usesInsetCards {
+            VStack(alignment: .leading, spacing: spacing) {
+                content()
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassCard(cornerRadius: 26, interactive: false, tone: .inset)
+        } else {
+            VStack(alignment: .leading, spacing: spacing) {
+                content()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var compactSectionDivider: some View {
+        Rectangle()
+            .fill(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.34))
+            .frame(height: 1)
+    }
+
+    @ViewBuilder
+    private func compactActionBar(metrics: LayoutMetrics) -> some View {
+        if metrics.pinsPrimaryAction && shouldShowCompactActionBar {
+            connectButton
+                .padding(.horizontal, metrics.outerPadding)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+                .background(.regularMaterial)
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.26))
+                        .frame(height: 1)
+                }
+        }
+    }
+
+    private func heroSupportingText(metrics: LayoutMetrics) -> String? {
+        if metrics.isWide {
+            return "Sign in once, load the sites tied to your account, then connect to the right gateway without stretching the whole interface across the screen."
+        }
+
+        if metrics.isCompactHeight {
+            return nil
+        }
+
+        return "Sign in with your Delta Dore account to load your sites and connect to the right gateway."
+    }
+
+    private func compactSignInDescription(metrics: LayoutMetrics) -> String {
+        if metrics.isCompactHeight {
+            return "Use your Delta Dore login to load sites and connect."
+        }
+
+        return "Use your Delta Dore login to load sites, choose the right home, and connect."
     }
 
     private func loadSites() {

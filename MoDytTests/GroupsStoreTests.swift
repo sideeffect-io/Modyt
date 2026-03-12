@@ -15,11 +15,13 @@ struct GroupsStoreReducerTests {
 
     @Test(arguments: transitionCases)
     func reducerAppliesConfiguredTransition(_ transition: TransitionCase) {
-        var stateMachine = GroupsStore.StateMachine(state: transition.initial)
-        let effects = stateMachine.reduce(transition.event)
+        let transitionResult = GroupsStore.StateMachine.reduce(
+            transition.initial,
+            transition.event
+        )
 
-        #expect(stateMachine.state == transition.expected)
-        #expect(effects == transition.expectedEffects)
+        #expect(transitionResult.state == transition.expected)
+        #expect(transitionResult.effects == transition.expectedEffects)
     }
 
     private static let transitionCases: [TransitionCase] = [
@@ -31,7 +33,7 @@ struct GroupsStoreReducerTests {
         ),
         .init(
             initial: .initial,
-            event: .groupsUpdated(groups),
+            event: .groupsObserved(groups),
             expected: GroupsState(groups: groups),
             expectedEffects: []
         ),
@@ -61,12 +63,16 @@ struct GroupsStoreEffectTests {
             makeTestGroup(id: "1", name: "Zeta", isGroupUser: true),
         ]
         let store = GroupsStore(
-            dependencies: .init(
+            observeGroups: .init(
                 observeGroups: {
                     await observeCalls.increment()
                     return streamBox.stream
-                },
-                toggleFavorite: { _ in },
+                }
+            ),
+            toggleFavorite: .init(
+                toggleFavorite: { _ in }
+            ),
+            refreshAll: .init(
                 refreshAll: {}
             )
         )
@@ -93,9 +99,13 @@ struct GroupsStoreEffectTests {
     func refreshRequestedForwardsRefreshAll() async {
         let refreshCalls = TestCounter()
         let store = GroupsStore(
-            dependencies: .init(
-                observeGroups: { AsyncStream { $0.finish() } },
-                toggleFavorite: { _ in },
+            observeGroups: .init(
+                observeGroups: { AsyncStream { $0.finish() } }
+            ),
+            toggleFavorite: .init(
+                toggleFavorite: { _ in }
+            ),
+            refreshAll: .init(
                 refreshAll: { await refreshCalls.increment() }
             )
         )
@@ -111,9 +121,13 @@ struct GroupsStoreEffectTests {
     func toggleFavoriteForwardsIdentifier() async {
         let recorder = TestRecorder<String>()
         let store = GroupsStore(
-            dependencies: .init(
-                observeGroups: { AsyncStream { $0.finish() } },
-                toggleFavorite: { await recorder.record($0) },
+            observeGroups: .init(
+                observeGroups: { AsyncStream { $0.finish() } }
+            ),
+            toggleFavorite: .init(
+                toggleFavorite: { await recorder.record($0) }
+            ),
+            refreshAll: .init(
                 refreshAll: {}
             )
         )

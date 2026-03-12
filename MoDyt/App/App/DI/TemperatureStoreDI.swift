@@ -1,18 +1,26 @@
-import SwiftUI
+struct TemperatureStoreFactory: Sendable {
+    private let makeStore: @MainActor @Sendable (DeviceIdentifier) -> TemperatureStore
 
-enum TemperatureStoreDependencyFactory {
-    static func make(
-        dependencyBag: DependencyBag = .production
-    ) -> TemperatureStore.Dependencies {
+    init(make: @escaping @MainActor @Sendable (DeviceIdentifier) -> TemperatureStore) {
+        self.makeStore = make
+    }
+
+    @MainActor
+    func make(identifier: DeviceIdentifier) -> TemperatureStore {
+        makeStore(identifier)
+    }
+
+    static func live(dependencyBag: DependencyBag) -> Self {
         let deviceRepository = dependencyBag.localStorageDatasources.deviceRepository
 
-        return .init(
-            observeTemperature: { await deviceRepository.observeByID($0) }
-        )
+        return Self { identifier in
+            TemperatureStore(
+                observeTemperature: .init(
+                    observeTemperature: {
+                        await deviceRepository.observeByID(identifier)
+                    }
+                )
+            )
+        }
     }
-}
-
-extension EnvironmentValues {
-    @Entry var temperatureStoreDependencies: TemperatureStore.Dependencies =
-        TemperatureStoreDependencyFactory.make()
 }

@@ -1,11 +1,11 @@
 import SwiftUI
 
 struct ScenesView: View {
-    @Environment(\.scenesStoreDependencies) private var scenesStoreDependencies
+    @Environment(\.scenesStoreFactory) private var scenesStoreFactory
 
     var body: some View {
         WithStoreView(
-            store: ScenesStore(dependencies: scenesStoreDependencies),
+            store: scenesStoreFactory.make(),
         ) { store in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {

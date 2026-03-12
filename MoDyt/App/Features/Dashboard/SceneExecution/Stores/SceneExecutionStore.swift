@@ -28,7 +28,7 @@ enum SceneExecutionEvent: Sendable {
 }
 
 enum SceneExecutionEffect: Sendable, Equatable {
-    case executeScene(String)
+    case executeScene
     case clearFeedback
 }
 
@@ -36,18 +36,18 @@ enum SceneExecutionEffect: Sendable, Equatable {
 @MainActor
 final class SceneExecutionStore: StartableStore {
     struct StateMachine {
-        var state: SceneExecutionState = .initial
+        static func reduce(
+            _ state: SceneExecutionState,
+            _ event: SceneExecutionEvent
+        ) -> Transition<SceneExecutionState, SceneExecutionEffect> {
+            var state = state
 
-        mutating func reduce(
-            _ event: SceneExecutionEvent,
-            uniqueId: String
-        ) -> [SceneExecutionEffect] {
             switch event {
             case .executeTapped:
-                guard !state.isExecuting else { return [] }
+                guard !state.isExecuting else { return .init(state: state) }
                 state.isExecuting = true
                 state.feedback = nil
-                return [.executeScene(uniqueId)]
+                return .init(state: state, effects: [.executeScene])
 
             case .executionFinished(let result):
                 state.isExecuting = false
@@ -59,59 +59,29 @@ final class SceneExecutionStore: StartableStore {
                 case .sentWithoutAcknowledgement:
                     state.feedback = .sent
                 }
-                return [.clearFeedback]
+                return .init(state: state, effects: [.clearFeedback])
 
             case .clearFeedback:
                 state.feedback = nil
-                return []
+                return .init(state: state)
             }
         }
     }
 
-    struct Dependencies {
-        let executeScene: @Sendable (String) async -> SceneExecutionResult
-        let sleep: @Sendable (Duration) async -> Void
-        let minimumExecutionAnimationDuration: Duration
-        let feedbackDuration: Duration
+    private(set) var state: SceneExecutionState = .initial
 
-        init(
-            executeScene: @escaping @Sendable (String) async -> SceneExecutionResult,
-            sleep: @escaping @Sendable (Duration) async -> Void = { duration in
-                try? await Task.sleep(for: duration)
-            },
-            minimumExecutionAnimationDuration: Duration = .seconds(2),
-            feedbackDuration: Duration = .seconds(2)
-        ) {
-            self.executeScene = executeScene
-            self.sleep = sleep
-            self.minimumExecutionAnimationDuration = minimumExecutionAnimationDuration
-            self.feedbackDuration = feedbackDuration
-        }
-    }
-
-    private(set) var stateMachine: StateMachine = StateMachine()
-
-    var state: SceneExecutionState {
-        stateMachine.state
-    }
-
-    private let uniqueId: String
-    private let executionTask = TaskHandle()
-    private let feedbackTask = TaskHandle()
-    private let worker: Worker
+    private let executeScene: ExecuteSceneEffectExecutor
+    private let clearFeedback: ClearSceneExecutionFeedbackEffectExecutor
+    private var executionTask: Task<Void, Never>?
+    private var feedbackTask: Task<Void, Never>?
     private var hasStarted = false
 
     init(
-        dependencies: Dependencies,
-        uniqueId: String
+        executeScene: ExecuteSceneEffectExecutor,
+        clearFeedback: ClearSceneExecutionFeedbackEffectExecutor
     ) {
-        self.uniqueId = uniqueId
-        self.worker = Worker(
-            executeScene: dependencies.executeScene,
-            sleep: dependencies.sleep,
-            minimumExecutionAnimationDuration: dependencies.minimumExecutionAnimationDuration,
-            feedbackDuration: dependencies.feedbackDuration
-        )
+        self.executeScene = executeScene
+        self.clearFeedback = clearFeedback
     }
 
     func start() {
@@ -119,14 +89,15 @@ final class SceneExecutionStore: StartableStore {
         hasStarted = true
     }
 
-    deinit {
-        executionTask.cancel()
-        feedbackTask.cancel()
+    isolated deinit {
+        executionTask?.cancel()
+        feedbackTask?.cancel()
     }
 
     func send(_ event: SceneExecutionEvent) {
-        let effects = stateMachine.reduce(event, uniqueId: uniqueId)
-        handle(effects)
+        let transition = StateMachine.reduce(state, event)
+        state = transition.state
+        handle(transition.effects)
     }
 
     private func handle(_ effects: [SceneExecutionEffect]) {
@@ -137,55 +108,38 @@ final class SceneExecutionStore: StartableStore {
 
     private func handle(_ effect: SceneExecutionEffect) {
         switch effect {
-        case .executeScene(let uniqueId):
-            feedbackTask.cancel()
-            executionTask.cancel()
-            let taskHandle = executionTask
-            executionTask.task = Task { [weak self, worker, uniqueId, weak taskHandle] in
-                defer {
-                    Task { @MainActor [weak taskHandle] in
-                        taskHandle?.task = nil
+        case .executeScene:
+            cancelTask(&feedbackTask)
+            replaceTask(
+                &executionTask,
+                with: makeTrackedEventTask(
+                    operation: { [executeScene] in
+                        await executeScene()
+                    },
+                    onEvent: { [weak self] event in
+                        self?.send(event)
+                    },
+                    onFinish: { [weak self] in
+                        self?.executionTask = nil
                     }
-                }
-                let result = await worker.executeScene(uniqueId)
-                guard !Task.isCancelled else { return }
-                self?.send(.executionFinished(result))
-            }
+                )
+            )
 
         case .clearFeedback:
-            feedbackTask.task = Task { [weak self, worker] in
-                await worker.waitBeforeClearingFeedback()
-                self?.send(.clearFeedback)
-            }
-        }
-    }
-
-    private actor Worker {
-        private let executeSceneAction: @Sendable (String) async -> SceneExecutionResult
-        private let sleepAction: @Sendable (Duration) async -> Void
-        private let minimumExecutionAnimationDuration: Duration
-        private let feedbackDuration: Duration
-
-        init(
-            executeScene: @escaping @Sendable (String) async -> SceneExecutionResult,
-            sleep: @escaping @Sendable (Duration) async -> Void,
-            minimumExecutionAnimationDuration: Duration,
-            feedbackDuration: Duration
-        ) {
-            self.executeSceneAction = executeScene
-            self.sleepAction = sleep
-            self.minimumExecutionAnimationDuration = minimumExecutionAnimationDuration
-            self.feedbackDuration = feedbackDuration
-        }
-
-        func executeScene(_ uniqueId: String) async -> SceneExecutionResult {
-            async let result = executeSceneAction(uniqueId)
-            await sleepAction(minimumExecutionAnimationDuration)
-            return await result
-        }
-
-        func waitBeforeClearingFeedback() async {
-            await sleepAction(feedbackDuration)
+            replaceTask(
+                &feedbackTask,
+                with: makeTrackedEventTask(
+                    operation: { [clearFeedback] in
+                        await clearFeedback()
+                    },
+                    onEvent: { [weak self] event in
+                        self?.send(event)
+                    },
+                    onFinish: { [weak self] in
+                        self?.feedbackTask = nil
+                    }
+                )
+            )
         }
     }
 }

@@ -20,11 +20,13 @@ struct DevicesStoreReducerTests {
 
     @Test(arguments: transitionCases)
     func reducerAppliesConfiguredTransition(_ transition: TransitionCase) {
-        var stateMachine = DevicesStore.StateMachine(state: transition.initial)
-        let effects = stateMachine.reduce(transition.event)
+        let transitionResult = DevicesStore.StateMachine.reduce(
+            transition.initial,
+            transition.event
+        )
 
-        #expect(stateMachine.state == transition.expected)
-        #expect(effects == transition.expectedEffects)
+        #expect(transitionResult.state == transition.expected)
+        #expect(transitionResult.effects == transition.expectedEffects)
     }
 
     private static let transitionCases: [TransitionCase] = [
@@ -36,7 +38,7 @@ struct DevicesStoreReducerTests {
         ),
         .init(
             initial: .initial,
-            event: .devicesUpdated(sections),
+            event: .devicesObserved([device]),
             expected: DevicesState(groupedDevices: sections),
             expectedEffects: []
         ),
@@ -59,26 +61,26 @@ struct DevicesStoreReducerTests {
 struct DevicesStoreEffectTests {
     @Test
     func startIsIdempotentAndObservationUpdatesState() async {
-        let streamBox = TestAsyncStreamBox<[RepositoryDeviceTypeSection]>()
+        let streamBox = TestAsyncStreamBox<[Device]>()
         let observeCalls = TestCounter()
+        let expectedDevice = makeTestDevice(
+            identifier: .init(deviceId: 1, endpointId: 1),
+            name: "Desk Lamp"
+        )
         let expected = [
-            makeTestRepositoryDeviceSection(
-                usage: .light,
-                items: [
-                    makeTestDevice(
-                        identifier: .init(deviceId: 1, endpointId: 1),
-                        name: "Desk Lamp"
-                    )
-                ]
-            )
+            makeTestRepositoryDeviceSection(usage: Usage.light, items: [expectedDevice])
         ]
         let store = DevicesStore(
-            dependencies: .init(
+            observeDevices: .init(
                 observeDevices: {
                     await observeCalls.increment()
                     return streamBox.stream
-                },
-                toggleFavorite: { _ in },
+                }
+            ),
+            toggleFavorite: .init(
+                toggleFavorite: { _ in }
+            ),
+            refreshAll: .init(
                 refreshAll: {}
             )
         )
@@ -90,7 +92,7 @@ struct DevicesStoreEffectTests {
             await observeCalls.value() == 1
         })
 
-        streamBox.yield(expected)
+        streamBox.yield([expectedDevice])
 
         #expect(await testWaitUntil {
             store.state.groupedDevices == expected
@@ -101,9 +103,13 @@ struct DevicesStoreEffectTests {
     func refreshRequestedForwardsRefreshAll() async {
         let refreshCalls = TestCounter()
         let store = DevicesStore(
-            dependencies: .init(
-                observeDevices: { AsyncStream { $0.finish() } },
-                toggleFavorite: { _ in },
+            observeDevices: .init(
+                observeDevices: { AsyncStream { $0.finish() } }
+            ),
+            toggleFavorite: .init(
+                toggleFavorite: { _ in }
+            ),
+            refreshAll: .init(
                 refreshAll: { await refreshCalls.increment() }
             )
         )
@@ -120,9 +126,13 @@ struct DevicesStoreEffectTests {
         let identifier = DeviceIdentifier(deviceId: 77, endpointId: 3)
         let recorder = TestRecorder<DeviceIdentifier>()
         let store = DevicesStore(
-            dependencies: .init(
-                observeDevices: { AsyncStream { $0.finish() } },
-                toggleFavorite: { await recorder.record($0) },
+            observeDevices: .init(
+                observeDevices: { AsyncStream { $0.finish() } }
+            ),
+            toggleFavorite: .init(
+                toggleFavorite: { await recorder.record($0) }
+            ),
+            refreshAll: .init(
                 refreshAll: {}
             )
         )

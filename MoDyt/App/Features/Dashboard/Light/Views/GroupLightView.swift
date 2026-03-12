@@ -12,7 +12,7 @@ private func performLightUpdatesWithoutAnimation(_ updates: () -> Void) {
 }
 
 struct GroupLightView: View {
-    @Environment(\.groupLightStoreDependencies) private var groupLightStoreDependencies
+    @Environment(\.groupLightStoreFactory) private var groupLightStoreFactory
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     let deviceIds: [DeviceIdentifier]
@@ -59,10 +59,7 @@ struct GroupLightView: View {
 
     var body: some View {
         WithStoreView(
-            store: GroupLightStore(
-                deviceIds: normalizedDeviceIds,
-                dependencies: groupLightStoreDependencies
-            )
+            store: groupLightStoreFactory.make(deviceIds: normalizedDeviceIds)
         ) { store in
             VStack(alignment: .leading, spacing: 12) {
                 groupBadge

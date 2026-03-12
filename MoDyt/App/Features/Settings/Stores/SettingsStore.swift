@@ -26,52 +26,48 @@ enum SettingsEffect: Sendable, Equatable {
 @MainActor
 final class SettingsStore: StartableStore {
     struct StateMachine {
-        var state: SettingsState = .initial
+        static func reduce(
+            _ state: SettingsState,
+            _ event: SettingsEvent
+        ) -> Transition<SettingsState, SettingsEffect> {
+            var state = state
 
-        mutating func reduce(_ event: SettingsEvent) -> [SettingsEffect] {
             switch event {
             case .disconnectTapped:
-                guard !state.isDisconnecting else { return [] }
+                guard !state.isDisconnecting else { return .init(state: state) }
                 state.isDisconnecting = true
                 state.didDisconnect = false
                 state.errorMessage = nil
-                return [.requestDisconnect]
+                return .init(state: state, effects: [.requestDisconnect])
 
             case .disconnectFinished:
                 state.isDisconnecting = false
                 state.didDisconnect = true
                 state.errorMessage = nil
-                return []
+                return .init(state: state)
             }
         }
     }
 
-    struct Dependencies {
-        let requestDisconnect: @Sendable () async -> Void
-    }
+    private(set) var state: SettingsState = .initial
 
-    private(set) var stateMachine: StateMachine = StateMachine()
+    private let requestDisconnect: RequestDisconnectEffectExecutor
+    private var disconnectTask: Task<Void, Never>?
 
-    var state: SettingsState {
-        stateMachine.state
-    }
-
-    private let worker: Worker
-    private let disconnectTask = TaskHandle()
-
-    init(dependencies: Dependencies) {
-        self.worker = Worker(requestDisconnect: dependencies.requestDisconnect)
+    init(requestDisconnect: RequestDisconnectEffectExecutor) {
+        self.requestDisconnect = requestDisconnect
     }
 
     func send(_ event: SettingsEvent) {
-        let effects = stateMachine.reduce(event)
-        handle(effects)
+        let transition = StateMachine.reduce(state, event)
+        state = transition.state
+        handle(transition.effects)
     }
 
     func start() {}
 
-    deinit {
-        disconnectTask.cancel()
+    isolated deinit {
+        disconnectTask?.cancel()
     }
 
     private func handle(_ effects: [SettingsEffect]) {
@@ -83,26 +79,24 @@ final class SettingsStore: StartableStore {
     private func handle(_ effect: SettingsEffect) {
         switch effect {
         case .requestDisconnect:
-            disconnectTask.task = Task { [weak self, worker] in
-                await worker.requestDisconnect()
-                self?.receive(.disconnectFinished)
-            }
+            replaceTask(
+                &disconnectTask,
+                with: makeTrackedEventTask(
+                    operation: { [requestDisconnect] in
+                        await requestDisconnect()
+                    },
+                    onEvent: { [weak self] event in
+                        self?.receive(event)
+                    },
+                    onFinish: { [weak self] in
+                        self?.disconnectTask = nil
+                    }
+                )
+            )
         }
     }
 
     private func receive(_ event: SettingsEvent) {
         send(event)
-    }
-
-    private actor Worker {
-        private let requestDisconnectAction: @Sendable () async -> Void
-
-        init(requestDisconnect: @escaping @Sendable () async -> Void) {
-            self.requestDisconnectAction = requestDisconnect
-        }
-
-        func requestDisconnect() async {
-            await requestDisconnectAction()
-        }
     }
 }

@@ -22,19 +22,22 @@ struct FavoriteRepositoryTests {
             name: "Good Night"
         )
 
-        try await fixture.deviceRepository.toggleFavorite(.init(deviceId: 1, endpointId: 1))
-        try await fixture.groupRepository.toggleFavorite("group-1")
-        try await fixture.sceneRepository.toggleFavorite("scene-1")
+        try await fixture.favoriteRepository.toggleFavorite(.device(identifier: .init(deviceId: 1, endpointId: 1)))
+        try await fixture.favoriteRepository.toggleFavorite(.group(groupId: "group-1", memberIdentifiers: [.init(deviceId: 5, endpointId: 1)]))
+        try await fixture.favoriteRepository.toggleFavorite(.scene(sceneId: "scene-1"))
 
-        try await fixture.deviceRepository.applyDashboardOrders([
-            .init(deviceId: 1, endpointId: 1): 0
-        ])
-        try await fixture.sceneRepository.applyDashboardOrders([
-            "scene-1": 0
-        ])
-        try await fixture.groupRepository.applyDashboardOrders([
-            "group-1": 0
-        ])
+        try await fixture.deviceRepository.mutateByIDs([.init(deviceId: 1, endpointId: 1)]) { device in
+            guard device.isFavorite else { return }
+            device.dashboardOrder = 0
+        }
+        try await fixture.sceneRepository.mutateByIDs(["scene-1"]) { scene in
+            guard scene.isFavorite else { return }
+            scene.dashboardOrder = 0
+        }
+        try await fixture.groupRepository.mutateByIDs(["group-1"]) { group in
+            guard group.isFavorite else { return }
+            group.dashboardOrder = 0
+        }
 
         let favorites = try await fixture.favoriteRepository.listAll()
 

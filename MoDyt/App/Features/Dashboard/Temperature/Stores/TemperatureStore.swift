@@ -9,22 +9,31 @@ final class TemperatureStore: StartableStore {
     }
 
     enum Event: Sendable {
+        case onAppear
         case descriptorWasResolved(Descriptor?)
     }
 
-    enum Effect: Sendable, Equatable {}
+    enum Effect: Sendable, Equatable {
+        case startObserving
+    }
 
     struct StateMachine {
-        var state = State(descriptor: nil)
+        static func reduce(
+            _ state: State,
+            _ event: Event
+        ) -> Transition<State, Effect> {
+            var state = state
 
-        mutating func reduce(_ event: Event) -> [Effect] {
             switch event {
+            case .onAppear:
+                return .init(state: state, effects: [.startObserving])
+
             case .descriptorWasResolved(let descriptor):
                 if state.descriptor != descriptor {
                     state.descriptor = descriptor
                 }
             }
-            return []
+            return .init(state: state)
         }
     }
 
@@ -44,92 +53,77 @@ final class TemperatureStore: StartableStore {
         let batteryStatus: BatteryStatus?
     }
 
-    struct Dependencies {
-        let observeTemperature: @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
-
-        init(
-            observeTemperature: @escaping @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
-        ) {
-            self.observeTemperature = observeTemperature
-        }
-    }
-
-    private(set) var stateMachine: StateMachine = StateMachine()
+    private(set) var state = State(descriptor: nil)
 
     var descriptor: Descriptor? {
-        stateMachine.state.descriptor
+        state.descriptor
     }
 
-    private let identifier: DeviceIdentifier
-    private let observationTask = TaskHandle()
-    private let worker: Worker
+    private let observeTemperature: ObserveTemperatureEffectExecutor
+    private var observationTask: Task<Void, Never>?
     private var hasStarted = false
 
     init(
-        dependencies: Dependencies,
-        identifier: DeviceIdentifier
+        observeTemperature: ObserveTemperatureEffectExecutor
     ) {
-        self.identifier = identifier
-        self.worker = Worker(observeTemperature: dependencies.observeTemperature)
+        self.observeTemperature = observeTemperature
     }
 
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
-        let identifier = self.identifier
-        observationTask.task = Task { [weak self, worker] in
-            await worker.observe(identifier: identifier) { [weak self] device, descriptor in
-                await self?.applyIncomingObservation(device: device, descriptor: descriptor)
-            }
-        }
+        send(.onAppear)
     }
 
-    deinit {
-        observationTask.cancel()
-    }
-
-    private func applyIncomingObservation(device: Device?, descriptor: Descriptor?) {
-        guard let device else {
-            send(.descriptorWasResolved(nil))
-            return
-        }
-
-        guard let descriptor else {
-            if Self.isClimateCandidate(device) == false {
-                send(.descriptorWasResolved(nil))
-            }
-            return
-        }
-
-        send(.descriptorWasResolved(descriptor))
+    isolated deinit {
+        observationTask?.cancel()
     }
 
     func send(_ event: Event) {
-        _ = stateMachine.reduce(event)
+        let transition = StateMachine.reduce(state, event)
+        state = transition.state
+        handle(transition.effects)
     }
 
-    private actor Worker {
-        private let observeTemperature: @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
-
-        init(
-            observeTemperature: @escaping @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
-        ) {
-            self.observeTemperature = observeTemperature
-        }
-
-        func observe(
-            identifier: DeviceIdentifier,
-            onObservation: @escaping @Sendable (Device?, Descriptor?) async -> Void
-        ) async {
-            let stream = await observeTemperature(identifier)
-            for await device in stream {
-                guard !Task.isCancelled else { return }
-                await onObservation(device, TemperatureStore.makeDescriptor(from: device))
+    private func handle(_ effects: [Effect]) {
+        for effect in effects {
+            switch effect {
+            case .startObserving:
+                guard observationTask == nil else { return }
+                replaceTask(
+                    &observationTask,
+                    with: makeTrackedStreamTask(
+                        operation: { [observeTemperature] in
+                            await observeTemperature()
+                        },
+                        onEvent: { [weak self] event in
+                            self?.send(event)
+                        },
+                        onFinish: { [weak self] in
+                            self?.observationTask = nil
+                        }
+                    )
+                )
             }
         }
     }
 
-    private static func isClimateCandidate(_ device: Device) -> Bool {
+    nonisolated static func observationEvent(from device: Device?) -> Event? {
+        guard let device else {
+            return .descriptorWasResolved(nil)
+        }
+
+        guard let descriptor = makeDescriptor(from: device) else {
+            if isClimateCandidate(device) == false {
+                return .descriptorWasResolved(nil)
+            }
+            return nil
+        }
+
+        return .descriptorWasResolved(descriptor)
+    }
+
+    nonisolated static func isClimateCandidate(_ device: Device) -> Bool {
         switch device.controlKind {
         case .temperature, .thermostat, .heatPump:
             return true
@@ -138,7 +132,7 @@ final class TemperatureStore: StartableStore {
         }
     }
 
-    private static func makeDescriptor(from device: Device?) -> Descriptor? {
+    nonisolated static func makeDescriptor(from device: Device?) -> Descriptor? {
         guard let device else { return nil }
         guard isClimateCandidate(device) else {
             return nil
@@ -155,7 +149,7 @@ final class TemperatureStore: StartableStore {
         )
     }
 
-    private static func batteryStatusDescriptor(data: [String: JSONValue]) -> Descriptor.BatteryStatus? {
+    private nonisolated static func batteryStatusDescriptor(data: [String: JSONValue]) -> Descriptor.BatteryStatus? {
         let batteryDefectSignal = firstSignalValue(
             keys: preferredBatteryDefectKeys,
             valueProvider: { key in normalizedBoolValue(forKey: key, data: data) }
@@ -176,7 +170,7 @@ final class TemperatureStore: StartableStore {
         )
     }
 
-    private static func firstLikelyBatteryDefectSignal(
+    private nonisolated static func firstLikelyBatteryDefectSignal(
         data: [String: JSONValue]
     ) -> (key: String, value: Bool)? {
         for key in data.keys.sorted() {
@@ -187,7 +181,7 @@ final class TemperatureStore: StartableStore {
         return nil
     }
 
-    private static func firstLikelyBatteryLevelSignal(
+    private nonisolated static func firstLikelyBatteryLevelSignal(
         data: [String: JSONValue]
     ) -> (key: String, value: Double)? {
         for key in data.keys.sorted() {
@@ -198,7 +192,7 @@ final class TemperatureStore: StartableStore {
         return nil
     }
 
-    private static func numericValue(
+    private nonisolated static func numericValue(
         forKey key: String,
         data: [String: JSONValue]
     ) -> Double? {
@@ -211,7 +205,7 @@ final class TemperatureStore: StartableStore {
         return nil
     }
 
-    private static func normalizedBoolValue(
+    private nonisolated static func normalizedBoolValue(
         forKey key: String,
         data: [String: JSONValue]
     ) -> Bool? {
@@ -232,7 +226,7 @@ final class TemperatureStore: StartableStore {
         }
     }
 
-    private static func firstSignalValue<Value>(
+    private nonisolated static func firstSignalValue<Value>(
         keys: [String],
         valueProvider: (String) -> Value?
     ) -> (key: String, value: Value)? {
@@ -243,7 +237,7 @@ final class TemperatureStore: StartableStore {
         return nil
     }
 
-    private static func isLikelyBatteryDefectKey(_ key: String) -> Bool {
+    private nonisolated static func isLikelyBatteryDefectKey(_ key: String) -> Bool {
         let normalized = key.lowercased()
         guard normalized.contains("batt") || normalized.contains("battery") else { return false }
         return normalized.contains("defect")
@@ -251,7 +245,7 @@ final class TemperatureStore: StartableStore {
             || normalized.contains("low")
     }
 
-    private static func isLikelyBatteryLevelKey(_ key: String) -> Bool {
+    private nonisolated static func isLikelyBatteryLevelKey(_ key: String) -> Bool {
         let normalized = key.lowercased()
         guard normalized.contains("batt") || normalized.contains("battery") else { return false }
         if normalized.contains("defect") || normalized.contains("fault") || normalized.contains("low") {
@@ -260,7 +254,7 @@ final class TemperatureStore: StartableStore {
         return normalized.contains("level") || normalized == "battery"
     }
 
-    private static let preferredBatteryDefectKeys = [
+    private nonisolated static let preferredBatteryDefectKeys = [
         "battDefect",
         "batteryCmdDefect",
         "batteryDefect",
@@ -268,7 +262,7 @@ final class TemperatureStore: StartableStore {
         "battLow"
     ]
 
-    private static let preferredBatteryLevelKeys = [
+    private nonisolated static let preferredBatteryLevelKeys = [
         "battLevel",
         "batteryLevel",
         "battery"

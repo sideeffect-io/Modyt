@@ -1,11 +1,10 @@
 import Foundation
 import Observation
-import DeltaDoreClient
 
 struct LoginState: Sendable, Equatable {
     var email: String = ""
     var password: String = ""
-    var sites: [DeltaDoreClient.Site] = []
+    var sites: [AuthenticationSite] = []
     var selectedSiteID: String? = nil
     var isLoadingSites: Bool = false
     var isConnecting: Bool = false
@@ -47,11 +46,11 @@ struct AuthenticationStoreError: LocalizedError, Sendable, Equatable {
 
 enum AuthenticationEvent: Sendable {
     case onAppear
-    case flowInspected(DeltaDoreClient.ConnectionFlowStatus)
+    case flowInspected(AuthenticationFlowStatus)
     case loginEmailChanged(String)
     case loginPasswordChanged(String)
     case loadSitesTapped
-    case sitesLoaded(Result<[DeltaDoreClient.Site], AuthenticationStoreError>)
+    case sitesLoaded(Result<[AuthenticationSite], AuthenticationStoreError>)
     case siteSelected(String)
     case connectTapped
     case connectionSucceeded
@@ -74,22 +73,25 @@ enum AuthenticationDelegateEvent {
 @MainActor
 final class AuthenticationStore: StartableStore {
     struct StateMachine {
-        var state: AuthenticationState = .initial
+        static func reduce(
+            _ state: AuthenticationState,
+            _ event: AuthenticationEvent
+        ) -> Transition<AuthenticationState, AuthenticationEffect> {
+            var state = state
 
-        mutating func reduce(_ event: AuthenticationEvent) -> [AuthenticationEffect] {
             switch event {
             case .onAppear, .retryTapped:
                 state.phase = .bootstrapping
-                return [.inspectFlow]
+                return .init(state: state, effects: [.inspectFlow])
 
             case .flowInspected(let flow):
                 switch flow {
                 case .connectWithStoredCredentials:
                     state.phase = .connecting
-                    return [.connectStored]
+                    return .init(state: state, effects: [.connectStored])
                 case .connectWithNewCredentials:
                     state.phase = .login(LoginState())
-                    return []
+                    return .init(state: state)
                 }
 
             case .loginEmailChanged(let email):
@@ -98,7 +100,7 @@ final class AuthenticationStore: StartableStore {
                     login.errorMessage = nil
                     state.phase = .login(login)
                 }
-                return []
+                return .init(state: state)
 
             case .loginPasswordChanged(let password):
                 if case .login(var login) = state.phase {
@@ -106,16 +108,19 @@ final class AuthenticationStore: StartableStore {
                     login.errorMessage = nil
                     state.phase = .login(login)
                 }
-                return []
+                return .init(state: state)
 
             case .loadSitesTapped:
                 if case .login(var login) = state.phase, login.canLoadSites {
                     login.isLoadingSites = true
                     login.errorMessage = nil
                     state.phase = .login(login)
-                    return [.listSites(email: login.email, password: login.password)]
+                    return .init(
+                        state: state,
+                        effects: [.listSites(email: login.email, password: login.password)]
+                    )
                 }
-                return []
+                return .init(state: state)
 
             case .sitesLoaded(let result):
                 if case .login(var login) = state.phase {
@@ -133,7 +138,7 @@ final class AuthenticationStore: StartableStore {
                     }
                     state.phase = .login(login)
                 }
-                return []
+                return .init(state: state)
 
             case .siteSelected(let siteID):
                 if case .login(var login) = state.phase {
@@ -143,26 +148,29 @@ final class AuthenticationStore: StartableStore {
                     login.errorMessage = nil
                     state.phase = .login(login)
                 }
-                return []
+                return .init(state: state)
 
             case .connectTapped:
                 if case .login(var login) = state.phase, login.canConnect {
                     login.isConnecting = true
                     login.errorMessage = nil
                     state.phase = .login(login)
-                    return [
-                        .connectNew(
-                            email: login.email,
-                            password: login.password,
-                            siteIndex: login.selectedSiteIndex
-                        )
-                    ]
+                    return .init(
+                        state: state,
+                        effects: [
+                            .connectNew(
+                                email: login.email,
+                                password: login.password,
+                                siteIndex: login.selectedSiteIndex
+                            )
+                        ]
+                    )
                 }
-                return []
+                return .init(state: state)
 
             case .connectionSucceeded:
                 state.phase = .connecting
-                return []
+                return .init(state: state)
 
             case .connectionFailed(let message):
                 switch state.phase {
@@ -174,12 +182,12 @@ final class AuthenticationStore: StartableStore {
                 default:
                     state.phase = .error(message)
                 }
-                return []
+                return .init(state: state)
             }
         }
 
         private static func selectedSiteID(
-            from sites: [DeltaDoreClient.Site],
+            from sites: [AuthenticationSite],
             preferred: String?
         ) -> String? {
             if sites.count == 1 {
@@ -194,40 +202,34 @@ final class AuthenticationStore: StartableStore {
         }
     }
 
-    struct Dependencies {
-        let inspectFlow: @Sendable () async -> DeltaDoreClient.ConnectionFlowStatus
-        let connectStored: @Sendable () async throws -> Void
-        let listSites: @Sendable (String, String) async throws -> [DeltaDoreClient.Site]
-        let connectNew: @Sendable (String, String, Int?) async throws -> Void
-    }
-
-    private(set) var stateMachine: StateMachine = StateMachine()
-
-    var state: AuthenticationState {
-        stateMachine.state
-    }
+    private(set) var state: AuthenticationState = .initial
 
     var onDelegateEvent: @MainActor (AuthenticationDelegateEvent) -> Void
 
-    private let worker: Worker
-    private let effectTask = TaskHandle()
+    private let inspectFlow: InspectAuthenticationFlowEffectExecutor
+    private let connectStored: ConnectStoredAuthenticationEffectExecutor
+    private let listSites: ListAuthenticationSitesEffectExecutor
+    private let connectNew: ConnectNewAuthenticationEffectExecutor
+    private var effectTask: Task<Void, Never>?
     private var hasStarted = false
 
     init(
-        dependencies: Dependencies,
+        inspectFlow: InspectAuthenticationFlowEffectExecutor,
+        connectStored: ConnectStoredAuthenticationEffectExecutor,
+        listSites: ListAuthenticationSitesEffectExecutor,
+        connectNew: ConnectNewAuthenticationEffectExecutor,
         onDelegateEvent: @escaping @MainActor (AuthenticationDelegateEvent) -> Void = { _ in }
     ) {
         self.onDelegateEvent = onDelegateEvent
-        self.worker = Worker(
-            inspectFlow: dependencies.inspectFlow,
-            connectStored: dependencies.connectStored,
-            listSites: dependencies.listSites,
-            connectNew: dependencies.connectNew
-        )
+        self.inspectFlow = inspectFlow
+        self.connectStored = connectStored
+        self.listSites = listSites
+        self.connectNew = connectNew
     }
 
     func send(_ event: AuthenticationEvent) {
-        let effects = stateMachine.reduce(event)
+        let transition = StateMachine.reduce(state, event)
+        state = transition.state
 
         switch event {
         case .connectionSucceeded:
@@ -236,7 +238,7 @@ final class AuthenticationStore: StartableStore {
             break
         }
 
-        handle(effects)
+        handle(transition.effects)
     }
 
     func start() {
@@ -245,8 +247,8 @@ final class AuthenticationStore: StartableStore {
         send(.onAppear)
     }
 
-    deinit {
-        effectTask.cancel()
+    isolated deinit {
+        effectTask?.cancel()
     }
 
     private func handle(_ effects: [AuthenticationEffect]) {
@@ -258,94 +260,67 @@ final class AuthenticationStore: StartableStore {
     private func handle(_ effect: AuthenticationEffect) {
         switch effect {
         case .inspectFlow:
-            effectTask.task = Task { [weak self, worker] in
-                let flow = await worker.inspectFlow()
-                guard !Task.isCancelled else { return }
-                self?.receive(.flowInspected(flow))
-            }
+            replaceTask(
+                &effectTask,
+                with: makeTrackedEventTask(
+                    operation: { [inspectFlow] in
+                        await inspectFlow()
+                    },
+                    onEvent: { [weak self] event in
+                        self?.receive(event)
+                    }
+                )
+            )
 
         case .connectStored:
-            effectTask.task = Task { [weak self, worker] in
-                if let message = await worker.connectStored() {
-                    guard !Task.isCancelled else { return }
-                    self?.receive(.connectionFailed(message))
-                } else {
-                    guard !Task.isCancelled else { return }
-                    self?.receive(.connectionSucceeded)
-                }
-            }
+            replaceTask(
+                &effectTask,
+                with: makeTrackedEventTask(
+                    operation: { [connectStored] in
+                        await connectStored()
+                    },
+                    onEvent: { [weak self] event in
+                        self?.receive(event)
+                    }
+                )
+            )
 
         case .listSites(let email, let password):
-            effectTask.task = Task { [weak self, worker] in
-                let result = await worker.listSites(email: email, password: password)
-                guard !Task.isCancelled else { return }
-                self?.receive(.sitesLoaded(result))
-            }
+            replaceTask(
+                &effectTask,
+                with: makeTrackedEventTask(
+                    operation: { [listSites] in
+                        await listSites(
+                            email: email,
+                            password: password
+                        )
+                    },
+                    onEvent: { [weak self] event in
+                        self?.receive(event)
+                    }
+                )
+            )
 
         case .connectNew(let email, let password, let siteIndex):
-            effectTask.task = Task { [weak self, worker] in
-                if let message = await worker.connectNew(email: email, password: password, siteIndex: siteIndex) {
-                    guard !Task.isCancelled else { return }
-                    self?.receive(.connectionFailed(message))
-                } else {
-                    guard !Task.isCancelled else { return }
-                    self?.receive(.connectionSucceeded)
-                }
-            }
+            replaceTask(
+                &effectTask,
+                with: makeTrackedEventTask(
+                    operation: { [connectNew] in
+                        await connectNew(
+                            email: email,
+                            password: password,
+                            siteIndex: siteIndex
+                        )
+                    },
+                    onEvent: { [weak self] event in
+                        self?.receive(event)
+                    }
+                )
+            )
         }
     }
 
     private func receive(_ event: AuthenticationEvent) {
         send(event)
-    }
-
-    private actor Worker {
-        private let inspectFlowAction: @Sendable () async -> DeltaDoreClient.ConnectionFlowStatus
-        private let connectStoredAction: @Sendable () async throws -> Void
-        private let listSitesAction: @Sendable (String, String) async throws -> [DeltaDoreClient.Site]
-        private let connectNewAction: @Sendable (String, String, Int?) async throws -> Void
-
-        init(
-            inspectFlow: @escaping @Sendable () async -> DeltaDoreClient.ConnectionFlowStatus,
-            connectStored: @escaping @Sendable () async throws -> Void,
-            listSites: @escaping @Sendable (String, String) async throws -> [DeltaDoreClient.Site],
-            connectNew: @escaping @Sendable (String, String, Int?) async throws -> Void
-        ) {
-            self.inspectFlowAction = inspectFlow
-            self.connectStoredAction = connectStored
-            self.listSitesAction = listSites
-            self.connectNewAction = connectNew
-        }
-
-        func inspectFlow() async -> DeltaDoreClient.ConnectionFlowStatus {
-            await inspectFlowAction()
-        }
-
-        func connectStored() async -> String? {
-            do {
-                try await connectStoredAction()
-                return nil
-            } catch {
-                return error.localizedDescription
-            }
-        }
-
-        func listSites(email: String, password: String) async -> Result<[DeltaDoreClient.Site], AuthenticationStoreError> {
-            do {
-                let sites = try await listSitesAction(email, password)
-                return .success(sites)
-            } catch {
-                return .failure(AuthenticationStoreError(message: error.localizedDescription))
-            }
-        }
-
-        func connectNew(email: String, password: String, siteIndex: Int?) async -> String? {
-            do {
-                try await connectNewAction(email, password, siteIndex)
-                return nil
-            } catch {
-                return error.localizedDescription
-            }
-        }
     }
 }

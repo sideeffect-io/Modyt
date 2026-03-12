@@ -4,50 +4,44 @@ import Testing
 struct SettingsStoreReducerTests {
     @Test
     func disconnectTappedStartsDisconnectAndRequestsEffect() {
-        var stateMachine = SettingsStore.StateMachine(state: .initial)
+        let transition = SettingsStore.StateMachine.reduce(.initial, .disconnectTapped)
 
-        let effects = stateMachine.reduce(.disconnectTapped)
-
-        #expect(stateMachine.state.isDisconnecting)
-        #expect(stateMachine.state.didDisconnect == false)
-        #expect(stateMachine.state.errorMessage == nil)
-        #expect(effects == [.requestDisconnect])
+        #expect(transition.state.isDisconnecting)
+        #expect(transition.state.didDisconnect == false)
+        #expect(transition.state.errorMessage == nil)
+        #expect(transition.effects == [.requestDisconnect])
     }
 
     @Test
     func secondDisconnectTapWhileInFlightIsIgnored() {
-        var stateMachine = SettingsStore.StateMachine(state: .init(
+        let initial = SettingsState(
             isDisconnecting: true,
             didDisconnect: false,
             errorMessage: nil
-        ))
+        )
+        let transition = SettingsStore.StateMachine.reduce(initial, .disconnectTapped)
 
-        let effects = stateMachine.reduce(.disconnectTapped)
-
-        #expect(stateMachine.state == .init(
-            isDisconnecting: true,
-            didDisconnect: false,
-            errorMessage: nil
-        ))
-        #expect(effects.isEmpty)
+        #expect(transition.state == initial)
+        #expect(transition.effects.isEmpty)
     }
 
     @Test
     func disconnectFinishedResetsStateAndMarksSuccess() {
-        var stateMachine = SettingsStore.StateMachine(state: .init(
-            isDisconnecting: true,
-            didDisconnect: false,
-            errorMessage: "stale"
-        ))
+        let transition = SettingsStore.StateMachine.reduce(
+            .init(
+                isDisconnecting: true,
+                didDisconnect: false,
+                errorMessage: "stale"
+            ),
+            .disconnectFinished
+        )
 
-        let effects = stateMachine.reduce(.disconnectFinished)
-
-        #expect(stateMachine.state == .init(
+        #expect(transition.state == .init(
             isDisconnecting: false,
             didDisconnect: true,
             errorMessage: nil
         ))
-        #expect(effects.isEmpty)
+        #expect(transition.effects.isEmpty)
     }
 }
 
@@ -58,7 +52,7 @@ struct SettingsStoreEffectTests {
         let requestCalls = TestCounter()
         let gate = TestAsyncStreamBox<Void>()
         let store = SettingsStore(
-            dependencies: .init(
+            requestDisconnect: .init(
                 requestDisconnect: {
                     await requestCalls.increment()
                     var iterator = gate.stream.makeAsyncIterator()

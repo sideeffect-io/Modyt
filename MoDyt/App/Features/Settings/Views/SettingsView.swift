@@ -47,7 +47,7 @@ struct SettingsView: View {
         }
     }
 
-    @Environment(\.settingsStoreDependencies) private var settingsStoreDependencies
+    @Environment(\.settingsStoreFactory) private var settingsStoreFactory
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
 
@@ -57,7 +57,7 @@ struct SettingsView: View {
 
     var body: some View {
         WithStoreView(
-            store: SettingsStore(dependencies: settingsStoreDependencies),
+            store: settingsStoreFactory.make(),
         ) { store in
             GeometryReader { proxy in
                 let metrics = LayoutMetrics(containerSize: proxy.size)

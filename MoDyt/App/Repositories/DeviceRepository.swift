@@ -55,17 +55,6 @@ extension DomainRepository where Item == Device, Upsert == DeviceUpsert {
         )
     }
     
-    func observeGroupedByType() -> some AsyncSequence<[RepositoryDeviceTypeSection], Never> & Sendable {
-        observeAll().map { devices in
-            let grouped = Dictionary(grouping: devices, by: \.resolvedUsage)
-            return Usage.allCases.compactMap { usage in
-                guard let values = grouped[usage] else { return nil }
-                let sorted = values.sorted(by: { $0.name.localizedStandardCompare($1.name) == .orderedAscending })
-                return RepositoryDeviceTypeSection(usage: usage, items: sorted)
-            }
-        }
-    }
-
     func observeByDeviceID(_ deviceId: Int) -> some AsyncSequence<[Device], Never> & Sendable {
         observeAll()
             .map { devices in

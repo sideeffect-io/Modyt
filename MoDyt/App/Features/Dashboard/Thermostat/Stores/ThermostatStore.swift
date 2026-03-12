@@ -9,22 +9,31 @@ final class ThermostatStore: StartableStore {
     }
 
     enum Event: Sendable {
+        case onAppear
         case descriptorWasResolved(Descriptor?)
     }
 
-    enum Effect: Sendable, Equatable {}
+    enum Effect: Sendable, Equatable {
+        case startObserving
+    }
 
     struct StateMachine {
-        var state = State(descriptor: nil)
+        static func reduce(
+            _ state: State,
+            _ event: Event
+        ) -> Transition<State, Effect> {
+            var state = state
 
-        mutating func reduce(_ event: Event) -> [Effect] {
             switch event {
+            case .onAppear:
+                return .init(state: state, effects: [.startObserving])
+
             case .descriptorWasResolved(let descriptor):
                 if state.descriptor != descriptor {
                     state.descriptor = descriptor
                 }
             }
-            return []
+            return .init(state: state)
         }
     }
 
@@ -44,99 +53,82 @@ final class ThermostatStore: StartableStore {
         let humidity: Humidity?
     }
 
-    struct Dependencies {
-        let observeThermostat: @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
-
-        init(
-            observeThermostat: @escaping @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
-        ) {
-            self.observeThermostat = observeThermostat
-        }
-    }
-
-    private(set) var stateMachine: StateMachine = StateMachine()
+    private(set) var storeState = State(descriptor: nil)
 
     var state: Descriptor? {
-        stateMachine.state.descriptor
+        storeState.descriptor
     }
 
-    private let identifier: DeviceIdentifier
-    private let observationTask = TaskHandle()
-    private let worker: Worker
+    private let observeThermostat: ObserveThermostatEffectExecutor
+    private var observationTask: Task<Void, Never>?
     private var hasStarted = false
 
     init(
-        dependencies: Dependencies,
-        identifier: DeviceIdentifier
+        observeThermostat: ObserveThermostatEffectExecutor
     ) {
-        self.identifier = identifier
-        self.worker = Worker(
-            observeThermostat: dependencies.observeThermostat
-        )
+        self.observeThermostat = observeThermostat
     }
 
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
-        let identifier = self.identifier
-        observationTask.task = Task { [weak self, worker] in
-            await worker.observe(identifier: identifier) { [weak self] device, state in
-                await self?.applyIncomingObservation(device: device, state: state)
-            }
-        }
+        send(.onAppear)
     }
 
-    deinit {
-        observationTask.cancel()
-    }
-
-    private func applyIncomingObservation(device: Device?, state: Descriptor?) {
-        guard let device else {
-            send(.descriptorWasResolved(nil))
-            return
-        }
-
-        guard let state else {
-            if Self.isClimateCandidate(device) == false {
-                send(.descriptorWasResolved(nil))
-            }
-            return
-        }
-
-        send(.descriptorWasResolved(state))
+    isolated deinit {
+        observationTask?.cancel()
     }
 
     func send(_ event: Event) {
-        _ = stateMachine.reduce(event)
+        let transition = StateMachine.reduce(storeState, event)
+        storeState = transition.state
+        handle(transition.effects)
     }
 
-    private static func isClimateCandidate(_ device: Device) -> Bool {
+    private func handle(_ effects: [Effect]) {
+        for effect in effects {
+            switch effect {
+            case .startObserving:
+                guard observationTask == nil else { return }
+                replaceTask(
+                    &observationTask,
+                    with: makeTrackedStreamTask(
+                        operation: { [observeThermostat] in
+                            await observeThermostat()
+                        },
+                        onEvent: { [weak self] event in
+                            self?.send(event)
+                        },
+                        onFinish: { [weak self] in
+                            self?.observationTask = nil
+                        }
+                    )
+                )
+            }
+        }
+    }
+
+    nonisolated static func observationEvent(from device: Device?) -> Event? {
+        guard let device else {
+            return .descriptorWasResolved(nil)
+        }
+
+        guard let descriptor = device.thermostatDescriptor() else {
+            if isClimateCandidate(device) == false {
+                return .descriptorWasResolved(nil)
+            }
+            return nil
+        }
+
+        return .descriptorWasResolved(descriptor)
+    }
+
+    private nonisolated static func isClimateCandidate(_ device: Device) -> Bool {
         switch device.controlKind {
         case .thermostat, .heatPump, .temperature:
             return true
         default:
             return device.hasLikelyClimatePayload
-        }
-    }
-
-    private actor Worker {
-        private let observeThermostat: @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
-
-        init(
-            observeThermostat: @escaping @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
-        ) {
-            self.observeThermostat = observeThermostat
-        }
-
-        func observe(
-            identifier: DeviceIdentifier,
-            onState: @escaping @Sendable (Device?, Descriptor?) async -> Void
-        ) async {
-            let stream = await observeThermostat(identifier)
-            for await device in stream {
-                guard !Task.isCancelled else { return }
-                await onState(device, device?.thermostatDescriptor())
-            }
         }
     }
 }

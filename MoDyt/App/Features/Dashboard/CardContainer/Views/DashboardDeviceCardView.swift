@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 struct DashboardDeviceCardView: View {
-    @Environment(\.dashboardDeviceCardStoreDependencies) private var dashboardDeviceCardStoreDependencies
+    @Environment(\.dashboardDeviceCardStoreFactory) private var dashboardDeviceCardStoreFactory
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let favorite: FavoriteItem
@@ -13,10 +13,7 @@ struct DashboardDeviceCardView: View {
 
     var body: some View {
         WithStoreView(
-            store: DashboardDeviceCardStore(
-                dependencies: dashboardDeviceCardStoreDependencies,
-                favoriteType: favorite.type
-            ),
+            store: dashboardDeviceCardStoreFactory.make(favoriteType: favorite.type),
         ) { store in
             cardContent(
                 for: favorite,

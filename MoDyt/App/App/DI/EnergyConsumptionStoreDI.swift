@@ -1,18 +1,26 @@
-import SwiftUI
+struct EnergyConsumptionStoreFactory: Sendable {
+    private let makeStore: @MainActor @Sendable (DeviceIdentifier) -> EnergyConsumptionStore
 
-enum EnergyConsumptionStoreDependencyFactory {
-    static func make(
-        dependencyBag: DependencyBag = .production
-    ) -> EnergyConsumptionStore.Dependencies {
+    init(make: @escaping @MainActor @Sendable (DeviceIdentifier) -> EnergyConsumptionStore) {
+        self.makeStore = make
+    }
+
+    @MainActor
+    func make(identifier: DeviceIdentifier) -> EnergyConsumptionStore {
+        makeStore(identifier)
+    }
+
+    static func live(dependencyBag: DependencyBag) -> Self {
         let deviceRepository = dependencyBag.localStorageDatasources.deviceRepository
 
-        return .init(
-            observeEnergyConsumption: { await deviceRepository.observeByID($0) }
-        )
+        return Self { identifier in
+            EnergyConsumptionStore(
+                observeEnergyConsumption: .init(
+                    observeEnergyConsumption: {
+                        await deviceRepository.observeByID(identifier)
+                    }
+                )
+            )
+        }
     }
-}
-
-extension EnvironmentValues {
-    @Entry var energyConsumptionStoreDependencies: EnergyConsumptionStore.Dependencies =
-        EnergyConsumptionStoreDependencyFactory.make()
 }

@@ -101,11 +101,13 @@ struct SingleShutterReducerTests {
 
     @Test(arguments: transitionCases)
     func reducerAppliesConfiguredTransition(_ transition: TransitionCase) {
-        var stateMachine = SingleShutterStore.StateMachine(state: transition.initial)
-        let effects = stateMachine.reduce(transition.event)
+        let transitionResult = SingleShutterStore.StateMachine.reduce(
+            transition.initial,
+            transition.event
+        )
 
-        #expect(stateMachine.state == transition.expected)
-        #expect(effects == transition.expectedEffects)
+        #expect(transitionResult.state == transition.expected)
+        #expect(transitionResult.effects == transition.expectedEffects)
     }
 
     @Test
@@ -148,13 +150,15 @@ struct SingleShutterReducerTests {
             ignoresNextMatchingPosition: true
         )
 
-        var stateMachine = SingleShutterStore.StateMachine(state: initial)
-        let effects = stateMachine.reduce(.timeoutTaskWasCreated(task: timeoutTask))
+        let transition = SingleShutterStore.StateMachine.reduce(
+            initial,
+            .timeoutTaskWasCreated(task: timeoutTask)
+        )
 
-        #expect(effects.isEmpty)
-        #expect(stateMachine.state.timeoutTask != nil)
+        #expect(transition.effects.isEmpty)
+        #expect(transition.state.timeoutTask != nil)
         #expect(
-            stateMachine.state == .shutterIsMovingToLocalTarget(
+            transition.state == .shutterIsMovingToLocalTarget(
                 deviceId: Self.deviceId,
                 position: 33,
                 target: 80,
@@ -165,19 +169,20 @@ struct SingleShutterReducerTests {
 
     @Test
     func movingToLocalTargetIgnoresFirstMatchingPositionOnly() {
-        var stateMachine = SingleShutterStore.StateMachine(
-            state: .shutterIsMovingToLocalTarget(
-                deviceId: Self.deviceId,
-                position: 100,
-                target: 75,
-                ignoresNextMatchingPosition: true
-            )
+        let initial = SingleShutterState.shutterIsMovingToLocalTarget(
+            deviceId: Self.deviceId,
+            position: 100,
+            target: 75,
+            ignoresNextMatchingPosition: true
         )
 
-        let ignoredEffects = stateMachine.reduce(.positionWasReceived(position: 75))
-        #expect(ignoredEffects.isEmpty)
+        let ignoredTransition = SingleShutterStore.StateMachine.reduce(
+            initial,
+            .positionWasReceived(position: 75)
+        )
+        #expect(ignoredTransition.effects.isEmpty)
         #expect(
-            stateMachine.state == .shutterIsMovingToLocalTarget(
+            ignoredTransition.state == .shutterIsMovingToLocalTarget(
                 deviceId: Self.deviceId,
                 position: 100,
                 target: 75,
@@ -185,15 +190,18 @@ struct SingleShutterReducerTests {
             )
         )
 
-        let completionEffects = stateMachine.reduce(.positionWasReceived(position: 75))
+        let completionTransition = SingleShutterStore.StateMachine.reduce(
+            ignoredTransition.state,
+            .positionWasReceived(position: 75)
+        )
         #expect(
-            completionEffects == [
+            completionTransition.effects == [
                 .cancelTimeout(task: nil),
                 .persistTarget(deviceId: Self.deviceId, target: nil),
             ]
         )
         #expect(
-            stateMachine.state == .featureIsStarted(
+            completionTransition.state == .featureIsStarted(
                 deviceId: Self.deviceId,
                 position: 75,
                 pendingLocalTarget: nil
@@ -203,23 +211,22 @@ struct SingleShutterReducerTests {
 
     @Test
     func settingCurrentTargetOnlySendsCommandWithoutEnteringMovingState() {
-        var stateMachine = SingleShutterStore.StateMachine(
-            state: .featureIsStarted(
+        let transition = SingleShutterStore.StateMachine.reduce(
+            .featureIsStarted(
                 deviceId: Self.deviceId,
                 position: 75,
                 pendingLocalTarget: nil
-            )
+            ),
+            .targetWasSetInApp(target: 75)
         )
 
-        let effects = stateMachine.reduce(.targetWasSetInApp(target: 75))
-
         #expect(
-            effects == [
+            transition.effects == [
                 .sendCommand(deviceId: Self.deviceId, position: 75)
             ]
         )
         #expect(
-            stateMachine.state == .featureIsStarted(
+            transition.state == .featureIsStarted(
                 deviceId: Self.deviceId,
                 position: 75,
                 pendingLocalTarget: nil
@@ -351,17 +358,7 @@ struct SingleShutterStoreEffectTests {
     func observationKeepsGatewayPositionInStore() async {
         let streamBox = DeviceStreamBox()
 
-        let store = SingleShutterStore(
-            dependencies: .init(
-                observeDevice: { _ in streamBox.stream },
-                sendCommand: { _, _ in },
-                sleep: { _ in
-                    try await Task.sleep(for: .seconds(5))
-                },
-                persistTarget: { _, _ in }
-            ),
-            deviceId: id10
-        )
+        let store = makeStore(streamBox: streamBox)
         store.start()
 
         streamBox.yield(makeShutter(identifier: id10, position: 25, target: nil))
@@ -381,17 +378,7 @@ struct SingleShutterStoreEffectTests {
     func observationKeepsRawPositionEvenWithNonPercentMetadataRange() async {
         let streamBox = DeviceStreamBox()
 
-        let store = SingleShutterStore(
-            dependencies: .init(
-                observeDevice: { _ in streamBox.stream },
-                sendCommand: { _, _ in },
-                sleep: { _ in
-                    try await Task.sleep(for: .seconds(5))
-                },
-                persistTarget: { _, _ in }
-            ),
-            deviceId: id10
-        )
+        let store = makeStore(streamBox: streamBox)
         store.start()
 
         streamBox.yield(
@@ -427,17 +414,12 @@ struct SingleShutterStoreEffectTests {
         let streamBox = DeviceStreamBox()
         let sleepDurations = RecordedSleepDurations()
 
-        let store = SingleShutterStore(
-            dependencies: .init(
-                observeDevice: { _ in streamBox.stream },
-                sendCommand: { _, _ in },
-                sleep: { duration in
-                    await sleepDurations.record(duration)
-                    try await Task.sleep(for: .seconds(5))
-                },
-                persistTarget: { _, _ in }
-            ),
-            deviceId: id10
+        let store = makeStore(
+            streamBox: streamBox,
+            sleep: { duration in
+                await sleepDurations.record(duration)
+                try await Task.sleep(for: .seconds(5))
+            }
         )
         store.start()
 
@@ -456,9 +438,15 @@ struct SingleShutterStoreEffectTests {
         #expect(store.gaugePosition == ShutterPositionMapper.gaugePosition(from: 100))
         #expect(store.movingTarget == 70)
 
-        let durations = await sleepDurations.values()
-        #expect(durations == [.seconds(60)])
-        #expect(store.state.timeoutTask != nil)
+        let didRecordTimeoutDuration = await waitUntilAsync {
+            await sleepDurations.values() == [.seconds(60)]
+        }
+        #expect(didRecordTimeoutDuration)
+
+        let didCaptureTimeoutTask = await waitUntil {
+            store.state.timeoutTask != nil
+        }
+        #expect(didCaptureTimeoutTask)
     }
 
     @Test
@@ -466,18 +454,11 @@ struct SingleShutterStoreEffectTests {
         let streamBox = DeviceStreamBox()
         let targets = RecordedSingleShutterTargets()
 
-        let store = SingleShutterStore(
-            dependencies: .init(
-                observeDevice: { _ in streamBox.stream },
-                sendCommand: { _, _ in },
-                sleep: { _ in
-                    try await Task.sleep(for: .seconds(5))
-                },
-                persistTarget: { deviceId, target in
-                    await targets.record(deviceId: deviceId, target: target)
-                }
-            ),
-            deviceId: id10
+        let store = makeStore(
+            streamBox: streamBox,
+            persistTarget: { deviceId, target in
+                await targets.record(deviceId: deviceId, target: target)
+            }
         )
         store.start()
 
@@ -493,27 +474,19 @@ struct SingleShutterStoreEffectTests {
 
         #expect(didObserve)
 
-        let persistedTargets = await targets.values()
-        #expect(persistedTargets == [
-            .init(deviceId: id10, target: nil)
-        ])
+        let didPersistClearedTarget = await waitUntilAsync {
+            await targets.values() == [
+                .init(deviceId: id10, target: nil)
+            ]
+        }
+        #expect(didPersistClearedTarget)
     }
 
     @Test
     func sceneLikePositionOnlyCloseNeverExposesTargetOrGetsStuckMoving() async {
         let streamBox = DeviceStreamBox()
 
-        let store = SingleShutterStore(
-            dependencies: .init(
-                observeDevice: { _ in streamBox.stream },
-                sendCommand: { _, _ in },
-                sleep: { _ in
-                    try await Task.sleep(for: .seconds(5))
-                },
-                persistTarget: { _, _ in }
-            ),
-            deviceId: id10
-        )
+        let store = makeStore(streamBox: streamBox)
         store.start()
 
         streamBox.yield(makeShutter(identifier: id10, position: 100, target: nil))
@@ -558,17 +531,12 @@ struct SingleShutterStoreEffectTests {
         let streamBox = DeviceStreamBox()
         let sleepDurations = RecordedSleepDurations()
 
-        let store = SingleShutterStore(
-            dependencies: .init(
-                observeDevice: { _ in streamBox.stream },
-                sendCommand: { _, _ in },
-                sleep: { duration in
-                    await sleepDurations.record(duration)
-                    try await Task.sleep(for: .seconds(5))
-                },
-                persistTarget: { _, _ in }
-            ),
-            deviceId: id10
+        let store = makeStore(
+            streamBox: streamBox,
+            sleep: { duration in
+                await sleepDurations.record(duration)
+                try await Task.sleep(for: .seconds(5))
+            }
         )
         store.start()
 
@@ -597,8 +565,10 @@ struct SingleShutterStoreEffectTests {
         #expect(store.movingTarget == 0)
         #expect(store.movementDirection == .closing)
 
-        let durations = await sleepDurations.values()
-        #expect(durations == [.seconds(60)])
+        let didRecordTimeoutDuration = await waitUntilAsync {
+            await sleepDurations.values() == [.seconds(60)]
+        }
+        #expect(didRecordTimeoutDuration)
     }
 
     @Test
@@ -608,21 +578,18 @@ struct SingleShutterStoreEffectTests {
         let targets = RecordedSingleShutterTargets()
         let sleepDurations = RecordedSleepDurations()
 
-        let store = SingleShutterStore(
-            dependencies: .init(
-                observeDevice: { _ in streamBox.stream },
-                sendCommand: { deviceId, position in
-                    await commands.record(deviceId: deviceId, position: position)
-                },
-                sleep: { duration in
-                    await sleepDurations.record(duration)
-                    try await Task.sleep(for: .seconds(5))
-                },
-                persistTarget: { deviceId, target in
-                    await targets.record(deviceId: deviceId, target: target)
-                }
-            ),
-            deviceId: id10
+        let store = makeStore(
+            streamBox: streamBox,
+            sendCommand: { deviceId, position in
+                await commands.record(deviceId: deviceId, position: position)
+            },
+            sleep: { duration in
+                await sleepDurations.record(duration)
+                try await Task.sleep(for: .seconds(5))
+            },
+            persistTarget: { deviceId, target in
+                await targets.record(deviceId: deviceId, target: target)
+            }
         )
         store.start()
 
@@ -667,7 +634,11 @@ struct SingleShutterStoreEffectTests {
 
         let durations = await sleepDurations.values()
         #expect(durations == [.seconds(60)])
-        #expect(store.state.timeoutTask != nil)
+
+        let didCaptureTimeoutTask = await waitUntil {
+            store.state.timeoutTask != nil
+        }
+        #expect(didCaptureTimeoutTask)
     }
 
     @Test
@@ -677,26 +648,23 @@ struct SingleShutterStoreEffectTests {
         let targets = RecordedSingleShutterTargets()
         let timeoutLifecycle = TimeoutLifecycleRecorder()
 
-        let store = SingleShutterStore(
-            dependencies: .init(
-                observeDevice: { _ in streamBox.stream },
-                sendCommand: { deviceId, position in
-                    await commands.record(deviceId: deviceId, position: position)
-                },
-                sleep: { _ in
-                    await timeoutLifecycle.didStart()
-                    do {
-                        try await Task.sleep(for: .seconds(5))
-                    } catch {
-                        await timeoutLifecycle.didCancel()
-                        throw error
-                    }
-                },
-                persistTarget: { deviceId, target in
-                    await targets.record(deviceId: deviceId, target: target)
+        let store = makeStore(
+            streamBox: streamBox,
+            sendCommand: { deviceId, position in
+                await commands.record(deviceId: deviceId, position: position)
+            },
+            sleep: { _ in
+                await timeoutLifecycle.didStart()
+                do {
+                    try await Task.sleep(for: .seconds(5))
+                } catch {
+                    await timeoutLifecycle.didCancel()
+                    throw error
                 }
-            ),
-            deviceId: id10
+            },
+            persistTarget: { deviceId, target in
+                await targets.record(deviceId: deviceId, target: target)
+            }
         )
         store.start()
 
@@ -754,24 +722,20 @@ struct SingleShutterStoreEffectTests {
         let targets = RecordedSingleShutterTargets()
         let timeoutLifecycle = TimeoutLifecycleRecorder()
 
-        let store = SingleShutterStore(
-            dependencies: .init(
-                observeDevice: { _ in streamBox.stream },
-                sendCommand: { _, _ in },
-                sleep: { _ in
-                    await timeoutLifecycle.didStart()
-                    do {
-                        try await Task.sleep(for: .seconds(5))
-                    } catch {
-                        await timeoutLifecycle.didCancel()
-                        throw error
-                    }
-                },
-                persistTarget: { deviceId, target in
-                    await targets.record(deviceId: deviceId, target: target)
+        let store = makeStore(
+            streamBox: streamBox,
+            sleep: { _ in
+                await timeoutLifecycle.didStart()
+                do {
+                    try await Task.sleep(for: .seconds(5))
+                } catch {
+                    await timeoutLifecycle.didCancel()
+                    throw error
                 }
-            ),
-            deviceId: id10
+            },
+            persistTarget: { deviceId, target in
+                await targets.record(deviceId: deviceId, target: target)
+            }
         )
         store.start()
 
@@ -824,9 +788,12 @@ struct SingleShutterStoreEffectTests {
         }
         #expect(timeoutCancelled)
 
-        let persistedTargets = await targets.values()
-        #expect(persistedTargets.contains(.init(deviceId: id10, target: 75)))
-        #expect(persistedTargets.contains(.init(deviceId: id10, target: nil)))
+        let didPersistTargetLifecycle = await waitUntilAsync {
+            let persistedTargets = await targets.values()
+            return persistedTargets.contains(.init(deviceId: id10, target: 75))
+                && persistedTargets.contains(.init(deviceId: id10, target: nil))
+        }
+        #expect(didPersistTargetLifecycle)
     }
 
     private func makeShutter(
@@ -847,6 +814,31 @@ struct SingleShutterStoreEffectTests {
             dashboardOrder: nil,
             shutterTargetPosition: target,
             updatedAt: Date()
+        )
+    }
+
+    private func makeStore(
+        streamBox: DeviceStreamBox,
+        sendCommand: @escaping @Sendable (DeviceIdentifier, Int) async -> Void = { _, _ in },
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { _ in
+            try await Task.sleep(for: .seconds(5))
+        },
+        persistTarget: @escaping @Sendable (DeviceIdentifier, Int?) async -> Void = { _, _ in }
+    ) -> SingleShutterStore {
+        SingleShutterStore(
+            deviceId: id10,
+            observeDevice: .init(
+                observeDevice: { _ in streamBox.stream }
+            ),
+            sendCommand: .init(
+                sendCommand: sendCommand
+            ),
+            startTimeout: .init(
+                sleep: sleep
+            ),
+            persistTarget: .init(
+                persistTarget: persistTarget
+            )
         )
     }
 

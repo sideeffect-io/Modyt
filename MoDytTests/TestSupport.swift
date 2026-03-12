@@ -270,8 +270,8 @@ func makeTestScene(
 func makeTestRepositoryDeviceSection(
     usage: Usage,
     items: [Device]
-) -> RepositoryDeviceTypeSection {
-    RepositoryDeviceTypeSection(usage: usage, items: items)
+) -> DeviceTypeSection {
+    DeviceTypeSection(usage: usage, items: items)
 }
 
 func makeTestACK(statusCode: Int = 200) -> TydomAck {

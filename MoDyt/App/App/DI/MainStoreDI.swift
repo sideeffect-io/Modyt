@@ -1,10 +1,18 @@
 import DeltaDoreClient
-import SwiftUI
 
-enum MainStoreDependencyFactory {
-    static func make(
-        dependencyBag: DependencyBag = .production
-    ) -> MainStore.Dependencies {
+struct MainStoreFactory: Sendable {
+    private let makeStore: @MainActor @Sendable () -> MainStore
+
+    init(make: @escaping @MainActor @Sendable () -> MainStore) {
+        self.makeStore = make
+    }
+
+    @MainActor
+    func make() -> MainStore {
+        makeStore()
+    }
+
+    static func live(dependencyBag: DependencyBag) -> Self {
         let gatewayClient = dependencyBag.gatewayClient
         let messageRouter = dependencyBag.localStorageDatasources.tydomMessageRepositoryRouter
         let runtime = MainRuntime(
@@ -12,20 +20,29 @@ enum MainStoreDependencyFactory {
             router: messageRouter
         )
 
-        return .init(
-            handleGatewayMessages: { await runtime.handleGatewayMessages() },
-            disconnect: { await runtime.disconnect() },
-            setAppInactive: { await runtime.setAppInactive() },
-            setAppActive: { await runtime.setAppActive() },
-            checkGatewayConnection: { await runtime.checkGatewayConnection() },
-            reconnectToGateway: { await runtime.reconnectToGateway() }
-        )
+        return Self {
+            MainStore(
+                handleGatewayMessages: .init(
+                    handleGatewayMessages: { await runtime.handleGatewayMessages() }
+                ),
+                disconnect: .init(
+                    disconnect: { await runtime.disconnect() }
+                ),
+                setAppInactive: .init(
+                    setAppInactive: { await runtime.setAppInactive() }
+                ),
+                setAppActive: .init(
+                    setAppActive: { await runtime.setAppActive() }
+                ),
+                checkGatewayConnection: .init(
+                    checkGatewayConnection: { await runtime.checkGatewayConnection() }
+                ),
+                reconnectToGateway: .init(
+                    reconnectToGateway: { await runtime.reconnectToGateway() }
+                )
+            )
+        }
     }
-}
-
-extension EnvironmentValues {
-    @Entry var mainStoreDependencies: MainStore.Dependencies =
-        MainStoreDependencyFactory.make()
 }
 
 struct MainGatewayDataRequestPipeline: Sendable {

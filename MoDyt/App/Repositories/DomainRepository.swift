@@ -68,10 +68,6 @@ actor DomainRepository<Item: DomainType, Upsert: DomainUpsert> where Item.ID == 
         observeAll().map { Self.project($0, by: ids) }.removeDuplicates()
     }
     
-    func observeFavorites() -> some AsyncSequence<[Item], Never> & Sendable {
-        observeAll().map { Self.filterFavorites($0) }.removeDuplicates()
-    }
-
     func listAll() throws -> [Item] {
         try currentSnapshot()
     }
@@ -173,62 +169,6 @@ actor DomainRepository<Item: DomainType, Upsert: DomainUpsert> where Item.ID == 
         let dao = try requireDAO()
         try dao.deleteAll()
         try refreshSnapshotAndNotify()
-    }
-
-    func toggleFavorite(_ id: Item.ID) throws {
-        let dao = try requireDAO()
-        let snapshot = try currentSnapshot()
-
-        guard var item = snapshot.first(where: { $0.id == id }) else {
-            return
-        }
-
-        if item.isFavorite {
-            item.isFavorite = false
-            item.dashboardOrder = nil
-        } else {
-            item.isFavorite = true
-            item.dashboardOrder = nextFavoriteDashboardOrder(from: snapshot)
-        }
-
-        item.updatedAt = now()
-        _ = try dao.update(item)
-        try refreshSnapshotAndNotify()
-    }
-
-    func applyDashboardOrders(_ orders: [Item.ID: Int]) async throws {
-        guard orders.isEmpty == false else {
-            return
-        }
-
-        let dao = try requireDAO()
-        let snapshot = try currentSnapshot()
-        let snapshotByID = Dictionary(uniqueKeysWithValues: snapshot.map { ($0.id, $0) })
-
-        var didChange = false
-
-        for (id, order) in orders {
-            guard var existing = snapshotByID[id] else {
-                continue
-            }
-
-            guard existing.isFavorite else {
-                continue
-            }
-
-            guard existing.dashboardOrder != order else {
-                continue
-            }
-
-            existing.dashboardOrder = order
-            existing.updatedAt = now()
-            _ = try dao.update(existing)
-            didChange = true
-        }
-
-        if didChange {
-            try refreshSnapshotAndNotify()
-        }
     }
 
     func mutateByIDs(
@@ -346,15 +286,6 @@ actor DomainRepository<Item: DomainType, Upsert: DomainUpsert> where Item.ID == 
         continuations[observerID] = nil
     }
 
-    private func nextFavoriteDashboardOrder(from snapshot: [Item]) -> Int {
-        let maxOrder = snapshot
-            .filter(\.isFavorite)
-            .compactMap(\.dashboardOrder)
-            .max() ?? -1
-
-        return maxOrder + 1
-    }
-
     private static func project(_ items: [Item], by ids: [Item.ID]) -> [Item] {
         guard ids.isEmpty == false else {
             return []
@@ -362,9 +293,5 @@ actor DomainRepository<Item: DomainType, Upsert: DomainUpsert> where Item.ID == 
 
         let lookup = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
         return ids.compactMap { lookup[$0] }
-    }
-    
-    private static func filterFavorites(_ items: [Item]) -> [Item] {
-        items.filter(\.isFavorite)
     }
 }

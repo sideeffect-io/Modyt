@@ -1,18 +1,26 @@
-import SwiftUI
+struct SmokeStoreFactory: Sendable {
+    private let makeStore: @MainActor @Sendable (DeviceIdentifier) -> SmokeStore
 
-enum SmokeStoreDependencyFactory {
-    static func make(
-        dependencyBag: DependencyBag = .production
-    ) -> SmokeStore.Dependencies {
+    init(make: @escaping @MainActor @Sendable (DeviceIdentifier) -> SmokeStore) {
+        self.makeStore = make
+    }
+
+    @MainActor
+    func make(identifier: DeviceIdentifier) -> SmokeStore {
+        makeStore(identifier)
+    }
+
+    static func live(dependencyBag: DependencyBag) -> Self {
         let deviceRepository = dependencyBag.localStorageDatasources.deviceRepository
 
-        return .init(
-            observeSmoke: { await deviceRepository.observeByID($0).removeDuplicates() }
-        )
+        return Self { identifier in
+            SmokeStore(
+                observeSmoke: .init(
+                    observeSmoke: {
+                        await deviceRepository.observeByID(identifier).removeDuplicates()
+                    }
+                )
+            )
+        }
     }
-}
-
-extension EnvironmentValues {
-    @Entry var smokeStoreDependencies: SmokeStore.Dependencies =
-        SmokeStoreDependencyFactory.make()
 }

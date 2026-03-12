@@ -1,11 +1,11 @@
 import SwiftUI
 
 struct GroupsView: View {
-    @Environment(\.groupsStoreDependencies) private var groupsStoreDependencies
+    @Environment(\.groupsStoreFactory) private var groupsStoreFactory
 
     var body: some View {
         WithStoreView(
-            store: GroupsStore(dependencies: groupsStoreDependencies),
+            store: groupsStoreFactory.make(),
         ) { store in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {

@@ -2,7 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct DashboardView: View {
-    @Environment(\.dashboardStoreDependencies) private var dashboardStoreDependencies
+    @Environment(\.dashboardStoreFactory) private var dashboardStoreFactory
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var dragSource: FavoriteType?
@@ -10,7 +10,7 @@ struct DashboardView: View {
 
     var body: some View {
         WithStoreView(
-            store: DashboardStore(dependencies: dashboardStoreDependencies),
+            store: dashboardStoreFactory.make(),
         ) { store in
             ScrollView {
                 VStack(spacing: 22) {

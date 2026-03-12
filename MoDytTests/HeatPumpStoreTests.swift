@@ -12,23 +12,25 @@ struct HeatPumpReducerTests {
 
     @Test(arguments: transitionCases)
     func reducerAppliesConfiguredTransition(_ transition: TransitionCase) {
-        var stateMachine = HeatPumpStore.StateMachine(state: transition.initial)
-        let effects = stateMachine.reduce(transition.event)
-        let nextState = stateMachine.state
+        let transitionResult = HeatPumpStore.StateMachine.reduce(
+            transition.initial,
+            transition.event
+        )
 
-        #expect(nextState == transition.expected)
-        #expect(effects == transition.expectedEffects)
+        #expect(transitionResult.state == transition.expected)
+        #expect(transitionResult.effects == transition.expectedEffects)
     }
 
     @Test
     func reducerLeavesUnknownTransitionUntouched() {
         let initial = HeatPumpState.featureIsIdle(Self.values(0.0, 0.0))
-        var stateMachine = HeatPumpStore.StateMachine(state: initial)
-        let effects = stateMachine.reduce(.newSetPointWasReceived(21.0))
-        let nextState = stateMachine.state
+        let transition = HeatPumpStore.StateMachine.reduce(
+            initial,
+            .newSetPointWasReceived(21.0)
+        )
 
-        #expect(nextState == initial)
-        #expect(effects.isEmpty)
+        #expect(transition.state == initial)
+        #expect(transition.effects.isEmpty)
     }
 
     private static let transitionCases: [TransitionCase] = [
@@ -80,11 +82,8 @@ struct HeatPumpStoreEffectTests {
     @Test
     func observationReceivesGatewayValueAndStartsFeature() async {
         let streamBox = DeviceStreamBox()
-        let store = HeatPumpStore(
-            dependencies: .init(
-                observeHeatPump: { _ in streamBox.stream },
-                executeSetPointCommand: { _ in }
-            ),
+        let store = makeStore(
+            streamBox: streamBox,
             identifier: .init(deviceId: 1, endpointId: 1)
         )
         store.start()
@@ -112,17 +111,14 @@ struct HeatPumpStoreEffectTests {
     func updateSetPointEffectSendsSetPointWasConfirmedWhenDone() async {
         let streamBox = DeviceStreamBox()
         let commands = RecordedGatewayCommands()
-        let store = HeatPumpStore(
-            dependencies: .init(
-                observeHeatPump: { _ in streamBox.stream },
-                executeSetPointCommand: { command in
-                    await commands.record(command)
-                },
-                makeTransactionID: { "tx-1" },
-                setPointDebounceInterval: .milliseconds(0)
-            ),
-            identifier: .init(deviceId: 42, endpointId: 1)
-        )
+        let store = makeStore(
+            streamBox: streamBox,
+            identifier: .init(deviceId: 42, endpointId: 1),
+            makeTransactionID: { "tx-1" },
+            setPointDebounceInterval: .milliseconds(0)
+        ) { command in
+            await commands.record(command)
+        }
         store.start()
 
         streamBox.yield(
@@ -163,17 +159,14 @@ struct HeatPumpStoreEffectTests {
         let streamBox = DeviceStreamBox()
         let commands = RecordedGatewayCommands()
         let transactionIDs = TransactionIDSequence(ids: ["tx-1", "tx-2", "tx-3", "tx-4"])
-        let store = HeatPumpStore(
-            dependencies: .init(
-                observeHeatPump: { _ in streamBox.stream },
-                executeSetPointCommand: { command in
-                    await commands.record(command)
-                },
-                makeTransactionID: { await transactionIDs.next() },
-                setPointDebounceInterval: .milliseconds(120)
-            ),
-            identifier: .init(deviceId: 42, endpointId: 1)
-        )
+        let store = makeStore(
+            streamBox: streamBox,
+            identifier: .init(deviceId: 42, endpointId: 1),
+            makeTransactionID: { await transactionIDs.next() },
+            setPointDebounceInterval: .milliseconds(120)
+        ) { command in
+            await commands.record(command)
+        }
         store.start()
 
         streamBox.yield(
@@ -244,6 +237,25 @@ struct HeatPumpStoreEffectTests {
             await Task.yield()
         }
         return condition()
+    }
+
+    private func makeStore(
+        streamBox: DeviceStreamBox,
+        identifier: DeviceIdentifier,
+        makeTransactionID: @escaping @Sendable () async -> String = { "test-transaction-id" },
+        setPointDebounceInterval: DispatchTimeInterval = .seconds(2),
+        executeSetPointCommand: @escaping @Sendable (HeatPumpGatewayCommand) async -> Void = { _ in }
+    ) -> HeatPumpStore {
+        HeatPumpStore(
+            observeHeatPump: .init(
+                observeHeatPump: { streamBox.stream }
+            ),
+            executeSetPoint: .init(
+                executeSetPointCommand: executeSetPointCommand,
+                makeTransactionID: makeTransactionID
+            ),
+            setPointDebounceInterval: setPointDebounceInterval
+        )
     }
 }
 

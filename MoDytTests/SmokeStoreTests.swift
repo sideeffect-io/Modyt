@@ -69,13 +69,12 @@ struct SmokeStoreObservationTests {
         let observeCalls = TestCounter()
         let identifier = DeviceIdentifier(deviceId: 21, endpointId: 1)
         let store = SmokeStore(
-            dependencies: .init(
-                observeSmoke: { _ in
+            observeSmoke: .init(
+                observeSmoke: {
                     await observeCalls.increment()
                     return streamBox.stream
                 }
-            ),
-            identifier: identifier
+            )
         )
 
         store.start()
@@ -102,10 +101,9 @@ struct SmokeStoreObservationTests {
         let streamBox = TestAsyncStreamBox<Device?>()
         let identifier = DeviceIdentifier(deviceId: 22, endpointId: 1)
         let store = SmokeStore(
-            dependencies: .init(
-                observeSmoke: { _ in streamBox.stream }
-            ),
-            identifier: identifier
+            observeSmoke: .init(
+                observeSmoke: { streamBox.stream }
+            )
         )
 
         store.start()

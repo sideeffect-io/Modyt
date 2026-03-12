@@ -187,17 +187,14 @@ struct SingleLightReducerTests {
 
     @Test
     func descriptorObservationStartsFeature() {
-        var stateMachine = SingleLightStore.StateMachine(
-            state: .featureIsIdle(deviceId: Self.deviceId, descriptor: nil)
-        )
-
-        let effects = stateMachine.reduce(
+        let transition = SingleLightStore.StateMachine.reduce(
+            .featureIsIdle(deviceId: Self.deviceId, descriptor: nil),
             SingleLightEvent.descriptorWasReceived(Self.descriptor)
         )
 
-        #expect(effects.isEmpty)
+        #expect(transition.effects.isEmpty)
         #expect(
-            stateMachine.state == SingleLightState.featureIsStarted(
+            transition.state == SingleLightState.featureIsStarted(
                 deviceId: Self.deviceId,
                 descriptor: Self.descriptor
             )
@@ -206,13 +203,12 @@ struct SingleLightReducerTests {
 
     @Test
     func committedLevelSendsACommandAndMovesToPendingState() {
-        var stateMachine = SingleLightStore.StateMachine(
-            state: .featureIsStarted(deviceId: Self.deviceId, descriptor: Self.descriptor)
+        let transition = SingleLightStore.StateMachine.reduce(
+            .featureIsStarted(deviceId: Self.deviceId, descriptor: Self.descriptor),
+            SingleLightEvent.levelWasCommitted(0.75)
         )
 
-        let effects = stateMachine.reduce(SingleLightEvent.levelWasCommitted(0.75))
-
-        #expect(effects == [
+        #expect(transition.effects == [
             SingleLightEffect.sendCommand(
                 .data(
                     LightGatewayCommandRequest(
@@ -225,7 +221,7 @@ struct SingleLightReducerTests {
         ])
 
         #expect(
-            stateMachine.state == SingleLightState.commandIsPending(
+            transition.state == SingleLightState.commandIsPending(
                 deviceId: Self.deviceId,
                 descriptor: Self.descriptor,
                 pendingCommand: SingleLightPendingCommand(
@@ -251,13 +247,12 @@ struct SingleLightReducerTests {
 
     @Test
     func committedColorSendsACommandAndMovesToPendingState() {
-        var stateMachine = SingleLightStore.StateMachine(
-            state: .featureIsStarted(deviceId: Self.deviceId, descriptor: Self.descriptor)
+        let transition = SingleLightStore.StateMachine.reduce(
+            .featureIsStarted(deviceId: Self.deviceId, descriptor: Self.descriptor),
+            SingleLightEvent.colorWasCommitted(0.5)
         )
 
-        let effects = stateMachine.reduce(SingleLightEvent.colorWasCommitted(0.5))
-
-        #expect(effects == [
+        #expect(transition.effects == [
             SingleLightEffect.sendCommand(
                 .color(
                     LightGatewayColorCommandRequest(
@@ -272,7 +267,7 @@ struct SingleLightReducerTests {
         ])
 
         #expect(
-            stateMachine.state == SingleLightState.commandIsPending(
+            transition.state == SingleLightState.commandIsPending(
                 deviceId: Self.deviceId,
                 descriptor: Self.descriptor,
                 pendingCommand: SingleLightPendingCommand(
@@ -317,15 +312,12 @@ struct SingleLightReducerTests {
             expectedLevel: 75,
             expectedColor: nil
         )
-        var stateMachine = SingleLightStore.StateMachine(
-            state: .commandIsPending(
+        let transition = SingleLightStore.StateMachine.reduce(
+            .commandIsPending(
                 deviceId: Self.deviceId,
                 descriptor: Self.descriptor,
                 pendingCommand: pendingCommand
-            )
-        )
-
-        let effects = stateMachine.reduce(
+            ),
             SingleLightEvent.descriptorWasReceived(
                 DrivingLightControlDescriptor(
                     powerKey: "on",
@@ -338,9 +330,9 @@ struct SingleLightReducerTests {
             )
         )
 
-        #expect(effects.isEmpty)
+        #expect(transition.effects.isEmpty)
         #expect(
-            stateMachine.state == SingleLightState.featureIsStarted(
+            transition.state == SingleLightState.featureIsStarted(
                 deviceId: Self.deviceId,
                 descriptor: DrivingLightControlDescriptor(
                     powerKey: "on",
@@ -369,13 +361,15 @@ struct SingleLightStoreTests {
         let starts = ObservationStartRecorder()
         let store = SingleLightStore(
             deviceId: deviceId,
-            dependencies: .init(
-                observeLight: { _ in
+            observeLight: .init(
+                observeLight: {
                     await starts.record()
                     return AsyncStream { continuation in
                         continuation.finish()
                     }
-                },
+                }
+            ),
+            sendCommand: .init(
                 sendCommand: { _ in }
             )
         )
@@ -508,8 +502,10 @@ struct SingleLightStoreTests {
         let commands = RecordedLightGatewayCommands()
         let store = SingleLightStore(
             deviceId: deviceId,
-            dependencies: .init(
-                observeLight: { _ in streamBox.stream },
+            observeLight: .init(
+                observeLight: { streamBox.stream }
+            ),
+            sendCommand: .init(
                 sendCommand: { request in
                     await commands.record(request)
                 }
@@ -544,8 +540,10 @@ struct SingleLightStoreTests {
     ) -> SingleLightStore {
         let store = SingleLightStore(
             deviceId: deviceId,
-            dependencies: .init(
-                observeLight: { _ in streamBox.stream },
+            observeLight: .init(
+                observeLight: { streamBox.stream }
+            ),
+            sendCommand: .init(
                 sendCommand: { request in
                     await commands.record(request)
                 }

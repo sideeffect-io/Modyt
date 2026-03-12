@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct HeatPumpView: View {
-    @Environment(\.heatPumpStoreDependencies) private var heatPumpStoreDependencies
+    @Environment(\.heatPumpStoreFactory) private var heatPumpStoreFactory
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     let identifier: DeviceIdentifier
@@ -14,10 +14,7 @@ struct HeatPumpView: View {
 
     var body: some View {
         WithStoreView(
-            store: HeatPumpStore(
-                dependencies: heatPumpStoreDependencies,
-                identifier: identifier
-            ),
+            store: heatPumpStoreFactory.make(identifier: identifier),
         ) { store in
             VStack(spacing: 0) {
                 Spacer(minLength: 0)

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SingleLightView: View {
-    @Environment(\.singleLightStoreDependencies) private var singleLightStoreDependencies
+    @Environment(\.singleLightStoreFactory) private var singleLightStoreFactory
     @Environment(\.colorScheme) private var colorScheme
 
     let deviceId: DeviceIdentifier
@@ -11,10 +11,7 @@ struct SingleLightView: View {
 
     var body: some View {
         WithStoreView(
-            store: SingleLightStore(
-                deviceId: deviceId,
-                dependencies: singleLightStoreDependencies
-            )
+            store: singleLightStoreFactory.make(deviceId: deviceId)
         ) { store in
             GeometryReader { proxy in
                 let horizontalGap = max(

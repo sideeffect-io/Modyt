@@ -14,11 +14,13 @@ struct GroupLightReducerTests {
 
     @Test(arguments: transitionCases)
     func reducerAppliesConfiguredTransition(_ transition: TransitionCase) {
-        var stateMachine = GroupLightStore.StateMachine(state: transition.initial)
-        let effects = stateMachine.reduce(transition.event)
+        let transitionResult = GroupLightStore.StateMachine.reduce(
+            transition.initial,
+            transition.event
+        )
 
-        #expect(stateMachine.state == transition.expected)
-        #expect(effects == transition.expectedEffects)
+        #expect(transitionResult.state == transition.expected)
+        #expect(transitionResult.effects == transition.expectedEffects)
     }
 
     private static let transitionCases: [TransitionCase] = [
@@ -27,7 +29,7 @@ struct GroupLightReducerTests {
             event: .presetWasTapped(.half),
             expected: .featureIsIdle(deviceIds: [id10, id11]),
             expectedEffects: [
-                .sendCommand(deviceIds: [id10, id11], preset: .half)
+                .sendCommand(preset: .half)
             ]
         ),
         .init(
@@ -49,7 +51,7 @@ struct GroupLightStoreTests {
         let commands = RecordedGroupLightCommands()
         let store = GroupLightStore(
             deviceIds: [id10, id11],
-            dependencies: .init(
+            sendCommand: .init(
                 sendCommand: { deviceIds, preset in
                     await commands.record(deviceIds: deviceIds, preset: preset)
                 }
@@ -67,7 +69,7 @@ struct GroupLightStoreTests {
         let commands = RecordedGroupLightCommands()
         let store = GroupLightStore(
             deviceIds: [id10, id11, id10, id11],
-            dependencies: .init(
+            sendCommand: .init(
                 sendCommand: { deviceIds, receivedPreset in
                     await commands.record(deviceIds: deviceIds, preset: receivedPreset)
                 }
@@ -90,7 +92,7 @@ struct GroupLightStoreTests {
         let commands = RecordedGroupLightCommands()
         let store = GroupLightStore(
             deviceIds: [],
-            dependencies: .init(
+            sendCommand: .init(
                 sendCommand: { deviceIds, preset in
                     await commands.record(deviceIds: deviceIds, preset: preset)
                 }

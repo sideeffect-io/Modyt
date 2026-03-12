@@ -1,16 +1,13 @@
 import SwiftUI
 
 struct SceneExecutionView: View {
-    @Environment(\.sceneExecutionStoreDependencies) private var sceneExecutionStoreDependencies
+    @Environment(\.sceneExecutionStoreFactory) private var sceneExecutionStoreFactory
 
     let uniqueId: String
 
     var body: some View {
         WithStoreView(
-            store: SceneExecutionStore(
-                dependencies: sceneExecutionStoreDependencies,
-                uniqueId: uniqueId
-            ),
+            store: sceneExecutionStoreFactory.make(uniqueId: uniqueId),
         ) { store in
             VStack(spacing: 8) {
                 SceneExecutionButton(

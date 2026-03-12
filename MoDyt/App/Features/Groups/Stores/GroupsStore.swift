@@ -9,7 +9,7 @@ struct GroupsState: Sendable, Equatable {
 
 enum GroupsEvent: Sendable {
     case onAppear
-    case groupsUpdated([Group])
+    case groupsObserved([Group])
     case refreshRequested
     case toggleFavorite(String)
 }
@@ -24,53 +24,51 @@ enum GroupsEffect: Sendable, Equatable {
 @MainActor
 final class GroupsStore: StartableStore {
     struct StateMachine {
-        var state: GroupsState = .initial
+        static func reduce(
+            _ state: GroupsState,
+            _ event: GroupsEvent
+        ) -> Transition<GroupsState, GroupsEffect> {
+            var state = state
 
-        mutating func reduce(_ event: GroupsEvent) -> [GroupsEffect] {
             switch event {
             case .onAppear:
-                return [.startObservingGroups]
+                return .init(state: state, effects: [.startObservingGroups])
 
-            case .groupsUpdated(let groups):
-                state.groups = groups
-                return []
+            case .groupsObserved(let groups):
+                state.groups = GroupsStoreProjector.groups(from: groups)
+                return .init(state: state)
 
             case .refreshRequested:
-                return [.refreshAll]
+                return .init(state: state, effects: [.refreshAll])
 
             case .toggleFavorite(let uniqueId):
-                return [.toggleFavorite(uniqueId)]
+                return .init(state: state, effects: [.toggleFavorite(uniqueId)])
             }
         }
     }
 
-    struct Dependencies {
-        let observeGroups: @Sendable () async -> any AsyncSequence<[Group], Never> & Sendable
-        let toggleFavorite: @Sendable (String) async -> Void
-        let refreshAll: @Sendable () async -> Void
-    }
+    private(set) var state: GroupsState = .initial
 
-    private(set) var stateMachine: StateMachine = StateMachine()
-
-    var state: GroupsState {
-        stateMachine.state
-    }
-
-    private let groupsTask = TaskHandle()
-    private let worker: Worker
+    private let observeGroups: ObserveGroupsEffectExecutor
+    private let toggleFavorite: ToggleGroupFavoriteEffectExecutor
+    private let refreshAll: RefreshGroupsEffectExecutor
+    private var groupsTask: Task<Void, Never>?
     private var hasStarted = false
 
-    init(dependencies: Dependencies) {
-        self.worker = Worker(
-            observeGroups: dependencies.observeGroups,
-            toggleFavorite: dependencies.toggleFavorite,
-            refreshAll: dependencies.refreshAll
-        )
+    init(
+        observeGroups: ObserveGroupsEffectExecutor,
+        toggleFavorite: ToggleGroupFavoriteEffectExecutor,
+        refreshAll: RefreshGroupsEffectExecutor
+    ) {
+        self.observeGroups = observeGroups
+        self.toggleFavorite = toggleFavorite
+        self.refreshAll = refreshAll
     }
 
     func send(_ event: GroupsEvent) {
-        let effects = stateMachine.reduce(event)
-        handle(effects)
+        let transition = StateMachine.reduce(state, event)
+        state = transition.state
+        handle(transition.effects)
     }
 
     func start() {
@@ -79,8 +77,8 @@ final class GroupsStore: StartableStore {
         send(.onAppear)
     }
 
-    deinit {
-        groupsTask.cancel()
+    isolated deinit {
+        groupsTask?.cancel()
     }
 
     private func handle(_ effects: [GroupsEffect]) {
@@ -92,65 +90,39 @@ final class GroupsStore: StartableStore {
     private func handle(_ effect: GroupsEffect) {
         switch effect {
         case .startObservingGroups:
-            guard groupsTask.task == nil else { return }
-            let taskHandle = groupsTask
-            groupsTask.task = Task { [weak self, worker, weak taskHandle] in
-                defer {
-                    Task { @MainActor [weak taskHandle] in
-                        taskHandle?.task = nil
+            guard groupsTask == nil else { return }
+            replaceTask(
+                &groupsTask,
+                with: makeTrackedStreamTask(
+                    operation: { [observeGroups] in
+                        await observeGroups()
+                    },
+                    onEvent: { [weak self] event in
+                        self?.send(event)
+                    },
+                    onFinish: { [weak self] in
+                        self?.groupsTask = nil
                     }
-                }
-                await worker.observeGroups { [weak self] groups in
-                    await self?.send(.groupsUpdated(groups))
-                }
-            }
+                )
+            )
 
         case .toggleFavorite(let uniqueId):
-            Task { [worker] in
-                await worker.toggleFavorite(uniqueId)
+            launchFireAndForgetTask { [toggleFavorite] in
+                await toggleFavorite(uniqueId)
             }
 
         case .refreshAll:
-            Task { [worker] in
-                await worker.refreshAll()
+            launchFireAndForgetTask { [refreshAll] in
+                await refreshAll()
             }
         }
     }
+}
 
-    private actor Worker {
-        private let observeGroupsSource: @Sendable () async -> any AsyncSequence<[Group], Never> & Sendable
-        private let toggleFavoriteAction: @Sendable (String) async -> Void
-        private let refreshAllAction: @Sendable () async -> Void
-
-        init(
-            observeGroups: @escaping @Sendable () async -> any AsyncSequence<[Group], Never> & Sendable,
-            toggleFavorite: @escaping @Sendable (String) async -> Void,
-            refreshAll: @escaping @Sendable () async -> Void
-        ) {
-            self.observeGroupsSource = observeGroups
-            self.toggleFavoriteAction = toggleFavorite
-            self.refreshAllAction = refreshAll
-        }
-
-        func observeGroups(
-            onUpdate: @escaping @Sendable ([Group]) async -> Void
-        ) async {
-            let stream = await observeGroupsSource()
-            for await groups in stream {
-                guard !Task.isCancelled else { return }
-                let sorted = groups
-                    .filter(\.isGroupUser)
-                    .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-                await onUpdate(sorted)
-            }
-        }
-
-        func toggleFavorite(_ uniqueId: String) async {
-            await toggleFavoriteAction(uniqueId)
-        }
-
-        func refreshAll() async {
-            await refreshAllAction()
-        }
+private enum GroupsStoreProjector {
+    nonisolated static func groups(from groups: [Group]) -> [Group] {
+        groups
+            .filter(\.isGroupUser)
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 }

@@ -18,8 +18,3 @@ struct Device: DomainType {
         Usage.from(usage: usage)
     }
 }
-
-struct RepositoryDeviceTypeSection: Sendable, Equatable {
-    let usage: Usage
-    let items: [Device]
-}

@@ -1,10 +1,18 @@
 import DeltaDoreClient
-import SwiftUI
 
-enum SceneExecutionStoreDependencyFactory {
-    static func make(
-        dependencyBag: DependencyBag = .production
-    ) -> SceneExecutionStore.Dependencies {
+struct SceneExecutionStoreFactory: Sendable {
+    private let makeStore: @MainActor @Sendable (String) -> SceneExecutionStore
+
+    init(make: @escaping @MainActor @Sendable (String) -> SceneExecutionStore) {
+        self.makeStore = make
+    }
+
+    @MainActor
+    func make(uniqueId: String) -> SceneExecutionStore {
+        makeStore(uniqueId)
+    }
+
+    static func live(dependencyBag: DependencyBag) -> Self {
         let gatewayClient = dependencyBag.gatewayClient
         let ackRepository = dependencyBag.localStorageDatasources.ackRepository
         let runtime = SceneExecutionRuntime(
@@ -12,17 +20,23 @@ enum SceneExecutionStoreDependencyFactory {
             ackRepository: ackRepository
         )
 
-        return .init(
-            executeScene: { sceneID in
-                await runtime.executeScene(sceneID: sceneID)
-            }
-        )
+        return Self { uniqueId in
+            SceneExecutionStore(
+                executeScene: .init(
+                    executeScene: {
+                        async let result = runtime.executeScene(sceneID: uniqueId)
+                        try? await Task.sleep(for: .seconds(2))
+                        return await result
+                    }
+                ),
+                clearFeedback: .init(
+                    clearFeedback: {
+                        try? await Task.sleep(for: .seconds(2))
+                    }
+                )
+            )
+        }
     }
-}
-
-extension EnvironmentValues {
-    @Entry var sceneExecutionStoreDependencies: SceneExecutionStore.Dependencies =
-        SceneExecutionStoreDependencyFactory.make()
 }
 
 actor SceneExecutionRuntime {

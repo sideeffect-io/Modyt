@@ -8,10 +8,9 @@ struct TemperatureStoreStateRetentionTests {
     func transientNilDescriptorKeepsLastValidValue() async {
         let streamBox = DeviceStreamBox()
         let store = TemperatureStore(
-            dependencies: .init(
-                observeTemperature: { _ in streamBox.stream }
-            ),
-            identifier: .init(deviceId: 42, endpointId: 1)
+            observeTemperature: .init(
+                observeTemperature: { streamBox.stream }
+            )
         )
         store.start()
 
@@ -45,10 +44,9 @@ struct TemperatureStoreStateRetentionTests {
     func deviceRemovalClearsDescriptor() async {
         let streamBox = DeviceStreamBox()
         let store = TemperatureStore(
-            dependencies: .init(
-                observeTemperature: { _ in streamBox.stream }
-            ),
-            identifier: .init(deviceId: 42, endpointId: 1)
+            observeTemperature: .init(
+                observeTemperature: { streamBox.stream }
+            )
         )
         store.start()
 

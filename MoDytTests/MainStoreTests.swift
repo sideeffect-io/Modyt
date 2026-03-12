@@ -14,23 +14,25 @@ struct MainReducerTransitionTests {
     @Test(arguments: transitionCases)
     func reducerAppliesConfiguredTransition(_ transition: TransitionCase) {
         let initialState = MainState(featureState: transition.initial)
-        var stateMachine = MainStore.StateMachine(state: initialState)
-        let effects = stateMachine.reduce(transition.event)
-        let nextState = stateMachine.state
+        let transitionResult = MainStore.StateMachine.reduce(
+            initialState,
+            transition.event
+        )
 
-        #expect(nextState.featureState == transition.expected)
-        #expect(effects == transition.expectedEffects)
+        #expect(transitionResult.state.featureState == transition.expected)
+        #expect(transitionResult.effects == transition.expectedEffects)
     }
 
     @Test
     func reducerLeavesUnknownTransitionUntouched() {
         let initialState = MainState(featureState: .featureIsIdle)
-        var stateMachine = MainStore.StateMachine(state: initialState)
-        let effects = stateMachine.reduce(.appActiveWasReceived)
-        let nextState = stateMachine.state
+        let transition = MainStore.StateMachine.reduce(
+            initialState,
+            .appActiveWasReceived
+        )
 
-        #expect(nextState == initialState)
-        #expect(effects.isEmpty)
+        #expect(transition.state == initialState)
+        #expect(transition.effects.isEmpty)
     }
 
     private static let transitionCases: [TransitionCase] = [
@@ -362,14 +364,12 @@ struct MainStoreEffectTests {
         reconnectToGateway: @escaping @Sendable () async -> MainEvent = { .reconnectionWasSuccessful }
     ) -> MainStore {
         MainStore(
-            dependencies: .init(
-                handleGatewayMessages: handleGatewayMessages,
-                disconnect: disconnect,
-                setAppInactive: setAppInactive,
-                setAppActive: setAppActive,
-                checkGatewayConnection: checkGatewayConnection,
-                reconnectToGateway: reconnectToGateway
-            )
+            handleGatewayMessages: .init(handleGatewayMessages: handleGatewayMessages),
+            disconnect: .init(disconnect: disconnect),
+            setAppInactive: .init(setAppInactive: setAppInactive),
+            setAppActive: .init(setAppActive: setAppActive),
+            checkGatewayConnection: .init(checkGatewayConnection: checkGatewayConnection),
+            reconnectToGateway: .init(reconnectToGateway: reconnectToGateway)
         )
     }
 }

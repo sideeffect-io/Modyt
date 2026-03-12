@@ -1,17 +1,14 @@
 import SwiftUI
 
 struct SmokeView: View {
-    @Environment(\.smokeStoreDependencies) private var smokeStoreDependencies
+    @Environment(\.smokeStoreFactory) private var smokeStoreFactory
     @Environment(\.colorScheme) private var colorScheme
 
     let identifier: DeviceIdentifier
 
     var body: some View {
         WithStoreView(
-            store: SmokeStore(
-                dependencies: smokeStoreDependencies,
-                identifier: identifier
-            ),
+            store: smokeStoreFactory.make(identifier: identifier),
         ) { store in
             smokeContent(descriptor: store.descriptor)
         }

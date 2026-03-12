@@ -9,7 +9,7 @@ struct ScenesState: Sendable, Equatable {
 
 enum ScenesEvent: Sendable {
     case onAppear
-    case scenesUpdated([Scene])
+    case scenesObserved([Scene])
     case refreshRequested
     case toggleFavorite(String)
 }
@@ -24,53 +24,51 @@ enum ScenesEffect: Sendable, Equatable {
 @MainActor
 final class ScenesStore: StartableStore {
     struct StateMachine {
-        var state: ScenesState = .initial
+        static func reduce(
+            _ state: ScenesState,
+            _ event: ScenesEvent
+        ) -> Transition<ScenesState, ScenesEffect> {
+            var state = state
 
-        mutating func reduce(_ event: ScenesEvent) -> [ScenesEffect] {
             switch event {
             case .onAppear:
-                return [.startObservingScenes]
+                return .init(state: state, effects: [.startObservingScenes])
 
-            case .scenesUpdated(let scenes):
-                state.scenes = scenes
-                return []
+            case .scenesObserved(let scenes):
+                state.scenes = ScenesStoreProjector.scenes(from: scenes)
+                return .init(state: state)
 
             case .refreshRequested:
-                return [.refreshAll]
+                return .init(state: state, effects: [.refreshAll])
 
             case .toggleFavorite(let uniqueId):
-                return [.toggleFavorite(uniqueId)]
+                return .init(state: state, effects: [.toggleFavorite(uniqueId)])
             }
         }
     }
 
-    struct Dependencies {
-        let observeScenes: @Sendable () async -> any AsyncSequence<[Scene], Never> & Sendable
-        let toggleFavorite: @Sendable (String) async -> Void
-        let refreshAll: @Sendable () async -> Void
-    }
+    private(set) var state: ScenesState = .initial
 
-    private(set) var stateMachine: StateMachine = StateMachine()
-
-    var state: ScenesState {
-        stateMachine.state
-    }
-
-    private let sceneTask = TaskHandle()
-    private let worker: Worker
+    private let observeScenes: ObserveScenesEffectExecutor
+    private let toggleFavorite: ToggleSceneFavoriteEffectExecutor
+    private let refreshAll: RefreshScenesEffectExecutor
+    private var sceneTask: Task<Void, Never>?
     private var hasStarted = false
 
-    init(dependencies: Dependencies) {
-        self.worker = Worker(
-            observeScenes: dependencies.observeScenes,
-            toggleFavorite: dependencies.toggleFavorite,
-            refreshAll: dependencies.refreshAll
-        )
+    init(
+        observeScenes: ObserveScenesEffectExecutor,
+        toggleFavorite: ToggleSceneFavoriteEffectExecutor,
+        refreshAll: RefreshScenesEffectExecutor
+    ) {
+        self.observeScenes = observeScenes
+        self.toggleFavorite = toggleFavorite
+        self.refreshAll = refreshAll
     }
 
     func send(_ event: ScenesEvent) {
-        let effects = stateMachine.reduce(event)
-        handle(effects)
+        let transition = StateMachine.reduce(state, event)
+        state = transition.state
+        handle(transition.effects)
     }
 
     func start() {
@@ -79,8 +77,8 @@ final class ScenesStore: StartableStore {
         send(.onAppear)
     }
 
-    deinit {
-        sceneTask.cancel()
+    isolated deinit {
+        sceneTask?.cancel()
     }
 
     private func handle(_ effects: [ScenesEffect]) {
@@ -92,63 +90,37 @@ final class ScenesStore: StartableStore {
     private func handle(_ effect: ScenesEffect) {
         switch effect {
         case .startObservingScenes:
-            guard sceneTask.task == nil else { return }
-            let taskHandle = sceneTask
-            sceneTask.task = Task { [weak self, worker, weak taskHandle] in
-                defer {
-                    Task { @MainActor [weak taskHandle] in
-                        taskHandle?.task = nil
+            guard sceneTask == nil else { return }
+            replaceTask(
+                &sceneTask,
+                with: makeTrackedStreamTask(
+                    operation: { [observeScenes] in
+                        await observeScenes()
+                    },
+                    onEvent: { [weak self] event in
+                        self?.send(event)
+                    },
+                    onFinish: { [weak self] in
+                        self?.sceneTask = nil
                     }
-                }
-                await worker.observeScenes { [weak self] scenes in
-                    await self?.send(.scenesUpdated(scenes))
-                }
-            }
+                )
+            )
 
         case .toggleFavorite(let uniqueId):
-            Task { [worker] in
-                await worker.toggleFavorite(uniqueId)
+            launchFireAndForgetTask { [toggleFavorite] in
+                await toggleFavorite(uniqueId)
             }
 
         case .refreshAll:
-            Task { [worker] in
-                await worker.refreshAll()
+            launchFireAndForgetTask { [refreshAll] in
+                await refreshAll()
             }
         }
     }
+}
 
-    private actor Worker {
-        private let observeScenesSource: @Sendable () async -> any AsyncSequence<[Scene], Never> & Sendable
-        private let toggleFavoriteAction: @Sendable (String) async -> Void
-        private let refreshAllAction: @Sendable () async -> Void
-
-        init(
-            observeScenes: @escaping @Sendable () async -> any AsyncSequence<[Scene], Never> & Sendable,
-            toggleFavorite: @escaping @Sendable (String) async -> Void,
-            refreshAll: @escaping @Sendable () async -> Void
-        ) {
-            self.observeScenesSource = observeScenes
-            self.toggleFavoriteAction = toggleFavorite
-            self.refreshAllAction = refreshAll
-        }
-
-        func observeScenes(
-            onUpdate: @escaping @Sendable ([Scene]) async -> Void
-        ) async {
-            let stream = await observeScenesSource()
-            for await scenes in stream {
-                guard !Task.isCancelled else { return }
-                let sorted = scenes.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-                await onUpdate(sorted)
-            }
-        }
-
-        func toggleFavorite(_ uniqueId: String) async {
-            await toggleFavoriteAction(uniqueId)
-        }
-
-        func refreshAll() async {
-            await refreshAllAction()
-        }
+private enum ScenesStoreProjector {
+    nonisolated static func scenes(from scenes: [Scene]) -> [Scene] {
+        scenes.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 }

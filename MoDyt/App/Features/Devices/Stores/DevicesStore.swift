@@ -2,14 +2,14 @@ import Foundation
 import Observation
 
 struct DevicesState: Sendable, Equatable {
-    var groupedDevices: [RepositoryDeviceTypeSection]
+    var groupedDevices: [DeviceTypeSection]
 
     static let initial = DevicesState(groupedDevices: [])
 }
 
 enum DevicesEvent: Sendable {
     case onAppear
-    case devicesUpdated([RepositoryDeviceTypeSection])
+    case devicesObserved([Device])
     case refreshRequested
     case toggleFavorite(DeviceIdentifier)
 }
@@ -24,53 +24,51 @@ enum DevicesEffect: Sendable, Equatable {
 @MainActor
 final class DevicesStore: StartableStore {
     struct StateMachine {
-        var state: DevicesState = .initial
+        static func reduce(
+            _ state: DevicesState,
+            _ event: DevicesEvent
+        ) -> Transition<DevicesState, DevicesEffect> {
+            var state = state
 
-        mutating func reduce(_ event: DevicesEvent) -> [DevicesEffect] {
             switch event {
             case .onAppear:
-                return [.startObservingDevices]
+                return .init(state: state, effects: [.startObservingDevices])
 
-            case .devicesUpdated(let groupedDevices):
-                state.groupedDevices = groupedDevices
-                return []
+            case .devicesObserved(let devices):
+                state.groupedDevices = DeviceListProjector.sections(from: devices)
+                return .init(state: state)
 
             case .refreshRequested:
-                return [.refreshAll]
+                return .init(state: state, effects: [.refreshAll])
 
             case .toggleFavorite(let uniqueId):
-                return [.toggleFavorite(uniqueId)]
+                return .init(state: state, effects: [.toggleFavorite(uniqueId)])
             }
         }
     }
 
-    struct Dependencies {
-        let observeDevices: @Sendable () async -> any AsyncSequence<[RepositoryDeviceTypeSection], Never> & Sendable
-        let toggleFavorite: @Sendable (DeviceIdentifier) async -> Void
-        let refreshAll: @Sendable () async -> Void
-    }
+    private(set) var state: DevicesState = .initial
 
-    private(set) var stateMachine: StateMachine = StateMachine()
-
-    var state: DevicesState {
-        stateMachine.state
-    }
-
-    private let deviceTask = TaskHandle()
-    private let worker: Worker
+    private let observeDevices: ObserveDevicesEffectExecutor
+    private let toggleFavorite: ToggleDeviceFavoriteEffectExecutor
+    private let refreshAll: RefreshDevicesEffectExecutor
+    private var deviceTask: Task<Void, Never>?
     private var hasStarted = false
 
-    init(dependencies: Dependencies) {
-        self.worker = Worker(
-            observeDevices: dependencies.observeDevices,
-            toggleFavorite: dependencies.toggleFavorite,
-            refreshAll: dependencies.refreshAll
-        )
+    init(
+        observeDevices: ObserveDevicesEffectExecutor,
+        toggleFavorite: ToggleDeviceFavoriteEffectExecutor,
+        refreshAll: RefreshDevicesEffectExecutor
+    ) {
+        self.observeDevices = observeDevices
+        self.toggleFavorite = toggleFavorite
+        self.refreshAll = refreshAll
     }
 
     func send(_ event: DevicesEvent) {
-        let effects = stateMachine.reduce(event)
-        handle(effects)
+        let transition = StateMachine.reduce(state, event)
+        state = transition.state
+        handle(transition.effects)
     }
 
     func start() {
@@ -79,8 +77,8 @@ final class DevicesStore: StartableStore {
         send(.onAppear)
     }
 
-    deinit {
-        deviceTask.cancel()
+    isolated deinit {
+        deviceTask?.cancel()
     }
 
     private func handle(_ effects: [DevicesEffect]) {
@@ -92,62 +90,31 @@ final class DevicesStore: StartableStore {
     private func handle(_ effect: DevicesEffect) {
         switch effect {
         case .startObservingDevices:
-            guard deviceTask.task == nil else { return }
-            let taskHandle = deviceTask
-            deviceTask.task = Task { [weak self, worker, weak taskHandle] in
-                defer {
-                    Task { @MainActor [weak taskHandle] in
-                        taskHandle?.task = nil
+            guard deviceTask == nil else { return }
+            replaceTask(
+                &deviceTask,
+                with: makeTrackedStreamTask(
+                    operation: { [observeDevices] in
+                        await observeDevices()
+                    },
+                    onEvent: { [weak self] event in
+                        self?.send(event)
+                    },
+                    onFinish: { [weak self] in
+                        self?.deviceTask = nil
                     }
-                }
-                await worker.observeDevices { [weak self] groupedDevices in
-                    await self?.send(.devicesUpdated(groupedDevices))
-                }
-            }
+                )
+            )
 
         case .toggleFavorite(let uniqueId):
-            Task { [worker] in
-                await worker.toggleFavorite(uniqueId)
+            launchFireAndForgetTask { [toggleFavorite] in
+                await toggleFavorite(uniqueId)
             }
 
         case .refreshAll:
-            Task { [worker] in
-                await worker.refreshAll()
+            launchFireAndForgetTask { [refreshAll] in
+                await refreshAll()
             }
-        }
-    }
-
-    private actor Worker {
-        private let observeDevicesSource: @Sendable () async -> any AsyncSequence<[RepositoryDeviceTypeSection], Never> & Sendable
-        private let toggleFavoriteAction: @Sendable (DeviceIdentifier) async -> Void
-        private let refreshAllAction: @Sendable () async -> Void
-
-        init(
-            observeDevices: @escaping @Sendable () async -> any AsyncSequence<[RepositoryDeviceTypeSection], Never> & Sendable,
-            toggleFavorite: @escaping @Sendable (DeviceIdentifier) async -> Void,
-            refreshAll: @escaping @Sendable () async -> Void
-        ) {
-            self.observeDevicesSource = observeDevices
-            self.toggleFavoriteAction = toggleFavorite
-            self.refreshAllAction = refreshAll
-        }
-
-        func observeDevices(
-            onUpdate: @escaping @Sendable ([RepositoryDeviceTypeSection]) async -> Void
-        ) async {
-            let stream = await observeDevicesSource()
-            for await groupedDevices in stream {
-                guard !Task.isCancelled else { return }
-                await onUpdate(groupedDevices)
-            }
-        }
-
-        func toggleFavorite(_ identifier: DeviceIdentifier) async {
-            await toggleFavoriteAction(identifier)
-        }
-
-        func refreshAll() async {
-            await refreshAllAction()
         }
     }
 }

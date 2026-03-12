@@ -1,5 +1,11 @@
 import Foundation
 
+struct FavoriteSourceSnapshot: Sendable, Equatable {
+    let devices: [Device]
+    let groups: [Group]
+    let scenes: [Scene]
+}
+
 actor FavoriteRepository {
     private let deviceRepository: DeviceRepository
     private let groupRepository: GroupRepository
@@ -15,29 +21,55 @@ actor FavoriteRepository {
         self.sceneRepository = sceneRepository
     }
 
-    func observeAll() async -> some AsyncSequence<[FavoriteItem], Never> & Sendable {
-        async let favoriteDevices = deviceRepository.observeFavorites()
-        async let favoriteGroups = groupRepository.observeFavorites()
-        async let favoriteScenes = sceneRepository.observeFavorites()
+    func observeSourceSnapshot() async -> some AsyncSequence<FavoriteSourceSnapshot, Never> & Sendable {
+        async let devices = deviceRepository.observeAll()
+        async let groups = groupRepository.observeAll()
+        async let scenes = sceneRepository.observeAll()
 
-        return combineLatest(await favoriteDevices, await favoriteGroups, await favoriteScenes).map { devices, groups, scenes in
-            Self.mergeFavorites(
-                devices: devices,
-                groups: groups,
-                scenes: scenes
-            )
-        }
+        return combineLatest(await devices, await groups, await scenes)
+            .map { devices, groups, scenes in
+                FavoriteSourceSnapshot(
+                    devices: Self.filterFavorites(devices),
+                    groups: Self.filterFavorites(groups),
+                    scenes: Self.filterFavorites(scenes)
+                )
+            }
+            .removeDuplicates()
     }
 
-    func listAll() async throws -> [FavoriteItem] {
+    func observeAll() async -> some AsyncSequence<[FavoriteItem], Never> & Sendable {
+        let favoriteSources = await observeSourceSnapshot()
+
+        return favoriteSources
+            .map { sources in
+                FavoriteItemsProjector.items(
+                    devices: sources.devices,
+                    groups: sources.groups,
+                    scenes: sources.scenes
+                )
+            }
+            .removeDuplicates()
+    }
+
+    func listSourceSnapshot() async throws -> FavoriteSourceSnapshot {
         async let devices = deviceRepository.listAll()
         async let groups = groupRepository.listAll()
         async let scenes = sceneRepository.listAll()
 
-        return Self.mergeFavorites(
-            devices: try await devices,
-            groups: try await groups,
-            scenes: try await scenes
+        return FavoriteSourceSnapshot(
+            devices: Self.filterFavorites(try await devices),
+            groups: Self.filterFavorites(try await groups),
+            scenes: Self.filterFavorites(try await scenes)
+        )
+    }
+
+    func listAll() async throws -> [FavoriteItem] {
+        let favoriteSources = try await listSourceSnapshot()
+
+        return FavoriteItemsProjector.items(
+            devices: favoriteSources.devices,
+            groups: favoriteSources.groups,
+            scenes: favoriteSources.scenes
         )
     }
 
@@ -46,7 +78,7 @@ actor FavoriteRepository {
         _ targetType: FavoriteType
     ) async throws {
         let snapshot = try await listAll()
-        guard let reordered = Self.reorderedFavorites(
+        guard let reordered = FavoriteItemsProjector.reordered(
             snapshot,
             moving: sourceType,
             before: targetType
@@ -69,140 +101,143 @@ actor FavoriteRepository {
             }
         }
 
-        try await deviceRepository.applyDashboardOrders(deviceOrders)
-        try await groupRepository.applyDashboardOrders(groupOrders)
-        try await sceneRepository.applyDashboardOrders(sceneOrders)
+        let deviceOrderMap = deviceOrders
+        let groupOrderMap = groupOrders
+        let sceneOrderMap = sceneOrders
+
+        try await deviceRepository.mutateByIDs(Array(deviceOrderMap.keys)) { device in
+            guard device.isFavorite,
+                  let order = deviceOrderMap[device.id] else {
+                return
+            }
+            device.dashboardOrder = order
+        }
+
+        try await groupRepository.mutateByIDs(Array(groupOrderMap.keys)) { group in
+            guard group.isFavorite,
+                  let order = groupOrderMap[group.id] else {
+                return
+            }
+            group.dashboardOrder = order
+        }
+
+        try await sceneRepository.mutateByIDs(Array(sceneOrderMap.keys)) { scene in
+            guard scene.isFavorite,
+                  let order = sceneOrderMap[scene.id] else {
+                return
+            }
+            scene.dashboardOrder = order
+        }
     }
 
     func toggleFavorite(_ favoriteType: FavoriteType) async throws {
         switch favoriteType {
         case .device(let identifier):
-            try await deviceRepository.toggleFavorite(identifier)
+            try await toggleDeviceFavorite(identifier)
         case .group(let groupID, _):
-            try await groupRepository.toggleFavorite(groupID)
+            try await toggleGroupFavorite(groupID)
         case .scene(let sceneID):
-            try await sceneRepository.toggleFavorite(sceneID)
+            try await toggleSceneFavorite(sceneID)
         }
     }
 
     func removeFavorite(_ favoriteType: FavoriteType) async throws {
         switch favoriteType {
         case .device(let identifier):
-            guard let device = try await deviceRepository.get(identifier), device.isFavorite else {
-                return
-            }
-            try await deviceRepository.toggleFavorite(identifier)
+            try await removeDeviceFavorite(identifier)
         case .group(let groupID, _):
-            guard let group = try await groupRepository.get(groupID), group.isFavorite else {
-                return
-            }
-            try await groupRepository.toggleFavorite(groupID)
+            try await removeGroupFavorite(groupID)
         case .scene(let sceneID):
-            guard let scene = try await sceneRepository.get(sceneID), scene.isFavorite else {
-                return
-            }
-            try await sceneRepository.toggleFavorite(sceneID)
+            try await removeSceneFavorite(sceneID)
         }
     }
-    
-    static func mergeFavorites(
-        devices: [Device],
-        groups: [Group],
-        scenes: [Scene]
-    ) -> [FavoriteItem] {
-        let deviceFavoriteItems = devices.map {
-            FavoriteItem(
-                name: $0.name,
-                usage: $0.resolvedUsage,
-                type: .device(identifier: $0.id),
-                order: $0.dashboardOrder ?? 0,
-                controlKind: $0.controlKind,
-                rawUsage: $0.usage
-            )
+
+    func toggleDeviceFavorite(_ identifier: DeviceIdentifier) async throws {
+        guard let device = try await deviceRepository.get(identifier) else {
+            return
         }
-        
-        let groupFavoriteItems = groups.map {
-            FavoriteItem(
-                name: $0.name,
-                usage: $0.resolvedUsage,
-                type: .group(groupId: $0.id, memberIdentifiers: $0.memberIdentifiers),
-                order: $0.dashboardOrder ?? 0,
-                controlKind: FavoriteControlKind.from(usage: $0.resolvedUsage),
-                rawUsage: $0.usage
-            )
+
+        if device.isFavorite {
+            try await removeDeviceFavorite(identifier)
+            return
         }
-        
-        let sceneFavoriteItems = scenes.map {
-            FavoriteItem(
-                name: $0.name,
-                usage: .scene,
-                type: .scene(sceneId: $0.id),
-                order: $0.dashboardOrder ?? 0,
-                controlKind: .scene,
-                rawUsage: "scene"
-            )
-        }
-        
-        let favorites = deviceFavoriteItems
-        + groupFavoriteItems
-        + sceneFavoriteItems
-        
-        return favorites.sorted(by: areFavoriteCandidatesOrderedAscending)
-    }
-    
-    static func reorderedFavorites(
-        _ values: [FavoriteItem],
-        moving sourceType: FavoriteType,
-        before targetType: FavoriteType
-    ) -> [FavoriteItem]? {
-        guard let sourceIndex = values.firstIndex(where: { $0.id == sourceType.id }),
-              let targetIndex = values.firstIndex(where: { $0.id == targetType.id }),
-              sourceIndex != targetIndex else {
-            return nil
-        }
-        
-        var reordered = values
-        let moved = reordered.remove(at: sourceIndex)
-        reordered.insert(moved, at: targetIndex)
-        return reordered
-    }
-    
-    private static func dashboardOrderValue(_ value: Int?) -> Int {
-        value ?? Int.max
-    }
-    
-    private static func sourcePriority(_ item: FavoriteItem) -> Int {
-        switch item.type {
-        case .device:
-            return 0
-        case .scene:
-            return 1
-        case .group:
-            return 2
+
+        let order = try await nextDashboardOrder()
+        try await deviceRepository.mutateByIDs([identifier]) { device in
+            device.isFavorite = true
+            device.dashboardOrder = order
         }
     }
-        
-    private static func areFavoriteCandidatesOrderedAscending(
-        _ lhs: FavoriteItem,
-        _ rhs: FavoriteItem
-    ) -> Bool {
-        let lhsOrder = dashboardOrderValue(lhs.order)
-        let rhsOrder = dashboardOrderValue(rhs.order)
-        if lhsOrder != rhsOrder {
-            return lhsOrder < rhsOrder
+
+    func toggleGroupFavorite(_ groupID: String) async throws {
+        guard let group = try await groupRepository.get(groupID) else {
+            return
         }
-        
-        let lhsItem = sourcePriority(lhs)
-        let rhsItem = sourcePriority(rhs)
-        if lhsItem != rhsItem {
-            return lhsItem < rhsItem
+
+        if group.isFavorite {
+            try await removeGroupFavorite(groupID)
+            return
         }
-        
-        let nameCompare = lhs.name.localizedStandardCompare(rhs.name)
-        if nameCompare != .orderedSame {
-            return nameCompare == .orderedAscending
+
+        let order = try await nextDashboardOrder()
+        try await groupRepository.mutateByIDs([groupID]) { group in
+            group.isFavorite = true
+            group.dashboardOrder = order
         }
-        
-        return lhs.id < rhs.id
+    }
+
+    func toggleSceneFavorite(_ sceneID: String) async throws {
+        guard let scene = try await sceneRepository.get(sceneID) else {
+            return
+        }
+
+        if scene.isFavorite {
+            try await removeSceneFavorite(sceneID)
+            return
+        }
+
+        let order = try await nextDashboardOrder()
+        try await sceneRepository.mutateByIDs([sceneID]) { scene in
+            scene.isFavorite = true
+            scene.dashboardOrder = order
+        }
+    }
+
+    func removeDeviceFavorite(_ identifier: DeviceIdentifier) async throws {
+        try await deviceRepository.mutateByIDs([identifier]) { device in
+            device.isFavorite = false
+            device.dashboardOrder = nil
+        }
+    }
+
+    func removeGroupFavorite(_ groupID: String) async throws {
+        try await groupRepository.mutateByIDs([groupID]) { group in
+            group.isFavorite = false
+            group.dashboardOrder = nil
+        }
+    }
+
+    func removeSceneFavorite(_ sceneID: String) async throws {
+        try await sceneRepository.mutateByIDs([sceneID]) { scene in
+            scene.isFavorite = false
+            scene.dashboardOrder = nil
+        }
+    }
+
+    private func nextDashboardOrder() async throws -> Int {
+        let snapshot = try await listSourceSnapshot()
+        let maxOrder = [
+            snapshot.devices.compactMap(\.dashboardOrder).max(),
+            snapshot.groups.compactMap(\.dashboardOrder).max(),
+            snapshot.scenes.compactMap(\.dashboardOrder).max(),
+        ]
+        .compactMap { $0 }
+        .max() ?? -1
+
+        return maxOrder + 1
+    }
+
+    private static func filterFavorites<Item: DomainType>(_ items: [Item]) -> [Item] {
+        items.filter(\.isFavorite)
     }
 }

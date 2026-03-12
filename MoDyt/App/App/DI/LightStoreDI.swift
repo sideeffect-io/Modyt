@@ -1,76 +1,99 @@
-import SwiftUI
 import DeltaDoreClient
 
-enum SingleLightStoreDependencyFactory {
-    static func make(
-        dependencyBag: DependencyBag = .production
-    ) -> SingleLightStore.Dependencies {
+struct SingleLightStoreFactory: Sendable {
+    private let makeStore: @MainActor @Sendable (DeviceIdentifier) -> SingleLightStore
+
+    init(make: @escaping @MainActor @Sendable (DeviceIdentifier) -> SingleLightStore) {
+        self.makeStore = make
+    }
+
+    @MainActor
+    func make(deviceId: DeviceIdentifier) -> SingleLightStore {
+        makeStore(deviceId)
+    }
+
+    static func live(dependencyBag: DependencyBag) -> Self {
         let deviceRepository = dependencyBag.localStorageDatasources.deviceRepository
         let gatewayClient = dependencyBag.gatewayClient
 
-        return .init(
-            observeLight: { await deviceRepository.observeByID($0) },
-            sendCommand: { command in
-                for request in gatewayRequests(for: command) {
-                    let gatewayCommand = makeLightCommand(for: request)
-                    try? await gatewayClient.send(text: gatewayCommand.request)
-                }
-            }
-        )
+        return Self { deviceId in
+            SingleLightStore(
+                deviceId: deviceId,
+                observeLight: .init(
+                    observeLight: {
+                        await deviceRepository.observeByID(deviceId)
+                    }
+                ),
+                sendCommand: .init(
+                    sendCommand: { command in
+                        for request in gatewayRequests(for: command) {
+                            let gatewayCommand = makeLightCommand(for: request)
+                            try? await gatewayClient.send(text: gatewayCommand.request)
+                        }
+                    }
+                )
+            )
+        }
     }
 }
 
-enum GroupLightStoreDependencyFactory {
-    static func make(
-        dependencyBag: DependencyBag = .production
-    ) -> GroupLightStore.Dependencies {
+struct GroupLightStoreFactory: Sendable {
+    private let makeStore: @MainActor @Sendable ([DeviceIdentifier]) -> GroupLightStore
+
+    init(make: @escaping @MainActor @Sendable ([DeviceIdentifier]) -> GroupLightStore) {
+        self.makeStore = make
+    }
+
+    @MainActor
+    func make(deviceIds: [DeviceIdentifier]) -> GroupLightStore {
+        makeStore(deviceIds)
+    }
+
+    static func live(dependencyBag: DependencyBag) -> Self {
         let deviceRepository = dependencyBag.localStorageDatasources.deviceRepository
         let gatewayClient = dependencyBag.gatewayClient
 
-        return .init(
-            sendCommand: { requestedDeviceIds, preset in
-                let uniqueDeviceIds = requestedDeviceIds.uniquePreservingOrder()
-                guard uniqueDeviceIds.isEmpty == false else { return }
+        return Self { deviceIds in
+            GroupLightStore(
+                deviceIds: deviceIds,
+                sendCommand: .init(
+                    sendCommand: { requestedDeviceIds, preset in
+                        let uniqueDeviceIds = requestedDeviceIds.uniquePreservingOrder()
+                        guard uniqueDeviceIds.isEmpty == false else { return }
 
-                let devices = (try? await deviceRepository.listByIDs(uniqueDeviceIds)) ?? []
-                let devicesById = Dictionary(uniqueKeysWithValues: devices.map { ($0.id, $0) })
+                        let devices = (try? await deviceRepository.listByIDs(uniqueDeviceIds)) ?? []
+                        let devicesById = Dictionary(uniqueKeysWithValues: devices.map { ($0.id, $0) })
 
-                for deviceId in uniqueDeviceIds {
-                    guard let device = devicesById[deviceId],
-                          let descriptor = device.drivingLightControlDescriptor(),
-                          let levelKey = descriptor.levelKey else {
-                        continue
+                        for deviceId in uniqueDeviceIds {
+                            guard let device = devicesById[deviceId],
+                                  let descriptor = device.drivingLightControlDescriptor(),
+                                  let levelKey = descriptor.levelKey else {
+                                continue
+                            }
+
+                            let rawLevel: Int
+                            switch preset {
+                            case .on:
+                                rawLevel = descriptor.maximumLevel
+                            case .half:
+                                rawLevel = descriptor.rawLevel(forNormalizedLevel: 0.5)
+                            case .off:
+                                rawLevel = descriptor.minimumLevel
+                            }
+
+                            let request = LightGatewayCommandRequest(
+                                deviceId: deviceId,
+                                signalName: levelKey,
+                                value: .int(rawLevel)
+                            )
+                            let command = makeLightCommand(for: request)
+                            try? await gatewayClient.send(text: command.request)
+                        }
                     }
-
-                    let rawLevel: Int
-                    switch preset {
-                    case .on:
-                        rawLevel = descriptor.maximumLevel
-                    case .half:
-                        rawLevel = descriptor.rawLevel(forNormalizedLevel: 0.5)
-                    case .off:
-                        rawLevel = descriptor.minimumLevel
-                    }
-
-                    let request = LightGatewayCommandRequest(
-                        deviceId: deviceId,
-                        signalName: levelKey,
-                        value: .int(rawLevel)
-                    )
-                    let command = makeLightCommand(for: request)
-                    try? await gatewayClient.send(text: command.request)
-                }
-            }
-        )
+                ),
+            )
+        }
     }
-}
-
-extension EnvironmentValues {
-    @Entry var singleLightStoreDependencies: SingleLightStore.Dependencies =
-        SingleLightStoreDependencyFactory.make()
-
-    @Entry var groupLightStoreDependencies: GroupLightStore.Dependencies =
-        GroupLightStoreDependencyFactory.make()
 }
 
 private nonisolated func makeLightCommand(

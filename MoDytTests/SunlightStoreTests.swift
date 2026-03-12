@@ -69,10 +69,9 @@ struct SunlightDescriptorTests {
 
     private func makeStore(streamBox: DeviceStreamBox) -> SunlightStore {
         let store = SunlightStore(
-            dependencies: .init(
-                observeSunlight: { _ in streamBox.stream }
-            ),
-            identifier: .init(deviceId: 1, endpointId: 1)
+            observeSunlight: .init(
+                observeSunlight: { streamBox.stream }
+            )
         )
         store.start()
         return store
@@ -106,14 +105,13 @@ struct SunlightStoreTests {
     @Test
     func initStartsWithoutDescriptor() {
         let store = SunlightStore(
-            dependencies: .init(
-                observeSunlight: { _ in
+            observeSunlight: .init(
+                observeSunlight: {
                     AsyncStream { continuation in
                         continuation.finish()
                     }
                 }
             ),
-            identifier: .init(deviceId: 11, endpointId: 1)
         )
 
         #expect(store.descriptor == nil)
@@ -123,10 +121,9 @@ struct SunlightStoreTests {
     func observationUpdatesDescriptorFromIncomingDescriptor() async {
         let streamBox = DeviceStreamBox()
         let store = SunlightStore(
-            dependencies: .init(
-                observeSunlight: { _ in streamBox.stream }
-            ),
-            identifier: .init(deviceId: 11, endpointId: 1)
+            observeSunlight: .init(
+                observeSunlight: { streamBox.stream }
+            )
         )
         store.start()
 
@@ -150,10 +147,9 @@ struct SunlightStoreTests {
     func observationClearsDescriptorWhenDeviceDisappears() async {
         let streamBox = DeviceStreamBox()
         let store = SunlightStore(
-            dependencies: .init(
-                observeSunlight: { _ in streamBox.stream }
-            ),
-            identifier: .init(deviceId: 11, endpointId: 1)
+            observeSunlight: .init(
+                observeSunlight: { streamBox.stream }
+            )
         )
         store.start()
 

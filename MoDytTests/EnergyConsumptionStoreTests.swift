@@ -104,13 +104,12 @@ struct EnergyConsumptionStoreObservationTests {
         let observeCalls = TestCounter()
         let identifier = DeviceIdentifier(deviceId: 41, endpointId: 1)
         let store = EnergyConsumptionStore(
-            dependencies: .init(
-                observeEnergyConsumption: { _ in
+            observeEnergyConsumption: .init(
+                observeEnergyConsumption: {
                     await observeCalls.increment()
                     return streamBox.stream
                 }
-            ),
-            identifier: identifier
+            )
         )
 
         store.start()
@@ -137,10 +136,9 @@ struct EnergyConsumptionStoreObservationTests {
         let streamBox = TestAsyncStreamBox<Device?>()
         let identifier = DeviceIdentifier(deviceId: 42, endpointId: 1)
         let store = EnergyConsumptionStore(
-            dependencies: .init(
-                observeEnergyConsumption: { _ in streamBox.stream }
-            ),
-            identifier: identifier
+            observeEnergyConsumption: .init(
+                observeEnergyConsumption: { streamBox.stream }
+            )
         )
 
         store.start()

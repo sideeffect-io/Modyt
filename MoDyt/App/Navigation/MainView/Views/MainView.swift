@@ -55,7 +55,7 @@ func shouldNotifyParentOnMainFeatureStateChange(
 }
 
 struct MainView: View {
-    @Environment(\.mainStoreDependencies) private var mainStoreDependencies
+    @Environment(\.mainStoreFactory) private var mainStoreFactory
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var selectedTab: MainTab = .dashboard
@@ -64,7 +64,7 @@ struct MainView: View {
 
     var body: some View {
         WithStoreView(
-            store: MainStore(dependencies: mainStoreDependencies),
+            store: mainStoreFactory.make(),
         ) { store in
             content(for: store)
                 .task {

@@ -1,16 +1,13 @@
 import SwiftUI
 
 struct EnergyConsumptionView: View {
-    @Environment(\.energyConsumptionStoreDependencies) private var energyConsumptionStoreDependencies
+    @Environment(\.energyConsumptionStoreFactory) private var energyConsumptionStoreFactory
 
     let identifier: DeviceIdentifier
 
     var body: some View {
         WithStoreView(
-            store: EnergyConsumptionStore(
-                dependencies: energyConsumptionStoreDependencies,
-                identifier: identifier
-            ),
+            store: energyConsumptionStoreFactory.make(identifier: identifier),
         ) { store in
             energyContent(descriptor: store.descriptor)
         }

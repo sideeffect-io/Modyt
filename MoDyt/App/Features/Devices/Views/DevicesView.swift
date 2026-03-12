@@ -1,11 +1,11 @@
 import SwiftUI
 
 struct DevicesView: View {
-    @Environment(\.devicesStoreDependencies) private var devicesStoreDependencies
+    @Environment(\.devicesStoreFactory) private var devicesStoreFactory
 
     var body: some View {
         WithStoreView(
-            store: DevicesStore(dependencies: devicesStoreDependencies),
+            store: devicesStoreFactory.make(),
         ) { store in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {
@@ -68,7 +68,7 @@ struct DevicesView: View {
         .glassCard(cornerRadius: 24, interactive: false)
     }
 
-    private func sectionHeader(_ section: RepositoryDeviceTypeSection) -> some View {
+    private func sectionHeader(_ section: DeviceTypeSection) -> some View {
         let favoritesInSection = section.items.filter(\.isFavorite).count
 
         return HStack(spacing: 8) {

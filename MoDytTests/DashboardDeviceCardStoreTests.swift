@@ -8,12 +8,14 @@ struct DashboardDeviceCardStoreReducerTests {
             groupId: "group-1",
             memberIdentifiers: [.init(deviceId: 5, endpointId: 1)]
         )
-        var stateMachine = DashboardDeviceCardStore.StateMachine()
+        let transition = DashboardDeviceCardStore.StateMachine.reduce(
+            .initial,
+            .favoriteTapped,
+            favoriteType: favoriteType
+        )
 
-        let effects = stateMachine.reduce(.favoriteTapped, favoriteType: favoriteType)
-
-        #expect(stateMachine.state == .initial)
-        #expect(effects == [.toggleFavorite(favoriteType)])
+        #expect(transition.state == .initial)
+        #expect(transition.effects == [.toggleFavorite])
     }
 }
 
@@ -23,10 +25,10 @@ struct DashboardDeviceCardStoreEffectTests {
     func startIsANoOp() async {
         let recorder = TestRecorder<FavoriteType>()
         let store = DashboardDeviceCardStore(
-            dependencies: .init(
+            favoriteType: .device(identifier: .init(deviceId: 1, endpointId: 1)),
+            toggleFavorite: .init(
                 toggleFavorite: { await recorder.record($0) }
-            ),
-            favoriteType: .device(identifier: .init(deviceId: 1, endpointId: 1))
+            )
         )
 
         store.start()
@@ -40,10 +42,10 @@ struct DashboardDeviceCardStoreEffectTests {
         let favoriteType = FavoriteType.scene(sceneId: "scene-12")
         let recorder = TestRecorder<FavoriteType>()
         let store = DashboardDeviceCardStore(
-            dependencies: .init(
+            favoriteType: favoriteType,
+            toggleFavorite: .init(
                 toggleFavorite: { await recorder.record($0) }
-            ),
-            favoriteType: favoriteType
+            )
         )
 
         store.send(.favoriteTapped)

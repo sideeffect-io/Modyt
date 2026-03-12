@@ -9,70 +9,51 @@ struct DashboardDeviceCardState: Sendable, Equatable {
 }
 
 enum DashboardDeviceCardEffect: Sendable, Equatable {
-    case toggleFavorite(FavoriteType)
+    case toggleFavorite
 }
 
 @Observable
 @MainActor
 final class DashboardDeviceCardStore: StartableStore {
     struct StateMachine {
-        var state: DashboardDeviceCardState = .initial
-
-        mutating func reduce(
+        static func reduce(
+            _ state: DashboardDeviceCardState,
             _ event: DashboardDeviceCardEvent,
-            favoriteType: FavoriteType
-        ) -> [DashboardDeviceCardEffect] {
+            favoriteType _: FavoriteType
+        ) -> Transition<DashboardDeviceCardState, DashboardDeviceCardEffect> {
             switch event {
             case .favoriteTapped:
-                return [.toggleFavorite(favoriteType)]
+                return .init(state: state, effects: [.toggleFavorite])
             }
         }
     }
 
-    struct Dependencies {
-        let toggleFavorite: @Sendable (FavoriteType) async -> Void
-    }
-
-    private(set) var stateMachine: StateMachine = StateMachine()
-
-    var state: DashboardDeviceCardState {
-        stateMachine.state
-    }
+    private(set) var state: DashboardDeviceCardState = .initial
 
     private let favoriteType: FavoriteType
-    private let worker: Worker
+    private let toggleFavorite: ToggleDashboardFavoriteEffectExecutor
 
     init(
-        dependencies: Dependencies,
-        favoriteType: FavoriteType
+        favoriteType: FavoriteType,
+        toggleFavorite: ToggleDashboardFavoriteEffectExecutor
     ) {
         self.favoriteType = favoriteType
-        self.worker = Worker(toggleFavorite: dependencies.toggleFavorite)
+        self.toggleFavorite = toggleFavorite
     }
 
     func start() {}
 
     func send(_ event: DashboardDeviceCardEvent) {
-        let effects = stateMachine.reduce(event, favoriteType: favoriteType)
-        for effect in effects {
+        let transition = StateMachine.reduce(state, event, favoriteType: favoriteType)
+        state = transition.state
+
+        for effect in transition.effects {
             switch effect {
-            case .toggleFavorite(let favoriteType):
-                Task { [worker] in
-                    await worker.toggleFavorite(favoriteType)
+            case .toggleFavorite:
+                launchFireAndForgetTask { [favoriteType, toggleFavorite] in
+                    await toggleFavorite(favoriteType)
                 }
             }
-        }
-    }
-
-    private actor Worker {
-        private let toggleFavoriteAction: @Sendable (FavoriteType) async -> Void
-
-        init(toggleFavorite: @escaping @Sendable (FavoriteType) async -> Void) {
-            self.toggleFavoriteAction = toggleFavorite
-        }
-
-        func toggleFavorite(_ favoriteType: FavoriteType) async {
-            await toggleFavoriteAction(favoriteType)
         }
     }
 }

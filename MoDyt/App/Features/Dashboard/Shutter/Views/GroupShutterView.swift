@@ -4,7 +4,7 @@ import UIKit
 #endif
 
 struct GroupShutterView: View {
-    @Environment(\.groupShutterStoreDependencies) private var groupShutterStoreDependencies
+    @Environment(\.groupShutterStoreFactory) private var groupShutterStoreFactory
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     let deviceIds: [DeviceIdentifier]
@@ -50,10 +50,7 @@ struct GroupShutterView: View {
 
     var body: some View {
         WithStoreView(
-            store: GroupShutterStore(
-                dependencies: groupShutterStoreDependencies,
-                deviceIds: normalizedDeviceIds
-            ),
+            store: groupShutterStoreFactory.make(deviceIds: normalizedDeviceIds),
         ) { store in
             VStack(alignment: .leading, spacing: 12) {
                 groupBadge

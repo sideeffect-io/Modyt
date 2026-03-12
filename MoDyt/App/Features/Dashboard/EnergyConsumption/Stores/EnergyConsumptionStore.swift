@@ -9,22 +9,31 @@ final class EnergyConsumptionStore: StartableStore {
     }
 
     enum Event: Sendable {
+        case onAppear
         case descriptorWasReceived(Descriptor?)
     }
 
-    enum Effect: Sendable, Equatable {}
+    enum Effect: Sendable, Equatable {
+        case startObserving
+    }
 
     struct StateMachine {
-        var state = State(descriptor: nil)
+        static func reduce(
+            _ state: State,
+            _ event: Event
+        ) -> Transition<State, Effect> {
+            var state = state
 
-        mutating func reduce(_ event: Event) -> [Effect] {
             switch event {
+            case .onAppear:
+                return .init(state: state, effects: [.startObserving])
+
             case .descriptorWasReceived(let descriptor):
                 if state.descriptor != descriptor {
                     state.descriptor = descriptor
                 }
             }
-            return []
+            return .init(state: state)
         }
     }
 
@@ -45,74 +54,62 @@ final class EnergyConsumptionStore: StartableStore {
         }
     }
 
-    struct Dependencies {
-        let observeEnergyConsumption: @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
-
-        init(
-            observeEnergyConsumption: @escaping @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
-        ) {
-            self.observeEnergyConsumption = observeEnergyConsumption
-        }
-    }
-
-    private(set) var stateMachine: StateMachine = StateMachine()
+    private(set) var state = State(descriptor: nil)
 
     var descriptor: Descriptor? {
-        stateMachine.state.descriptor
+        state.descriptor
     }
 
-    private let identifier: DeviceIdentifier
-    private let observationTask = TaskHandle()
-    private let worker: Worker
+    private let observeEnergyConsumption: ObserveEnergyConsumptionEffectExecutor
+    private var observationTask: Task<Void, Never>?
     private var hasStarted = false
 
     init(
-        dependencies: Dependencies,
-        identifier: DeviceIdentifier
+        observeEnergyConsumption: ObserveEnergyConsumptionEffectExecutor
     ) {
-        self.identifier = identifier
-        self.worker = Worker(
-            observeEnergyConsumption: dependencies.observeEnergyConsumption
-        )
+        self.observeEnergyConsumption = observeEnergyConsumption
     }
 
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
-        let identifier = self.identifier
-        observationTask.task = Task { [weak self, worker] in
-            await worker.observe(identifier: identifier) { [weak self] descriptor in
-                await self?.send(.descriptorWasReceived(descriptor))
-            }
-        }
+        send(.onAppear)
     }
 
-    deinit {
-        observationTask.cancel()
+    isolated deinit {
+        observationTask?.cancel()
     }
 
     func send(_ event: Event) {
-        _ = stateMachine.reduce(event)
+        let transition = StateMachine.reduce(state, event)
+        state = transition.state
+        handle(transition.effects)
     }
 
-    private actor Worker {
-        private let observeEnergyConsumption: @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
-
-        init(
-            observeEnergyConsumption: @escaping @Sendable (DeviceIdentifier) async -> any AsyncSequence<Device?, Never> & Sendable
-        ) {
-            self.observeEnergyConsumption = observeEnergyConsumption
-        }
-
-        func observe(
-            identifier: DeviceIdentifier,
-            onDescriptor: @escaping @Sendable (Descriptor?) async -> Void
-        ) async {
-            let stream = await observeEnergyConsumption(identifier)
-            for await device in stream {
-                guard !Task.isCancelled else { return }
-                await onDescriptor(device?.energyConsumptionDescriptor())
+    private func handle(_ effects: [Effect]) {
+        for effect in effects {
+            switch effect {
+            case .startObserving:
+                guard observationTask == nil else { return }
+                replaceTask(
+                    &observationTask,
+                    with: makeTrackedStreamTask(
+                        operation: { [observeEnergyConsumption] in
+                            await observeEnergyConsumption()
+                        },
+                        onEvent: { [weak self] event in
+                            self?.send(event)
+                        },
+                        onFinish: { [weak self] in
+                            self?.observationTask = nil
+                        }
+                    )
+                )
             }
         }
+    }
+
+    nonisolated static func observationEvent(from device: Device?) -> Event? {
+        .descriptorWasReceived(device?.energyConsumptionDescriptor())
     }
 }

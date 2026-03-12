@@ -6,8 +6,6 @@ struct DependencyBag: Sendable {
     let gatewayClient: DeltaDoreClient
     var client: DeltaDoreClient { gatewayClient }
 
-    static let production: DependencyBag = .live()
-
     static func live(
         databasePath: String = databaseURL.path,
         now: @escaping @Sendable () -> Date = Date.init,

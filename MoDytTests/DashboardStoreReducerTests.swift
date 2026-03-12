@@ -16,23 +16,19 @@ struct DashboardStoreReducerTests {
     @Test
     func onAppearEmitsStartObservingFavoritesEffect() {
         let initialState = DashboardState.initial
-        var stateMachine = DashboardStore.StateMachine(state: initialState)
-        let effects = stateMachine.reduce(.onAppear)
-        let nextState = stateMachine.state
+        let transition = DashboardStore.StateMachine.reduce(initialState, .onAppear)
 
-        #expect(nextState == initialState)
-        #expect(effects == [.startObservingFavorites])
+        #expect(transition.state == initialState)
+        #expect(transition.effects == [.startObservingFavorites])
     }
 
     @Test
     func refreshRequestedEmitsRefreshAllEffect() {
         let initialState = DashboardState.initial
-        var stateMachine = DashboardStore.StateMachine(state: initialState)
-        let effects = stateMachine.reduce(.refreshRequested)
-        let nextState = stateMachine.state
+        let transition = DashboardStore.StateMachine.reduce(initialState, .refreshRequested)
 
-        #expect(nextState == initialState)
-        #expect(effects == [.refreshAll])
+        #expect(transition.state == initialState)
+        #expect(transition.effects == [.refreshAll])
     }
 
     @Test
@@ -45,37 +41,50 @@ struct DashboardStoreReducerTests {
             memberIdentifiers: [.init(deviceId: 4, endpointId: 1)]
         )
 
-        var stateMachine = DashboardStore.StateMachine(state: initialState)
-        let effects = stateMachine.reduce(.reorderFavorite(source, target))
-        let nextState = stateMachine.state
+        let transition = DashboardStore.StateMachine.reduce(
+            initialState,
+            .reorderFavorite(source, target)
+        )
 
-        #expect(nextState == initialState)
-        #expect(effects == [.reorderFavorite(source, target)])
+        #expect(transition.state == initialState)
+        #expect(transition.effects == [.reorderFavorite(source, target)])
     }
 
     @Test
-    func favoritesUpdatedMutatesStateWithoutEmittingEffects() {
+    func favoritesObservedProjectsFavoritesWithoutEmittingEffects() {
         let initialState = DashboardState.initial
-        let updatedFavorites = [
-            FavoriteItem(
-                name: "Kitchen Light",
-                usage: .light,
-                type: .device(identifier: .init(deviceId: 42, endpointId: 1)),
-                order: 0
-            ),
-            FavoriteItem(
-                name: "Night",
-                usage: .scene,
-                type: .scene(sceneId: "8"),
-                order: 1
-            )
-        ]
+        let device = makeTestDevice(
+            identifier: .init(deviceId: 42, endpointId: 1),
+            name: "Kitchen Light",
+            usage: "light",
+            isFavorite: true,
+            dashboardOrder: 0
+        )
+        let scene = makeTestScene(
+            id: "8",
+            name: "Night",
+            isFavorite: true,
+            dashboardOrder: 1
+        )
+        let observation = DashboardFavoritesObservation(
+            devices: [device],
+            groups: [],
+            scenes: [scene]
+        )
 
-        var stateMachine = DashboardStore.StateMachine(state: initialState)
-        let effects = stateMachine.reduce(.favoritesUpdated(updatedFavorites))
-        let nextState = stateMachine.state
+        let transition = DashboardStore.StateMachine.reduce(
+            initialState,
+            .favoritesObserved(observation)
+        )
 
-        #expect(nextState.favorites == updatedFavorites)
-        #expect(effects.isEmpty)
+        #expect(
+            transition.state.favorites
+                == FavoriteItemsProjector.items(
+                    devices: observation.devices,
+                    groups: observation.groups,
+                    scenes: observation.scenes
+                )
+        )
+        #expect(transition.effects.isEmpty)
     }
 }

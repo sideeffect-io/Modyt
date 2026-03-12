@@ -1,35 +1,66 @@
-import SwiftUI
 import DeltaDoreClient
 
-enum AuthenticationStoreDependencyFactory {
-    static func make(
-        dependencyBag: DependencyBag = .production
-    ) -> AuthenticationStore.Dependencies {
+struct AuthenticationStoreFactory: Sendable {
+    private let makeStore: @MainActor @Sendable (@escaping @MainActor (AuthenticationDelegateEvent) -> Void) -> AuthenticationStore
+
+    init(
+        make: @escaping @MainActor @Sendable (@escaping @MainActor (AuthenticationDelegateEvent) -> Void) -> AuthenticationStore
+    ) {
+        self.makeStore = make
+    }
+
+    @MainActor
+    func make(
+        onDelegateEvent: @escaping @MainActor (AuthenticationDelegateEvent) -> Void = { _ in }
+    ) -> AuthenticationStore {
+        makeStore(onDelegateEvent)
+    }
+
+    static func live(dependencyBag: DependencyBag) -> Self {
         let gatewayClient = dependencyBag.gatewayClient
 
-        return .init(
-            inspectFlow: {
-                await gatewayClient.inspectConnectionFlow()
-            },
-            connectStored: {
-                _ = try await gatewayClient.connectWithStoredCredentials(options: .init())
-            },
-            listSites: { email, password in
-                let credentials = TydomConnection.CloudCredentials(email: email, password: password)
-                return try await gatewayClient.listSites(cloudCredentials: credentials)
-            },
-            connectNew: { email, password, siteIndex in
-                let credentials = TydomConnection.CloudCredentials(email: email, password: password)
-                _ = try await gatewayClient.connectWithNewCredentials(
-                    options: .init(mode: .auto(cloudCredentials: credentials)),
-                    selectSiteIndex: { _ in siteIndex }
-                )
-            }
-        )
+        return Self { onDelegateEvent in
+            AuthenticationStore(
+                inspectFlow: .init(
+                    inspectFlow: {
+                        switch await gatewayClient.inspectConnectionFlow() {
+                        case .connectWithStoredCredentials:
+                            return .connectWithStoredCredentials
+                        case .connectWithNewCredentials:
+                            return .connectWithNewCredentials
+                        }
+                    }
+                ),
+                connectStored: .init(
+                    connectStored: {
+                        _ = try await gatewayClient.connectWithStoredCredentials(options: .init())
+                    }
+                ),
+                listSites: .init(
+                    listSites: { email, password in
+                        let credentials = TydomConnection.CloudCredentials(email: email, password: password)
+                        return try await gatewayClient
+                            .listSites(cloudCredentials: credentials)
+                            .map { site in
+                                AuthenticationSite(
+                                    id: site.id,
+                                    name: site.name,
+                                    gatewayCount: site.gateways.count
+                                )
+                            }
+                    }
+                ),
+                connectNew: .init(
+                    connectNew: { email, password, siteIndex in
+                        let credentials = TydomConnection.CloudCredentials(email: email, password: password)
+                        _ = try await gatewayClient.connectWithNewCredentials(
+                            options: .init(mode: .auto(cloudCredentials: credentials)),
+                            selectSiteIndex: { _ in siteIndex }
+                        )
+                    }
+                ),
+                onDelegateEvent: onDelegateEvent
+            )
+        }
     }
-}
-
-extension EnvironmentValues {
-    @Entry var authenticationStoreDependencies: AuthenticationStore.Dependencies =
-        AuthenticationStoreDependencyFactory.make()
 }

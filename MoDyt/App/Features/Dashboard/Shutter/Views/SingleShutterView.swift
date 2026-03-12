@@ -12,7 +12,7 @@ private func performWithoutAnimation(_ updates: () -> Void) {
 }
 
 struct SingleShutterView: View {
-    @Environment(\.singleShutterStoreDependencies) private var singleShutterStoreDependencies
+    @Environment(\.singleShutterStoreFactory) private var singleShutterStoreFactory
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     let deviceId: DeviceIdentifier
@@ -32,10 +32,7 @@ struct SingleShutterView: View {
 
     var body: some View {
         WithStoreView(
-            store: SingleShutterStore(
-                dependencies: singleShutterStoreDependencies,
-                deviceId: deviceId
-            ),
+            store: singleShutterStoreFactory.make(deviceId: deviceId),
         ) { store in
             VStack(spacing: 10) {
                 ShutterLinearGauge(
