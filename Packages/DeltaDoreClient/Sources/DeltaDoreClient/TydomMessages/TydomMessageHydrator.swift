@@ -17,6 +17,22 @@ struct TydomMessageHydratorDependencies: Sendable {
         self.applyCacheMutation = applyCacheMutation
         self.log = log
     }
+
+    init(
+        deviceInfo: @escaping @Sendable (String) async -> TydomDeviceInfo?,
+        scenarioMetadata: @escaping @Sendable (Int) async -> TydomScenarioMetadata?,
+        applyCacheMutation: @escaping @Sendable (TydomCacheMutation) async -> Void,
+        log: @escaping @Sendable (String) -> Void = { _ in }
+    ) {
+        self.init(
+            deviceInfo: { identifier in
+                await deviceInfo(identifier.uniqueId)
+            },
+            scenarioMetadata: scenarioMetadata,
+            applyCacheMutation: applyCacheMutation,
+            log: log
+        )
+    }
 }
 
 struct TydomMessageHydrator: Sendable {

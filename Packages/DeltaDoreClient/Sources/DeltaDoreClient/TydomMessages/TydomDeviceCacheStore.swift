@@ -15,6 +15,13 @@ actor TydomDeviceCacheStore {
         return TydomDeviceInfo(name: name, usage: usage, metadata: entry.metadata)
     }
 
+    func deviceInfo(for uniqueId: String) async -> TydomDeviceInfo? {
+        guard let identifier = TydomDeviceIdentifier(uniqueId: uniqueId) else {
+            return nil
+        }
+        return await deviceInfo(for: identifier)
+    }
+
     func upsert(_ entry: TydomDeviceCacheEntry) async {
         var current = devices[entry.identifier] ?? TydomDeviceCacheEntry(identifier: entry.identifier)
         if let name = entry.name { current.name = name }

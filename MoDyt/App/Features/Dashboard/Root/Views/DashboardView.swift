@@ -5,61 +5,195 @@ struct DashboardView: View {
     @Environment(\.dashboardStoreFactory) private var dashboardStoreFactory
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
+    @State private var currentPage = 0
     @State private var dragSource: FavoriteType?
     @State private var dropTarget: FavoriteType?
+
+    private let dashboardHorizontalPadding: CGFloat = 18
+    private let dashboardVerticalPadding: CGFloat = 24
+    private let dashboardGridSpacing: CGFloat = 18
+    private let dashboardBottomInset: CGFloat = 0
+    private let dashboardPageIndicatorInset: CGFloat = 28
+    private let dashboardCardVerticalFootprint: CGFloat = 196
+    private let landscapeMinimumCardWidth: CGFloat = 220
 
     var body: some View {
         WithStoreView(
             store: dashboardStoreFactory.make(),
         ) { store in
-            ScrollView {
-                VStack(spacing: 22) {
-                    favoritesSection(store: store)
+            GeometryReader { proxy in
+                dashboardContent(
+                    store: store,
+                    availableSize: proxy.size
+                )
+                .navigationTitle("Dashboard")
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            store.send(.refreshRequested)
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .accessibilityLabel("Refresh dashboard")
+                    }
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 24)
-            }
-            .safeAreaInset(edge: .bottom) {
-                Color.clear.frame(height: 74)
-            }
-            .navigationTitle("Dashboard")
-            .refreshable {
-                store.send(.refreshRequested)
             }
         }
-    }
-
-    private var gridColumns: [GridItem] {
-        if horizontalSizeClass == .compact {
-            return [
-                GridItem(.flexible(minimum: 0), spacing: 18),
-                GridItem(.flexible(minimum: 0), spacing: 18)
-            ]
-        }
-        return [GridItem(.adaptive(minimum: 220), spacing: 18)]
     }
 
     @ViewBuilder
-    private func favoritesSection(store: DashboardStore) -> some View {
+    private func dashboardContent(
+        store: DashboardStore,
+        availableSize: CGSize
+    ) -> some View {
         let favorites = store.state.favorites
         let favoriteIDs = favorites.map(\.id)
+        let metrics = paginationMetrics(
+            for: availableSize,
+            favoriteCount: favorites.count
+        )
+        let pagedFavorites = favoritePages(
+            favorites,
+            pageSize: metrics.pageSize
+        )
 
-        VStack(alignment: .leading, spacing: 12) {
-            if favorites.isEmpty {
-                ContentUnavailableView(
-                    "No Favorites Yet",
-                    systemImage: "star",
-                    description: Text("Mark devices, scenes, or groups as favorites to pin them here.")
+        if favorites.isEmpty {
+            ContentUnavailableView(
+                "No Favorites Yet",
+                systemImage: "star",
+                description: Text("Mark devices, scenes, or groups as favorites to pin them here.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.horizontal, dashboardHorizontalPadding)
+            .padding(.vertical, dashboardVerticalPadding)
+            .padding(.bottom, dashboardBottomInset)
+        } else if pagedFavorites.count == 1, let firstPage = pagedFavorites.first {
+            favoritesPage(
+                firstPage,
+                store: store,
+                columnCount: metrics.columnCount,
+                bottomInset: dashboardBottomInset
+            )
+            .animation(.easeInOut(duration: 0.28), value: favoriteIDs)
+        } else {
+            TabView(
+                selection: Binding(
+                    get: { min(currentPage, max(pagedFavorites.count - 1, 0)) },
+                    set: { currentPage = $0 }
                 )
-                .padding(.vertical, 24)
-            } else {
-                LazyVGrid(columns: gridColumns, spacing: 18) {
-                    ForEach(favorites, id: \.id) { favorite in
-                        favoriteTile(for: favorite, store: store)
-                    }
+            ) {
+                ForEach(Array(pagedFavorites.enumerated()), id: \.offset) { index, page in
+                    favoritesPage(
+                        page,
+                        store: store,
+                        columnCount: metrics.columnCount,
+                        bottomInset: dashboardBottomInset + dashboardPageIndicatorInset
+                    )
+                    .tag(index)
                 }
-                .animation(.easeInOut(duration: 0.28), value: favoriteIDs)
             }
+            .tabViewStyle(.page(indexDisplayMode: .automatic))
+            .indexViewStyle(.page(backgroundDisplayMode: .interactive))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .animation(.easeInOut(duration: 0.28), value: favoriteIDs)
+        }
+    }
+
+    private func favoritesPage(
+        _ favorites: [FavoriteItem],
+        store: DashboardStore,
+        columnCount: Int,
+        bottomInset: CGFloat
+    ) -> some View {
+        LazyVGrid(columns: gridColumns(for: columnCount), spacing: dashboardGridSpacing) {
+            ForEach(favorites, id: \.id) { favorite in
+                favoriteTile(for: favorite, store: store)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.horizontal, dashboardHorizontalPadding)
+        .padding(.top, dashboardVerticalPadding)
+        .padding(.bottom, bottomInset)
+    }
+
+    private func gridColumns(for columnCount: Int) -> [GridItem] {
+        Array(
+            repeating: GridItem(.flexible(minimum: 0), spacing: dashboardGridSpacing),
+            count: max(columnCount, 1)
+        )
+    }
+
+    private func paginationMetrics(
+        for availableSize: CGSize,
+        favoriteCount: Int
+    ) -> DashboardPaginationMetrics {
+        let columnCount = gridColumnCount(for: availableSize)
+        let rowsWithoutPageIndicator = gridRowCount(
+            for: availableSize,
+            bottomInset: dashboardBottomInset
+        )
+        let firstPassPageSize = max(columnCount * rowsWithoutPageIndicator, 1)
+        let showsPageIndicator = favoriteCount > firstPassPageSize
+        let rowCount = gridRowCount(
+            for: availableSize,
+            bottomInset: dashboardBottomInset + (showsPageIndicator ? dashboardPageIndicatorInset : 0)
+        )
+
+        return DashboardPaginationMetrics(
+            columnCount: columnCount,
+            rowCount: rowCount
+        )
+    }
+
+    private func gridColumnCount(for availableSize: CGSize) -> Int {
+        let contentWidth = max(availableSize.width - (dashboardHorizontalPadding * 2), 0)
+
+        if availableSize.width > availableSize.height {
+            let fittingColumnCount = max(
+                1,
+                Int((contentWidth + dashboardGridSpacing) / (landscapeMinimumCardWidth + dashboardGridSpacing))
+            )
+            return min(4, fittingColumnCount)
+        }
+
+        if horizontalSizeClass == .compact {
+            return 2
+        }
+
+        return max(
+            1,
+            Int((contentWidth + dashboardGridSpacing) / (landscapeMinimumCardWidth + dashboardGridSpacing))
+        )
+    }
+
+    private func gridRowCount(
+        for availableSize: CGSize,
+        bottomInset: CGFloat
+    ) -> Int {
+        if availableSize.width > availableSize.height {
+            return 3
+        }
+
+        let usableHeight = max(
+            availableSize.height - (dashboardVerticalPadding * 2) - bottomInset,
+            dashboardCardVerticalFootprint
+        )
+
+        return max(
+            1,
+            Int((usableHeight + dashboardGridSpacing) / (dashboardCardVerticalFootprint + dashboardGridSpacing))
+        )
+    }
+
+    private func favoritePages(
+        _ favorites: [FavoriteItem],
+        pageSize: Int
+    ) -> [[FavoriteItem]] {
+        guard pageSize > 0, favorites.isEmpty == false else { return [] }
+
+        return stride(from: 0, to: favorites.count, by: pageSize).map { startIndex in
+            let endIndex = min(startIndex + pageSize, favorites.count)
+            return Array(favorites[startIndex..<endIndex])
         }
     }
 
@@ -101,6 +235,15 @@ struct DashboardView: View {
                 }
             )
         )
+    }
+}
+
+private struct DashboardPaginationMetrics {
+    let columnCount: Int
+    let rowCount: Int
+
+    var pageSize: Int {
+        max(columnCount * rowCount, 1)
     }
 }
 

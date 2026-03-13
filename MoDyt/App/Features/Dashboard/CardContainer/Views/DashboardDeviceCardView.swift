@@ -10,6 +10,8 @@ struct DashboardDeviceCardView: View {
     @ScaledMetric(relativeTo: .body) private var dashboardCardMinHeight: CGFloat = 194
     @ScaledMetric(relativeTo: .title3) private var cardIconSize: CGFloat = 22
     @ScaledMetric(relativeTo: .title3) private var cardIconFrame: CGFloat = 36
+    @ScaledMetric(relativeTo: .title3) private var favoriteButtonInset: CGFloat = 10
+    @ScaledMetric(relativeTo: .title3) private var favoriteButtonClearance: CGFloat = 50
 
     var body: some View {
         WithStoreView(
@@ -41,8 +43,7 @@ struct DashboardDeviceCardView: View {
         VStack(alignment: .leading, spacing: 12) {
             cardHeader(
                 for: favorite,
-                titleLineLimit: 2,
-                onFavoriteTapped: onFavoriteTapped
+                titleLineLimit: 2
             )
 
             Spacer(minLength: 0)
@@ -53,6 +54,9 @@ struct DashboardDeviceCardView: View {
         .padding(16)
         .frame(minHeight: dashboardCardMinHeight, alignment: .top)
         .glassCard(cornerRadius: 22)
+        .overlay(alignment: .topTrailing) {
+            favoriteButton(for: favorite, action: onFavoriteTapped)
+        }
     }
 
     private func deviceCardContent(
@@ -62,8 +66,7 @@ struct DashboardDeviceCardView: View {
         VStack(alignment: .leading, spacing: 12) {
             cardHeader(
                 for: favorite,
-                titleLineLimit: 1,
-                onFavoriteTapped: onFavoriteTapped
+                titleLineLimit: 2
             )
 
             if let passiveLabel = passiveBodyLabel(for: favorite) {
@@ -77,35 +80,77 @@ struct DashboardDeviceCardView: View {
         .padding(16)
         .frame(minHeight: dashboardCardMinHeight, alignment: .top)
         .glassCard(cornerRadius: 22)
+        .overlay(alignment: .topTrailing) {
+            favoriteButton(for: favorite, action: onFavoriteTapped)
+        }
     }
 
+    @ViewBuilder
     private func cardHeader(
         for favorite: FavoriteItem,
-        titleLineLimit: Int,
-        onFavoriteTapped: @escaping () -> Void
+        titleLineLimit: Int
     ) -> some View {
         let effectiveTitleLineLimit = dynamicTypeSize.isAccessibilitySize
-            ? max(titleLineLimit, 2)
+            ? max(titleLineLimit, 3)
             : titleLineLimit
 
-        return HStack(alignment: .center, spacing: 10) {
-            Image(systemName: iconSystemName(for: favorite))
-                .font(.system(size: cardIconSize, weight: .semibold))
-                .frame(width: cardIconFrame, height: cardIconFrame)
+        if dynamicTypeSize.isAccessibilitySize {
+            multilineHeader(for: favorite, titleLineLimit: effectiveTitleLineLimit)
+                .padding(.trailing, favoriteButtonClearance)
+        } else {
+            SwiftUI.ViewThatFits(in: .horizontal) {
+                compactHeader(for: favorite)
+                multilineHeader(for: favorite, titleLineLimit: effectiveTitleLineLimit)
+            }
+            .padding(.trailing, favoriteButtonClearance)
+        }
+    }
+
+    private func compactHeader(for favorite: FavoriteItem) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            headerIcon(for: favorite)
 
             Text(favorite.name)
-                .font(.system(.headline, design: .rounded))
-                .lineLimit(effectiveTitleLineLimit)
-                .minimumScaleFactor(0.9)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            FavoriteOrbButton(
-                isFavorite: true,
-                size: 32,
-                accessibilityContext: favorite.name,
-                action: onFavoriteTapped
-            )
+                .font(.system(.headline, design: .rounded).weight(.semibold))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .fixedSize(horizontal: true, vertical: false)
         }
+    }
+
+    private func multilineHeader(
+        for favorite: FavoriteItem,
+        titleLineLimit: Int
+    ) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            headerIcon(for: favorite)
+            Text(favorite.name)
+                .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                .lineLimit(titleLineLimit)
+                .truncationMode(.tail)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func headerIcon(for favorite: FavoriteItem) -> some View {
+        Image(systemName: iconSystemName(for: favorite))
+            .font(.system(size: cardIconSize, weight: .semibold))
+            .frame(width: cardIconFrame, height: cardIconFrame, alignment: .leading)
+    }
+
+    private func favoriteButton(
+        for favorite: FavoriteItem,
+        action: @escaping () -> Void
+    ) -> some View {
+        FavoriteOrbButton(
+            isFavorite: true,
+            size: 32,
+            accessibilityContext: favorite.name,
+            action: action
+        )
+        .padding(favoriteButtonInset)
     }
 
     private func iconSystemName(for favorite: FavoriteItem) -> String {

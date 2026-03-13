@@ -274,6 +274,20 @@ public struct TydomDeviceIdentifier: Sendable, Equatable, Hashable, Codable {
         self.deviceId = deviceId
         self.endpointId = endpointId
     }
+
+    public init?(uniqueId: String) {
+        let parts = uniqueId.split(separator: "_", omittingEmptySubsequences: false)
+        guard parts.count == 2,
+              let endpointId = Int(parts[0]),
+              let deviceId = Int(parts[1]) else {
+            return nil
+        }
+        self.init(deviceId: deviceId, endpointId: endpointId)
+    }
+
+    public var uniqueId: String {
+        "\(endpointId)_\(deviceId)"
+    }
 }
 
 
@@ -289,6 +303,14 @@ public struct TydomDevice: Sendable, Equatable {
 
     public var identifier: TydomDeviceIdentifier {
         TydomDeviceIdentifier(deviceId: deviceId, endpointId: endpointId)
+    }
+
+    public var id: Int {
+        deviceId
+    }
+
+    public var uniqueId: String {
+        identifier.uniqueId
     }
 
     public init(

@@ -17,6 +17,23 @@ struct TydomDeviceCacheEntry: Sendable, Equatable {
         self.usage = usage
         self.metadata = metadata
     }
+
+    init(
+        uniqueId: String,
+        name: String? = nil,
+        usage: String? = nil,
+        metadata: [String: PayloadValue]? = nil
+    ) {
+        guard let identifier = TydomDeviceIdentifier(uniqueId: uniqueId) else {
+            preconditionFailure("Invalid TydomDeviceCacheEntry uniqueId: \(uniqueId)")
+        }
+        self.init(
+            identifier: identifier,
+            name: name,
+            usage: usage,
+            metadata: metadata
+        )
+    }
 }
 
 enum TydomMessageDecoder {

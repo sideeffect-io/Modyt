@@ -7,7 +7,7 @@ extension TydomMessageHydratorDependencies {
         log: @escaping @Sendable (String) -> Void = { _ in }
     ) -> TydomMessageHydratorDependencies {
         TydomMessageHydratorDependencies(
-            deviceInfo: { identifier in
+            deviceInfo: { (identifier: TydomDeviceIdentifier) in
                 await cache.deviceInfo(for: identifier)
             },
             scenarioMetadata: { scenarioId in
