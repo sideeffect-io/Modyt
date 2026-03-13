@@ -233,20 +233,6 @@ public struct TydomConnectionStateMachine {
                     mode: .local(host: credentials.cachedLocalIP ?? ""),
                     reason: .overrideLocal
                 )
-                if let cached = credentials.cachedLocalIP, cached.isEmpty == false {
-                    return (
-                        TydomConnectionState(
-                            phase: .tryingCachedIP,
-                            override: state.override,
-                            credentials: credentials,
-                            selectedGatewayMac: credentials.mac,
-                            lastDecision: decision,
-                            lastError: nil,
-                            connectedConnection: state.connectedConnection
-                        ),
-                        [.emitDecision(decision), .tryCachedIP(cached)]
-                    )
-                }
                 return (
                     TydomConnectionState(
                         phase: .discoveringLocal,

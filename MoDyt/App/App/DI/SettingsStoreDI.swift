@@ -18,6 +18,20 @@ struct SettingsStoreFactory: Sendable {
 
         return Self {
             SettingsStore(
+                refreshConnectionRoute: .init(
+                    readConnectionRoute: {
+                        guard let mode = await gatewayClient.currentConnectionMode() else {
+                            return .unavailable
+                        }
+
+                        switch mode {
+                        case .local(let host):
+                            return .local(host: host)
+                        case .remote(let host):
+                            return .remote(host: host)
+                        }
+                    }
+                ),
                 requestDisconnect: .init(
                     requestDisconnect: {
                         await gatewayClient.disconnectCurrentConnection()

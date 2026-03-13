@@ -1,24 +1,37 @@
 import Foundation
 import Observation
 
+enum SettingsConnectionRoute: Sendable, Equatable {
+    case local(host: String)
+    case remote(host: String)
+    case unavailable
+}
+
 struct SettingsState: Sendable, Equatable {
     var isDisconnecting: Bool
+    var isRefreshingConnectionRoute: Bool
     var didDisconnect: Bool
+    var connectionRoute: SettingsConnectionRoute
     var errorMessage: String?
 
     static let initial = SettingsState(
         isDisconnecting: false,
+        isRefreshingConnectionRoute: false,
         didDisconnect: false,
+        connectionRoute: .unavailable,
         errorMessage: nil
     )
 }
 
 enum SettingsEvent: Sendable {
+    case connectionRouteRefreshRequested
+    case connectionRouteLoaded(SettingsConnectionRoute)
     case disconnectTapped
     case disconnectFinished
 }
 
 enum SettingsEffect: Sendable, Equatable {
+    case refreshConnectionRoute
     case requestDisconnect
 }
 
@@ -33,6 +46,16 @@ final class SettingsStore: StartableStore {
             var state = state
 
             switch event {
+            case .connectionRouteRefreshRequested:
+                guard !state.isRefreshingConnectionRoute else { return .init(state: state) }
+                state.isRefreshingConnectionRoute = true
+                return .init(state: state, effects: [.refreshConnectionRoute])
+
+            case .connectionRouteLoaded(let connectionRoute):
+                state.isRefreshingConnectionRoute = false
+                state.connectionRoute = connectionRoute
+                return .init(state: state)
+
             case .disconnectTapped:
                 guard !state.isDisconnecting else { return .init(state: state) }
                 state.isDisconnecting = true
@@ -42,7 +65,9 @@ final class SettingsStore: StartableStore {
 
             case .disconnectFinished:
                 state.isDisconnecting = false
+                state.isRefreshingConnectionRoute = false
                 state.didDisconnect = true
+                state.connectionRoute = .unavailable
                 state.errorMessage = nil
                 return .init(state: state)
             }
@@ -51,10 +76,16 @@ final class SettingsStore: StartableStore {
 
     private(set) var state: SettingsState = .initial
 
+    private let refreshConnectionRoute: ReadSettingsConnectionRouteEffectExecutor
     private let requestDisconnect: RequestDisconnectEffectExecutor
+    private var connectionRouteTask: Task<Void, Never>?
     private var disconnectTask: Task<Void, Never>?
 
-    init(requestDisconnect: RequestDisconnectEffectExecutor) {
+    init(
+        refreshConnectionRoute: ReadSettingsConnectionRouteEffectExecutor,
+        requestDisconnect: RequestDisconnectEffectExecutor
+    ) {
+        self.refreshConnectionRoute = refreshConnectionRoute
         self.requestDisconnect = requestDisconnect
     }
 
@@ -67,6 +98,7 @@ final class SettingsStore: StartableStore {
     func start() {}
 
     isolated deinit {
+        connectionRouteTask?.cancel()
         disconnectTask?.cancel()
     }
 
@@ -78,6 +110,22 @@ final class SettingsStore: StartableStore {
 
     private func handle(_ effect: SettingsEffect) {
         switch effect {
+        case .refreshConnectionRoute:
+            replaceTask(
+                &connectionRouteTask,
+                with: makeTrackedEventTask(
+                    operation: { [refreshConnectionRoute] in
+                        await refreshConnectionRoute()
+                    },
+                    onEvent: { [weak self] event in
+                        self?.receive(event)
+                    },
+                    onFinish: { [weak self] in
+                        self?.connectionRouteTask = nil
+                    }
+                )
+            )
+
         case .requestDisconnect:
             replaceTask(
                 &disconnectTask,

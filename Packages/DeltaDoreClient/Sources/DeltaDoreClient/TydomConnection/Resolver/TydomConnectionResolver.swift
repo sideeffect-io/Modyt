@@ -97,6 +97,14 @@ struct TydomConnectionResolver: Sendable {
                 remoteConnectTimeout: 6.0
             )
 
+            static let storedLocalPreferredFlow = Self(
+                discoveryTimeout: 2.0,
+                probeTimeout: 0.35,
+                infoTimeout: 10.0,
+                localConnectTimeout: 10.0,
+                remoteConnectTimeout: 6.0
+            )
+
             func timeout(for mode: TydomConnection.Configuration.Mode) -> TimeInterval {
                 switch mode {
                 case .local:
@@ -114,9 +122,13 @@ struct TydomConnectionResolver: Sendable {
         let cloudCredentials: TydomConnection.CloudCredentials?
         let siteIndex: Int?
         let allowInsecureTLS: Bool?
-        let timeout: TimeInterval
         let timings: Timings
+        let preferFreshLocalDiscovery: Bool
         let onDecision: (@Sendable (TydomConnectionState.Decision) async -> Void)?
+
+        var allowUnvalidatedLocalFallback: Bool {
+            mode == .auto && preferFreshLocalDiscovery == false
+        }
 
         init(
             mode: Mode,
@@ -128,6 +140,7 @@ struct TydomConnectionResolver: Sendable {
             allowInsecureTLS: Bool? = nil,
             timeout: TimeInterval = 10.0,
             timings: Timings? = nil,
+            preferFreshLocalDiscovery: Bool = false,
             onDecision: (@Sendable (TydomConnectionState.Decision) async -> Void)? = nil
         ) {
             self.mode = mode
@@ -137,8 +150,8 @@ struct TydomConnectionResolver: Sendable {
             self.cloudCredentials = cloudCredentials
             self.siteIndex = siteIndex
             self.allowInsecureTLS = allowInsecureTLS
-            self.timeout = timeout
             self.timings = timings ?? Timings(timeout: timeout)
+            self.preferFreshLocalDiscovery = preferFreshLocalDiscovery
             self.onDecision = onDecision
         }
     }
@@ -214,11 +227,16 @@ struct TydomConnectionResolver: Sendable {
             options: options,
             selectSiteIndex: selectSiteIndex
         )
+        let stateMachineCredentials = normalizedCredentials(
+            credentials,
+            for: options
+        )
 
         let cache = CredentialsCache(initial: credentials)
         let onDisconnect = makeOnDisconnect()
         let dependencies = makeOrchestratorDependencies(
             options: options,
+            initialCredentials: stateMachineCredentials,
             cache: cache,
             onDisconnect: onDisconnect
         )
@@ -391,6 +409,7 @@ struct TydomConnectionResolver: Sendable {
 
     private func makeOrchestratorDependencies(
         options: Options,
+        initialCredentials: TydomGatewayCredentials,
         cache: CredentialsCache,
         onDisconnect: @escaping @Sendable () async -> Void
     ) -> TydomConnectionOrchestrator.Dependencies {
@@ -427,7 +446,7 @@ struct TydomConnectionResolver: Sendable {
 
         return TydomConnectionOrchestrator.Dependencies(
             loadCredentials: {
-                await cache.get()
+                initialCredentials
             },
             saveCredentials: { credentials in
                 let gatewayId = TydomMac.normalize(credentials.mac)
@@ -445,10 +464,11 @@ struct TydomConnectionResolver: Sendable {
                     probeTimeout: timings.probeTimeout,
                     probeConcurrency: 256,
                     probePorts: [443],
-                    infoTimeout: timings.infoTimeout,
+                    infoTimeout: max(timings.infoTimeout, timings.localConnectTimeout),
                     infoConcurrency: 32,
                     allowInsecureTLS: allowInsecureTLS ?? true,
-                    validateWithInfo: true
+                    validateWithInfo: true,
+                    allowUnvalidatedFallback: options.allowUnvalidatedLocalFallback
                 )
                 let candidates = await discovery.discover(
                     credentials: credentials,
@@ -505,6 +525,22 @@ struct TydomConnectionResolver: Sendable {
                 timeout: options.timings.timeout(for: decision.mode)
             )
         }
+    }
+
+    private func normalizedCredentials(
+        _ credentials: TydomGatewayCredentials,
+        for options: Options
+    ) -> TydomGatewayCredentials {
+        guard options.preferFreshLocalDiscovery else {
+            return credentials
+        }
+
+        return TydomGatewayCredentials(
+            mac: credentials.mac,
+            password: credentials.password,
+            cachedLocalIP: nil,
+            updatedAt: credentials.updatedAt
+        )
     }
 }
 

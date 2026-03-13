@@ -111,8 +111,8 @@ struct MainReducerTransitionTests {
         .init(
             initial: .reconnectionIsInProgress,
             event: .reconnectionWasSuccessful,
-            expected: .gatewayHandlingIsStarting,
-            expectedEffects: [.handleGatewayMessages]
+            expected: .featureIsStarted,
+            expectedEffects: []
         )
     ]
 }
@@ -249,12 +249,12 @@ struct MainStoreEffectTests {
     }
 
     @Test
-    func reconnectionSuccessAndRefreshSuccessReturnToFeatureStartedAndSetAppActive() async {
-        let setActiveCalls = Counter()
+    func reconnectionSuccessReturnsDirectlyToFeatureStarted() async {
+        let gatewayMessagesCounter = Counter()
         let store = makeStore(
-            handleGatewayMessages: { .gatewayHandlingWasSuccessful },
-            setAppActive: {
-                await setActiveCalls.increment()
+            handleGatewayMessages: {
+                await gatewayMessagesCounter.increment()
+                return .gatewayHandlingWasSuccessful
             },
             checkGatewayConnection: { .reconnectionWasRequested },
             reconnectToGateway: { .reconnectionWasSuccessful }
@@ -273,21 +273,15 @@ struct MainStoreEffectTests {
                 store.state.featureState == .featureIsStarted
             }
         )
-        #expect(await waitUntilAsync {
-            await setActiveCalls.value() >= 1
-        })
+        #expect(await gatewayMessagesCounter.value() == 1)
     }
 
     @Test
-    func reconnectionSuccessAndRefreshFailureEndsInRefreshingDataError() async {
-        let gatewayMessagesCounter = Counter()
+    func reconnectionRefreshFailureEndsInReconnectionError() async {
         let store = makeStore(
-            handleGatewayMessages: {
-                let count = await gatewayMessagesCounter.incrementAndGet()
-                return count == 1 ? .gatewayHandlingWasSuccessful : .gatewayHandlingWasAFailure
-            },
+            handleGatewayMessages: { .gatewayHandlingWasSuccessful },
             checkGatewayConnection: { .reconnectionWasRequested },
-            reconnectToGateway: { .reconnectionWasSuccessful }
+            reconnectToGateway: { .reconnectionWasAFailure }
         )
 
         store.send(.startingGatewayHandlingWasRequested)
@@ -299,7 +293,7 @@ struct MainStoreEffectTests {
         store.send(.appActiveWasReceived)
         #expect(
             await waitUntil(cycles: 80) {
-                store.state.featureState == .gatewayHandlingIsInError
+                store.state.featureState == .reconnectionIsInError
             }
         )
     }

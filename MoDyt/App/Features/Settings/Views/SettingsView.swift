@@ -48,12 +48,14 @@ struct SettingsView: View {
     }
 
     @Environment(\.settingsStoreFactory) private var settingsStoreFactory
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
 
     let onDidDisconnect: @MainActor () -> Void
 
     @State private var hasAnimatedIn = false
+    @State private var isVisible = false
 
     var body: some View {
         WithStoreView(
@@ -77,7 +79,16 @@ struct SettingsView: View {
                 .sensoryFeedback(.warning, trigger: store.state.errorMessage)
             }
             .onAppear {
+                isVisible = true
                 startAnimationsIfNeeded()
+                store.send(.connectionRouteRefreshRequested)
+            }
+            .onDisappear {
+                isVisible = false
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                guard isVisible, newPhase == .active else { return }
+                store.send(.connectionRouteRefreshRequested)
             }
             .onChange(of: store.state.didDisconnect) { _, didDisconnect in
                 guard didDisconnect else { return }
@@ -266,6 +277,12 @@ struct SettingsView: View {
 
             VStack(spacing: 14) {
                 SettingsInfoCard(
+                    title: "Current route",
+                    message: connectionRouteMessage(for: store.state),
+                    systemImage: connectionRouteSymbol(for: store.state)
+                )
+
+                SettingsInfoCard(
                     title: "What happens next",
                     message: "The active gateway session closes on this device, then the sign-in flow becomes available immediately.",
                     systemImage: "rectangle.portrait.and.arrow.right"
@@ -388,6 +405,36 @@ struct SettingsView: View {
             return "exclamationmark.circle.fill"
         }
         return "checkmark.circle.fill"
+    }
+
+    private func connectionRouteMessage(for state: SettingsState) -> String {
+        if state.isRefreshingConnectionRoute {
+            return "Refreshing the current gateway route for this device."
+        }
+
+        switch state.connectionRoute {
+        case .local(let host):
+            return "Connected on the local network via \(host)."
+        case .remote(let host):
+            return "Connected through the remote relay via \(host)."
+        case .unavailable:
+            return "No active gateway route is available on this device right now."
+        }
+    }
+
+    private func connectionRouteSymbol(for state: SettingsState) -> String {
+        if state.isRefreshingConnectionRoute {
+            return "arrow.clockwise.circle"
+        }
+
+        switch state.connectionRoute {
+        case .local:
+            return "wifi"
+        case .remote:
+            return "globe"
+        case .unavailable:
+            return "slash.circle"
+        }
     }
 
     private var heroPanelGradient: LinearGradient {

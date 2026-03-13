@@ -29,3 +29,33 @@ import Testing
     #expect(candidates.first?.host == "192.168.1.20")
     #expect(candidates.first?.method == .cachedIP)
 }
+
+@Test func gatewayDiscovery_strictValidationReturnsNoCandidatesWhenInfoProbeFails() async {
+    // Given
+    let dependencies = TydomGatewayDiscovery.Dependencies(
+        subnetHosts: { ["192.168.1.20"] },
+        probeHost: { _, _, _ in true },
+        probeWebSocketInfo: { _, _, _, _, _ in false }
+    )
+    let discovery = TydomGatewayDiscovery(dependencies: dependencies)
+    let config = TydomGatewayDiscoveryConfig(
+        validateWithInfo: true,
+        allowUnvalidatedFallback: false
+    )
+    let credentials = TydomGatewayCredentials(
+        mac: "AA:BB:CC:DD:EE:FF",
+        password: "test",
+        cachedLocalIP: "192.168.1.20",
+        updatedAt: Date()
+    )
+
+    // When
+    let candidates = await discovery.discover(
+        credentials: credentials,
+        cachedIP: "192.168.1.20",
+        config: config
+    )
+
+    // Then
+    #expect(candidates.isEmpty)
+}

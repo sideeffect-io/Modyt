@@ -119,9 +119,7 @@ actor MainRuntime {
 
     func handleGatewayMessages() async -> MainEvent {
         do {
-            try await router.startIfNeeded()
-            startGatewayMessagesHandling()
-            try await requestGatewayData()
+            try await prepareGatewayHandling(restartStream: false)
             return .gatewayHandlingWasSuccessful
         } catch {
             if error is CancellationError {
@@ -148,31 +146,24 @@ actor MainRuntime {
     }
 
     func checkGatewayConnection() async -> MainEvent? {
-        do {
-            let renewal = try await gatewayClient.renewStoredConnectionIfNeeded(
-                preferLocal: true,
-                livenessTimeout: 2.0
-            )
-            if renewal == .reconnected {
-                cancelMessageStream()
-                startGatewayMessagesHandling()
-                try await requestGatewayData()
-            }
+        let isAlive = await gatewayClient.isCurrentConnectionAlive(timeout: 2.0)
+        if isAlive {
             await gatewayClient.setCurrentConnectionAppActive(true)
             return nil
-        } catch {
-            cancelMessageStream()
-            if error is CancellationError {
-                return .reconnectionWasRequested
-            }
-            log("MainRuntime checkGatewayConnection failed error=\(error)")
         }
+
+        cancelMessageStream()
         return .reconnectionWasRequested
     }
 
     func reconnectToGateway() async -> MainEvent {
         do {
-            _ = try await gatewayClient.connectWithStoredCredentials(options: .init(mode: .auto))
+            _ = try await gatewayClient.renewStoredConnectionIfNeeded(
+                preferLocal: true,
+                livenessTimeout: 2.0
+            )
+            try await prepareGatewayHandling(restartStream: true)
+            await gatewayClient.setCurrentConnectionAppActive(true)
             return .reconnectionWasSuccessful
         } catch {
             if error is CancellationError {
@@ -194,6 +185,15 @@ actor MainRuntime {
             }
         )
         try await pipeline.run()
+    }
+
+    private func prepareGatewayHandling(restartStream: Bool) async throws {
+        try await router.startIfNeeded()
+        if restartStream {
+            cancelMessageStream()
+        }
+        startGatewayMessagesHandling()
+        try await requestGatewayData()
     }
 
     private func startGatewayMessagesHandling() {

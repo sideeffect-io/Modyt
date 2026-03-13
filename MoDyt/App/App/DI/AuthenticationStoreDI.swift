@@ -33,7 +33,10 @@ struct AuthenticationStoreFactory: Sendable {
                 ),
                 connectStored: .init(
                     connectStored: {
-                        _ = try await gatewayClient.connectWithStoredCredentials(options: .init())
+                        _ = try await gatewayClient.renewStoredConnectionIfNeeded(
+                            preferLocal: true,
+                            livenessTimeout: 2.0
+                        )
                     }
                 ),
                 listSites: .init(

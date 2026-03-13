@@ -44,11 +44,7 @@ public extension DeltaDoreClient.Dependencies {
                 return .connectWithNewCredentials
             },
             connectStored: { options in
-                let resolverOptions = TydomConnectionResolver.Options(
-                    mode: mapStoredMode(options.mode),
-                    credentialPolicy: .useStoredDataOnly,
-                    timings: storedResolverTimings(for: options.mode)
-                )
+                let resolverOptions = makeStoredResolverOptions(for: options.mode)
                 let resolution = try await resolver.resolve(resolverOptions)
                 return try await buildSession(resolution)
             },
@@ -103,21 +99,23 @@ public extension DeltaDoreClient {
     }
 }
 
-private func storedResolverTimings(
+func makeStoredResolverOptions(
     for mode: DeltaDoreClient.StoredCredentialsFlowOptions.Mode
-) -> TydomConnectionResolver.Options.Timings {
+) -> TydomConnectionResolver.Options {
+    let timings: TydomConnectionResolver.Options.Timings
     switch mode {
     case .auto, .forceLocal:
-        return .silentStoredFlow
+        timings = .storedLocalPreferredFlow
     case .forceRemote:
-        return .init(
-            discoveryTimeout: 2.0,
-            probeTimeout: 0.35,
-            infoTimeout: 1.0,
-            localConnectTimeout: 1.5,
-            remoteConnectTimeout: 6.0
-        )
+        timings = .silentStoredFlow
     }
+
+    return TydomConnectionResolver.Options(
+        mode: mapStoredMode(mode),
+        credentialPolicy: .useStoredDataOnly,
+        timings: timings,
+        preferFreshLocalDiscovery: mode == .auto
+    )
 }
 
 private func probeConnectionWithRetry(
@@ -145,7 +143,7 @@ func connectAndValidate(
     _ connection: TydomConnection,
     configuration: TydomConnection.Configuration
 ) async throws {
-    let validationTimeout = max(0.5, min(configuration.timeout, 2.0))
+    let validationTimeout = validationTimeout(for: configuration)
     do {
         try await connection.connect(
             startReceiving: false,
@@ -158,4 +156,10 @@ func connectAndValidate(
         await connection.disconnect(shouldNotifyOnDisconnect: false)
         throw error
     }
+}
+
+func validationTimeout(
+    for configuration: TydomConnection.Configuration
+) -> TimeInterval {
+    max(0.5, configuration.timeout)
 }

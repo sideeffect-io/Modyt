@@ -101,6 +101,28 @@ import Testing
     #expect(actions.contains(.discoverLocal))
 }
 
+@Test func stateMachine_overrideLocalUsesFreshDiscoveryEvenWithCachedIP() async {
+    // Given
+    let credentials = TydomGatewayCredentials(
+        mac: "AABBCCDDEEFF",
+        password: "pass",
+        cachedLocalIP: "192.168.1.10",
+        updatedAt: Date()
+    )
+    let state = TydomConnectionState(phase: .loadingCredentials, override: .forceLocal, credentials: credentials)
+
+    // When
+    let (next, actions) = TydomConnectionStateMachine.reduce(
+        state: state,
+        event: .credentialsLoaded(credentials)
+    )
+
+    // Then
+    #expect(next.phase == .discoveringLocal)
+    #expect(actions.contains(.discoverLocal))
+    #expect(actions.contains(.tryCachedIP("192.168.1.10")) == false)
+}
+
 @Test func stateMachine_overrideLocalFailsWhenDiscoveryFindsNoGateway() async {
     // Given
     let credentials = TydomGatewayCredentials(

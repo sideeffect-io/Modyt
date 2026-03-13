@@ -20,6 +20,7 @@ public struct TydomGatewayDiscoveryConfig: Sendable, Equatable {
     public let infoConcurrency: Int
     public let allowInsecureTLS: Bool
     public let validateWithInfo: Bool
+    public let allowUnvalidatedFallback: Bool
 
     public init(
         discoveryTimeout: TimeInterval = 4,
@@ -29,7 +30,8 @@ public struct TydomGatewayDiscoveryConfig: Sendable, Equatable {
         infoTimeout: TimeInterval = 6,
         infoConcurrency: Int = 16,
         allowInsecureTLS: Bool = true,
-        validateWithInfo: Bool = true
+        validateWithInfo: Bool = true,
+        allowUnvalidatedFallback: Bool = true
     ) {
         self.discoveryTimeout = discoveryTimeout
         self.probeTimeout = probeTimeout
@@ -39,6 +41,7 @@ public struct TydomGatewayDiscoveryConfig: Sendable, Equatable {
         self.infoConcurrency = infoConcurrency
         self.allowInsecureTLS = allowInsecureTLS
         self.validateWithInfo = validateWithInfo
+        self.allowUnvalidatedFallback = allowUnvalidatedFallback
     }
 }
 
@@ -130,7 +133,12 @@ public struct TydomGatewayDiscovery: Sendable {
                 dependencies.log("Discovery websocket validation ok hosts=\(validated.map { $0.host })")
                 return validated
             }
-            dependencies.log("Discovery websocket validation found 0 hosts (falling back to unvalidated candidates)")
+            if config.allowUnvalidatedFallback {
+                dependencies.log("Discovery websocket validation found 0 hosts (falling back to unvalidated candidates)")
+            } else {
+                dependencies.log("Discovery websocket validation found 0 hosts (strict mode, returning no candidates)")
+                return []
+            }
         }
         dependencies.log("Discovery returning candidates (no websocket verification step)")
         return unique
@@ -169,6 +177,7 @@ public struct TydomGatewayDiscovery: Sendable {
     ) async -> [TydomLocalGateway] {
         guard candidates.isEmpty == false else { return [] }
         let concurrency = max(config.infoConcurrency, 1)
+        let log = dependencies.log
         var iterator = candidates.makeIterator()
         return await withTaskGroup(of: TydomLocalGateway?.self) { group in
             let initial = min(concurrency, candidates.count)
@@ -176,6 +185,7 @@ public struct TydomGatewayDiscovery: Sendable {
                 if let candidate = iterator.next() {
                     group.addTask {
                         let ok = await probeInfo(host: candidate.host, credentials: credentials, config: config)
+                        log("Discovery validation host=\(candidate.host) ok=\(ok)")
                         return ok ? candidate : nil
                     }
                 }
@@ -189,6 +199,7 @@ public struct TydomGatewayDiscovery: Sendable {
                 if let candidate = iterator.next() {
                     group.addTask {
                         let ok = await probeInfo(host: candidate.host, credentials: credentials, config: config)
+                        log("Discovery validation host=\(candidate.host) ok=\(ok)")
                         return ok ? candidate : nil
                     }
                 }

@@ -286,7 +286,10 @@ public actor TydomConnection {
     }
 
 #if canImport(Network)
-    private func startNWConnection(_ connection: NWConnection) async throws {
+    private func startNWConnection(
+        _ connection: NWConnection,
+        timeout: TimeInterval
+    ) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let gate = ConnectionGate()
             connection.stateUpdateHandler = { state in
@@ -303,6 +306,10 @@ public actor TydomConnection {
                 }
             }
             connection.start(queue: nwQueue)
+            nwQueue.asyncAfter(deadline: .now() + timeout) {
+                connection.cancel()
+                gate.resumeOnce(continuation, result: .failure(ConnectionError.receiveFailed))
+            }
         }
     }
 
@@ -337,7 +344,7 @@ public actor TydomConnection {
             port: NWEndpoint.Port(rawValue: 443)!,
             using: parameters
         )
-        try await startNWConnection(connection)
+        try await startNWConnection(connection, timeout: timeout)
 
         let request = buildDigestChallengeRequest(includeUpgradeHeaders: includeUpgradeHeaders)
         try await sendRaw(connection: connection, data: Data(request.utf8))

@@ -98,8 +98,8 @@ final class MainStore: StartableStore {
                 return .init(state: state, effects: [.disconnect])
 
             case (.reconnectionIsInProgress, .reconnectionWasSuccessful):
-                state.featureState = .gatewayHandlingIsStarting
-                return .init(state: state, effects: [.handleGatewayMessages])
+                state.featureState = .featureIsStarted
+                return .init(state: state)
 
             default:
                 return .init(state: state)

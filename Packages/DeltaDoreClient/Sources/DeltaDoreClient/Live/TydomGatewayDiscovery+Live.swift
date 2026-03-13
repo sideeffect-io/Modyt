@@ -2,7 +2,6 @@ import Foundation
 
 #if canImport(Network)
 import Network
-import Security
 import os
 
 public extension TydomGatewayDiscovery.Dependencies {
@@ -20,9 +19,9 @@ public extension TydomGatewayDiscovery.Dependencies {
                 await WebSocketProbe.probeInfo(
                     host: host,
                     mac: mac,
-                    password: password,
                     allowInsecureTLS: allowInsecureTLS,
-                    timeout: timeout
+                    timeout: timeout,
+                    log: log
                 )
             },
             log: log
@@ -89,14 +88,13 @@ private enum WebSocketProbe {
     static func probeInfo(
         host: String,
         mac: String,
-        password: String,
         allowInsecureTLS: Bool,
-        timeout: TimeInterval
+        timeout: TimeInterval,
+        log: @escaping @Sendable (String) -> Void
     ) async -> Bool {
         let normalizedMac = TydomMac.normalize(mac)
         let path = "/mediation/client?mac=\(normalizedMac)&appli=1"
-        guard let httpsURL = URL(string: "https://\(host):443\(path)"),
-              let wsURL = URL(string: "wss://\(host):443\(path)") else {
+        guard let url = URL(string: "https://\(host):443\(path)") else {
             return false
         }
 
@@ -105,98 +103,104 @@ private enum WebSocketProbe {
         sessionConfig.timeoutIntervalForResource = timeout
         let delegate = InsecureTLSDelegate(allowInsecureTLS: allowInsecureTLS, credential: nil)
         let session = URLSession(configuration: sessionConfig, delegate: delegate, delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
 
         do {
-            let challenge = try await fetchDigestChallenge(session: session, url: httpsURL, host: host, timeout: timeout)
-            let authorization = try DigestAuthorizationBuilder.build(
-                challenge: challenge,
-                username: normalizedMac,
-                password: password,
-                method: "GET",
-                uri: path,
-                randomBytes: { count in
-                    (0..<count).map { _ in UInt8.random(in: UInt8.min...UInt8.max) }
-                }
+            _ = try await fetchDigestChallenge(
+                using: session,
+                url: url,
+                host: host,
+                includeUpgradeHeaders: true,
+                log: log
             )
-
-            var request = URLRequest(url: wsURL)
-            request.timeoutInterval = timeout
-            request.setValue(authorization, forHTTPHeaderField: "Authorization")
-
-            let task = session.webSocketTask(with: request)
-            task.resume()
-
-            defer {
-                task.cancel(with: .goingAway, reason: nil)
-                session.finishTasksAndInvalidate()
-            }
-
-            let pingRequest = Data(TydomCommand.ping().request.utf8)
-            try await withTimeout(timeout) {
-                try await task.send(.data(pingRequest))
-            }
-
-            _ = try await withTimeout(timeout) {
-                try await task.receive()
-            }
+            log("Discovery validation accepted host=\(host) method=upgrade")
             return true
         } catch {
+            log("Discovery validation upgrade failed host=\(host) error=\(error)")
+        }
+
+        do {
+            _ = try await fetchDigestChallenge(
+                using: session,
+                url: url,
+                host: host,
+                includeUpgradeHeaders: false,
+                log: log
+            )
+            log("Discovery validation accepted host=\(host) method=plain")
+            return true
+        } catch {
+            log("Discovery validation plain failed host=\(host) error=\(error)")
             return false
         }
     }
 
     private static func fetchDigestChallenge(
-        session: URLSession,
+        using session: URLSession,
         url: URL,
         host: String,
-        timeout: TimeInterval
+        includeUpgradeHeaders: Bool,
+        log: @escaping @Sendable (String) -> Void
     ) async throws -> DigestChallenge {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.timeoutInterval = timeout
-        request.setValue("Upgrade", forHTTPHeaderField: "Connection")
-        request.setValue("websocket", forHTTPHeaderField: "Upgrade")
-        request.setValue("\(host):443", forHTTPHeaderField: "Host")
-        request.setValue("*/*", forHTTPHeaderField: "Accept")
-        request.setValue(WebSocketKeyGenerator.generate(), forHTTPHeaderField: "Sec-WebSocket-Key")
-        request.setValue("13", forHTTPHeaderField: "Sec-WebSocket-Version")
+        let headers = buildHeaders(host: host, includeUpgradeHeaders: includeUpgradeHeaders)
+        for (key, value) in headers {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
 
         let (_, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
+        guard let httpResponse = response as? HTTPURLResponse else {
             throw TydomConnection.ConnectionError.invalidResponse
         }
-        guard let rawHeader = http.value(forHTTPHeaderField: "WWW-Authenticate") else {
+
+        let status = httpResponse.statusCode
+        log("Discovery validation response host=\(host) status=\(status) includeUpgrade=\(includeUpgradeHeaders)")
+
+        let rawHeader = httpResponse.value(forHTTPHeaderField: "WWW-Authenticate")
+            ?? httpResponse.allHeaderFields.first { key, _ in
+                String(describing: key).lowercased() == "www-authenticate"
+            }.flatMap { _, value in
+                normalizeHeaderValue(value)
+            }
+        guard let rawHeader else {
             throw TydomConnection.ConnectionError.missingChallenge
         }
         return try DigestChallenge.parse(from: rawHeader)
     }
 
-    // Intentionally no response parsing; any reply is enough to validate connectivity.
-}
+    private static func buildHeaders(
+        host: String,
+        includeUpgradeHeaders: Bool
+    ) -> [String: String] {
+        var headers: [String: String] = [
+            "Host": "\(host):443",
+            "Accept": "*/*"
+        ]
+        guard includeUpgradeHeaders else { return headers }
 
-private enum WebSocketKeyGenerator {
-    static func generate() -> String {
-        var bytes = [UInt8](repeating: 0, count: 16)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        return Data(bytes).base64EncodedString()
+        headers["Connection"] = "Upgrade"
+        headers["Upgrade"] = "websocket"
+        headers["Sec-WebSocket-Version"] = "13"
+        headers["Sec-WebSocket-Key"] = Data((0..<16).map { UInt8($0) }).base64EncodedString()
+        return headers
     }
-}
 
-private func withTimeout<T: Sendable>(
-    _ seconds: TimeInterval,
-    operation: @Sendable @escaping () async throws -> T
-) async throws -> T {
-    try await withThrowingTaskGroup(of: T.self) { group in
-        group.addTask {
-            try await operation()
+    private static func normalizeHeaderValue(_ raw: Any) -> String? {
+        if let text = raw as? String {
+            return text
         }
-        group.addTask {
-            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-            throw TydomConnection.ConnectionError.receiveFailed
+        if let values = raw as? [String], values.isEmpty == false {
+            return values.joined(separator: ", ")
         }
-        let result = try await group.next()!
-        group.cancelAll()
-        return result
+        if let values = raw as? [Any], values.isEmpty == false {
+            let joined = values
+                .map { String(describing: $0) }
+                .joined(separator: ", ")
+            return joined.isEmpty ? nil : joined
+        }
+        let text = String(describing: raw)
+        return text.isEmpty ? nil : text
     }
 }
 

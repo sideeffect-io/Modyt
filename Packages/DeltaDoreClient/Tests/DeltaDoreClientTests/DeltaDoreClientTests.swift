@@ -73,45 +73,38 @@ import Testing
     #expect(signal != nil)
 }
 
-@Test func deltaDoreClient_renewStoredConnectionIfNeededUpgradesRemoteToLocal() async throws {
-    // Given
-    let remoteConnection = makeConnection(mode: .remote(host: "mediation.tydom.com"))
-    let localConnection = makeConnection(mode: .local(host: "192.168.1.10"))
-    let recorder = StoredModeRecorder()
-    let dependencies = DeltaDoreClient.Dependencies(
-        inspectFlow: { .connectWithStoredCredentials },
-        connectStored: { options in
-            await recorder.record(options.mode)
-            switch options.mode {
-            case .forceRemote:
-                return DeltaDoreClient.ConnectionSession(connection: remoteConnection)
-            case .forceLocal, .auto:
-                return DeltaDoreClient.ConnectionSession(connection: localConnection)
-            }
-        },
-        connectNew: { _, _ in
-            DeltaDoreClient.ConnectionSession(connection: remoteConnection)
-        },
-        listSites: { _ in [] },
-        listSitesPayload: { _ in Data() },
-        clearStoredData: {},
-        probeConnection: { connection, _ in
-            await connection.mode() == .remote(host: "mediation.tydom.com")
-        }
-    )
-    let client = DeltaDoreClient(dependencies: dependencies)
-    _ = try await client.connectWithStoredCredentials(options: .init(mode: .forceRemote))
+@Test func storedResolverOptions_autoUsesFreshValidatedLocalDiscovery() {
+    let options = makeStoredResolverOptions(for: .auto)
 
-    // When
-    let result = try await client.renewStoredConnectionIfNeeded()
-
-    // Then
-    #expect(result == .reconnected)
-    #expect(await client.currentConnectionMode() == .local(host: "192.168.1.10"))
-    #expect(await recorder.labels() == ["forceRemote", "forceLocal"])
+    #expect(options.mode == .auto)
+    #expect(options.timings == .storedLocalPreferredFlow)
+    #expect(options.preferFreshLocalDiscovery)
+    #expect(!options.allowUnvalidatedLocalFallback)
 }
 
-@Test func deltaDoreClient_renewStoredConnectionIfNeededKeepsAliveRemoteConnectionWhenLocalFails() async throws {
+@Test func validationTimeout_usesFullConfiguredTimeoutForNominalLocalConnection() {
+    let configuration = TydomConnection.Configuration(
+        mode: .local(host: "192.168.1.10"),
+        mac: "AA:BB:CC:DD:EE:FF",
+        password: "pass",
+        timeout: 10.0
+    )
+
+    #expect(validationTimeout(for: configuration) == 10.0)
+}
+
+@Test func validationTimeout_keepsMinimumProbeBudget() {
+    let configuration = TydomConnection.Configuration(
+        mode: .local(host: "192.168.1.10"),
+        mac: "AA:BB:CC:DD:EE:FF",
+        password: "pass",
+        timeout: 0.1
+    )
+
+    #expect(validationTimeout(for: configuration) == 0.5)
+}
+
+@Test func deltaDoreClient_renewStoredConnectionIfNeededKeepsHealthyRemoteConnection() async throws {
     // Given
     let remoteConnection = makeConnection(mode: .remote(host: "mediation.tydom.com"))
     let recorder = StoredModeRecorder()
@@ -123,7 +116,7 @@ import Testing
             case .forceRemote:
                 return DeltaDoreClient.ConnectionSession(connection: remoteConnection)
             case .forceLocal:
-                throw TestFailure.localUnavailable
+                throw TestFailure.unexpectedLocalReconnect
             case .auto:
                 throw TestFailure.unexpectedAutoReconnect
             }
@@ -147,53 +140,13 @@ import Testing
     // Then
     #expect(result == .unchanged)
     #expect(await client.currentConnectionMode() == .remote(host: "mediation.tydom.com"))
-    #expect(await recorder.labels() == ["forceRemote", "forceLocal"])
+    #expect(await recorder.labels() == ["forceRemote"])
 }
 
-@Test func deltaDoreClient_renewStoredConnectionIfNeededKeepsCurrentRemoteWhenForceLocalFallsBackToRemote() async throws {
-    // Given
-    let currentRemoteConnection = makeConnection(mode: .remote(host: "current.tydom.com"))
-    let fallbackRemoteConnection = makeConnection(mode: .remote(host: "fallback.tydom.com"))
-    let recorder = StoredModeRecorder()
-    let dependencies = DeltaDoreClient.Dependencies(
-        inspectFlow: { .connectWithStoredCredentials },
-        connectStored: { options in
-            await recorder.record(options.mode)
-            switch options.mode {
-            case .forceRemote:
-                return DeltaDoreClient.ConnectionSession(connection: currentRemoteConnection)
-            case .forceLocal:
-                return DeltaDoreClient.ConnectionSession(connection: fallbackRemoteConnection)
-            case .auto:
-                throw TestFailure.unexpectedAutoReconnect
-            }
-        },
-        connectNew: { _, _ in
-            DeltaDoreClient.ConnectionSession(connection: currentRemoteConnection)
-        },
-        listSites: { _ in [] },
-        listSitesPayload: { _ in Data() },
-        clearStoredData: {},
-        probeConnection: { connection, _ in
-            await connection.mode() == .remote(host: "current.tydom.com")
-        }
-    )
-    let client = DeltaDoreClient(dependencies: dependencies)
-    _ = try await client.connectWithStoredCredentials(options: .init(mode: .forceRemote))
-
-    // When
-    let result = try await client.renewStoredConnectionIfNeeded()
-
-    // Then
-    #expect(result == .unchanged)
-    #expect(await client.currentConnectionMode() == .remote(host: "current.tydom.com"))
-    #expect(await recorder.labels() == ["forceRemote", "forceLocal"])
-}
-
-@Test func deltaDoreClient_renewStoredConnectionIfNeededFallsBackToAutoWhenCurrentConnectionIsDead() async throws {
+@Test func deltaDoreClient_renewStoredConnectionIfNeededReconnectsDeadRemoteLocally() async throws {
     // Given
     let remoteConnection = makeConnection(mode: .remote(host: "mediation.tydom.com"))
-    let recoveredConnection = makeConnection(mode: .local(host: "192.168.1.20"))
+    let localConnection = makeConnection(mode: .local(host: "192.168.1.10"))
     let recorder = StoredModeRecorder()
     let dependencies = DeltaDoreClient.Dependencies(
         inspectFlow: { .connectWithStoredCredentials },
@@ -203,9 +156,9 @@ import Testing
             case .forceRemote:
                 return DeltaDoreClient.ConnectionSession(connection: remoteConnection)
             case .forceLocal:
-                throw TestFailure.localUnavailable
+                throw TestFailure.unexpectedLocalReconnect
             case .auto:
-                return DeltaDoreClient.ConnectionSession(connection: recoveredConnection)
+                return DeltaDoreClient.ConnectionSession(connection: localConnection)
             }
         },
         connectNew: { _, _ in
@@ -224,8 +177,82 @@ import Testing
 
     // Then
     #expect(result == .reconnected)
-    #expect(await client.currentConnectionMode() == .local(host: "192.168.1.20"))
-    #expect(await recorder.labels() == ["forceRemote", "forceLocal", "auto"])
+    #expect(await client.currentConnectionMode() == .local(host: "192.168.1.10"))
+    #expect(await recorder.labels() == ["forceRemote", "auto"])
+}
+
+@Test func deltaDoreClient_renewStoredConnectionIfNeededFallsBackToRemoteWhenDeadConnectionCannotReconnectLocally() async throws {
+    // Given
+    let currentRemoteConnection = makeConnection(mode: .remote(host: "current.tydom.com"))
+    let recoveredRemoteConnection = makeConnection(mode: .remote(host: "recovered.tydom.com"))
+    let recorder = StoredModeRecorder()
+    let dependencies = DeltaDoreClient.Dependencies(
+        inspectFlow: { .connectWithStoredCredentials },
+        connectStored: { options in
+            await recorder.record(options.mode)
+            switch options.mode {
+            case .forceRemote:
+                return DeltaDoreClient.ConnectionSession(connection: currentRemoteConnection)
+            case .forceLocal:
+                throw TestFailure.localUnavailable
+            case .auto:
+                return DeltaDoreClient.ConnectionSession(connection: recoveredRemoteConnection)
+            }
+        },
+        connectNew: { _, _ in
+            DeltaDoreClient.ConnectionSession(connection: currentRemoteConnection)
+        },
+        listSites: { _ in [] },
+        listSitesPayload: { _ in Data() },
+        clearStoredData: {},
+        probeConnection: { _, _ in false }
+    )
+    let client = DeltaDoreClient(dependencies: dependencies)
+    _ = try await client.connectWithStoredCredentials(options: .init(mode: .forceRemote))
+
+    // When
+    let result = try await client.renewStoredConnectionIfNeeded()
+
+    // Then
+    #expect(result == .reconnected)
+    #expect(await client.currentConnectionMode() == .remote(host: "recovered.tydom.com"))
+    #expect(await recorder.labels() == ["forceRemote", "auto"])
+}
+
+@Test func deltaDoreClient_renewStoredConnectionIfNeededFallsBackToRemoteWhenNoCurrentConnectionExists() async throws {
+    // Given
+    let remoteConnection = makeConnection(mode: .remote(host: "mediation.tydom.com"))
+    let recorder = StoredModeRecorder()
+    let dependencies = DeltaDoreClient.Dependencies(
+        inspectFlow: { .connectWithStoredCredentials },
+        connectStored: { options in
+            await recorder.record(options.mode)
+            switch options.mode {
+            case .forceRemote:
+                return DeltaDoreClient.ConnectionSession(connection: remoteConnection)
+            case .forceLocal:
+                throw TestFailure.localUnavailable
+            case .auto:
+                return DeltaDoreClient.ConnectionSession(connection: remoteConnection)
+            }
+        },
+        connectNew: { _, _ in
+            DeltaDoreClient.ConnectionSession(connection: remoteConnection)
+        },
+        listSites: { _ in [] },
+        listSitesPayload: { _ in Data() },
+        clearStoredData: {},
+        probeConnection: { _, _ in false }
+    )
+    let client = DeltaDoreClient(dependencies: dependencies)
+
+    // When
+    let result = try await client.renewStoredConnectionIfNeeded()
+
+    // Then
+    #expect(result == .reconnected)
+    #expect(await client.currentConnectionMode() == .remote(host: "mediation.tydom.com"))
+    #expect(await recorder.labels() == ["auto"])
 }
 
 private func makeConnection(mode: TydomConnection.Configuration.Mode) -> TydomConnection {
@@ -241,6 +268,7 @@ private func makeConnection(mode: TydomConnection.Configuration.Mode) -> TydomCo
 private enum TestFailure: Error {
     case localUnavailable
     case unexpectedAutoReconnect
+    case unexpectedLocalReconnect
 }
 
 private actor StoredModeRecorder {

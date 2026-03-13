@@ -229,6 +229,129 @@ import Testing
     }
 }
 
+@Test func resolver_forceLocalRefreshesCachedIPFromFreshDiscovery() async throws {
+    // Given
+    let gatewayMac = "AA:BB:CC:DD:EE:FF"
+    let staleHost = "192.168.1.10"
+    let refreshedHost = "192.168.1.20"
+    let credentials = TydomGatewayCredentials(
+        mac: gatewayMac,
+        password: "secret",
+        cachedLocalIP: staleHost,
+        updatedAt: Date()
+    )
+    let gatewayId = TydomMac.normalize(gatewayMac)
+    let credentialStore = TydomGatewayCredentialStore.inMemory(initial: [gatewayId: credentials])
+    let gatewayMacStore = TydomGatewayMacStore.inMemory(initial: gatewayMac)
+    let cloudCredentialStore = TydomCloudCredentialStore.inMemory()
+    let probedHosts = ProbeHostRecorder()
+    let discovery = TydomGatewayDiscovery(dependencies: .init(
+        subnetHosts: { [refreshedHost] },
+        probeHost: { host, _, _ in
+            host == refreshedHost
+        },
+        probeWebSocketInfo: { host, _, _, _, _ in
+            await probedHosts.record(host)
+            return host == refreshedHost
+        },
+        log: { _ in }
+    ))
+    let environment = TydomConnectionResolver.Environment(
+        credentialStore: credentialStore,
+        gatewayMacStore: gatewayMacStore,
+        cloudCredentialStore: cloudCredentialStore,
+        discovery: discovery,
+        remoteHost: "mediation.tydom.com",
+        now: { Date() },
+        makeSession: { URLSession(configuration: .ephemeral) },
+        fetchSites: { _, _ in [] },
+        fetchSitesPayload: { _, _ in Data() },
+        fetchGatewayPassword: { _, _, _, _ in "secret" },
+        connect: { configuration, onDisconnect in
+            TydomConnection(configuration: configuration, onDisconnect: onDisconnect)
+        },
+        log: { _ in }
+    )
+    let resolver = TydomConnectionResolver(environment: environment)
+
+    // When
+    let resolution = try await resolver.resolve(
+        .init(mode: .local, credentialPolicy: .useStoredDataOnly)
+    )
+
+    // Then
+    #expect(resolution.configuration.mode == .local(host: refreshedHost))
+    #expect(resolution.credentials.cachedLocalIP == refreshedHost)
+    let storedCredentials = try await credentialStore.load(gatewayId)
+    #expect(storedCredentials?.cachedLocalIP == refreshedHost)
+    #expect(await probedHosts.values() == [staleHost, refreshedHost])
+}
+
+@Test func resolver_autoCanRefreshCachedIPFromFreshDiscovery() async throws {
+    // Given
+    let gatewayMac = "AA:BB:CC:DD:EE:FF"
+    let staleHost = "192.168.1.10"
+    let refreshedHost = "192.168.1.20"
+    let credentials = TydomGatewayCredentials(
+        mac: gatewayMac,
+        password: "secret",
+        cachedLocalIP: staleHost,
+        updatedAt: Date()
+    )
+    let gatewayId = TydomMac.normalize(gatewayMac)
+    let credentialStore = TydomGatewayCredentialStore.inMemory(initial: [gatewayId: credentials])
+    let gatewayMacStore = TydomGatewayMacStore.inMemory(initial: gatewayMac)
+    let cloudCredentialStore = TydomCloudCredentialStore.inMemory()
+    let probedHosts = ProbeHostRecorder()
+    let connectAttempts = ConnectAttemptRecorder()
+    let discovery = TydomGatewayDiscovery(dependencies: .init(
+        subnetHosts: { [refreshedHost] },
+        probeHost: { host, _, _ in
+            host == staleHost || host == refreshedHost
+        },
+        probeWebSocketInfo: { host, _, _, _, _ in
+            await probedHosts.record(host)
+            return host == refreshedHost
+        },
+        log: { _ in }
+    ))
+    let environment = TydomConnectionResolver.Environment(
+        credentialStore: credentialStore,
+        gatewayMacStore: gatewayMacStore,
+        cloudCredentialStore: cloudCredentialStore,
+        discovery: discovery,
+        remoteHost: "mediation.tydom.com",
+        now: { Date() },
+        makeSession: { URLSession(configuration: .ephemeral) },
+        fetchSites: { _, _ in [] },
+        fetchSitesPayload: { _, _ in Data() },
+        fetchGatewayPassword: { _, _, _, _ in "secret" },
+        connect: { configuration, onDisconnect in
+            await connectAttempts.record(mode: configuration.mode, timeout: configuration.timeout)
+            return TydomConnection(configuration: configuration, onDisconnect: onDisconnect)
+        },
+        log: { _ in }
+    )
+    let resolver = TydomConnectionResolver(environment: environment)
+
+    // When
+    let resolution = try await resolver.resolve(
+        .init(
+            mode: .auto,
+            credentialPolicy: .useStoredDataOnly,
+            preferFreshLocalDiscovery: true
+        )
+    )
+
+    // Then
+    #expect(resolution.configuration.mode == .local(host: refreshedHost))
+    #expect(resolution.credentials.cachedLocalIP == refreshedHost)
+    let storedCredentials = try await credentialStore.load(gatewayId)
+    #expect(storedCredentials?.cachedLocalIP == refreshedHost)
+    #expect(await probedHosts.values() == [staleHost, refreshedHost])
+    #expect(await connectAttempts.values() == ["local:192.168.1.20@10.0"])
+}
+
 @Test func resolver_autoUsesConfiguredLocalAndRemoteTimeouts() async throws {
     // Given
     let gatewayMac = "AA:BB:CC:DD:EE:FF"
@@ -318,6 +441,18 @@ private actor ConnectAttemptRecorder {
         case .remote(let host):
             recorded.append("remote:\(host)@\(timeout)")
         }
+    }
+
+    func values() -> [String] {
+        recorded
+    }
+}
+
+private actor ProbeHostRecorder {
+    private var recorded: [String] = []
+
+    func record(_ host: String) {
+        recorded.append(host)
     }
 
     func values() -> [String] {
