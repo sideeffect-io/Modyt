@@ -97,6 +97,7 @@ extension Device {
             key: key,
             modeKey: lightColorModeKey(forColorKey: key),
             modeValue: lightColorModeValue(forColorKey: key),
+            temperatureKey: key.caseInsensitiveCompare("colorXY") == .orderedSame ? lightColorTemperatureKey() : nil,
             value: value,
             range: lightColorRange(forKey: key)
         )
@@ -158,6 +159,17 @@ extension Device {
         }
 
         return data["colorMode"]?.stringValue
+    }
+
+    private func lightColorTemperatureKey() -> String? {
+        if lightNumericValue(forKey: "miredTemperatureW") != nil
+            || lightNumericValue(forKey: "minMiredTemperatureW") != nil
+            || lightNumericValue(forKey: "maxMiredTemperatureW") != nil
+            || lightMetadataRange(forKey: "miredTemperatureW") != nil {
+            return "miredTemperatureW"
+        }
+
+        return nil
     }
 
     private func isReservedLightColorKey(_ key: String) -> Bool {

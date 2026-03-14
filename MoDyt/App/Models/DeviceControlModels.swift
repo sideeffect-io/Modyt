@@ -105,6 +105,7 @@ struct DrivingLightColorDescriptor: Sendable, Equatable {
     let key: String
     let modeKey: String?
     let modeValue: String?
+    let temperatureKey: String?
     let value: Double
     let range: ClosedRange<Double>
 
@@ -112,15 +113,35 @@ struct DrivingLightColorDescriptor: Sendable, Equatable {
         normalizedValue(forRawValue: Int(value.rounded()))
     }
 
-    func rawValue(forNormalizedValue normalizedValue: Double) -> Int {
+    func payload(forNormalizedValue normalizedValue: Double) -> DrivingLightColorPayload {
         switch encoding {
         case .packedXY:
-            return packedXYRawValue(forNormalizedValue: normalizedValue)
+            if let calibration {
+                let calibratedPayload = calibration.payload(for: normalizedValue)
+                return DrivingLightColorPayload(
+                    rawValue: calibratedPayload.packedXY,
+                    miredTemperatureW: temperatureKey == nil ? nil : calibratedPayload.miredTemperatureW
+                )
+            }
+            return DrivingLightColorPayload(
+                rawValue: packedXYRawValue(forNormalizedValue: normalizedValue),
+                miredTemperatureW: nil
+            )
         case .hueDegrees:
-            return linearRawValue(forNormalizedValue: normalizedValue, in: 0...360)
+            return DrivingLightColorPayload(
+                rawValue: linearRawValue(forNormalizedValue: normalizedValue, in: 0...360),
+                miredTemperatureW: nil
+            )
         case .linear:
-            return linearRawValue(forNormalizedValue: normalizedValue, in: range)
+            return DrivingLightColorPayload(
+                rawValue: linearRawValue(forNormalizedValue: normalizedValue, in: range),
+                miredTemperatureW: nil
+            )
         }
+    }
+
+    func rawValue(forNormalizedValue normalizedValue: Double) -> Int {
+        payload(forNormalizedValue: normalizedValue).rawValue
     }
 
     func normalizedValue(forRawValue rawValue: Int) -> Double {
@@ -133,6 +154,8 @@ struct DrivingLightColorDescriptor: Sendable, Equatable {
             return linearNormalizedValue(forRawValue: rawValue, in: range)
         }
     }
+
+    static let packedXYCalibration = LightColorCalibration.defaultProfile
 
     private enum Encoding {
         case packedXY
@@ -181,9 +204,18 @@ struct DrivingLightColorDescriptor: Sendable, Equatable {
     }
 
     private func normalizedPackedXYValue(forRawValue rawValue: Int) -> Double {
+        if let calibration {
+            return calibration.normalizedValue(forPackedXY: rawValue)
+        }
+
         let xy = Self.xyCoordinates(forPackedValue: rawValue)
         let rgb = Self.rgbComponents(forXY: xy.x, y: xy.y)
         return Self.normalizedHue(for: rgb) ?? DrivingLightControlDescriptor.defaultNormalizedColor
+    }
+
+    private var calibration: LightColorCalibration? {
+        guard encoding == .packedXY else { return nil }
+        return Self.packedXYCalibration
     }
 
     private static func packedXYWord(for coordinate: Double) -> UInt32 {
@@ -308,6 +340,11 @@ struct DrivingLightColorDescriptor: Sendable, Equatable {
 
     private static let packedXYComponentDenominator = 65_536.0
     private static let packedXYComponentWordMax = UInt32(UInt16.max)
+}
+
+struct DrivingLightColorPayload: Sendable, Equatable {
+    let rawValue: Int
+    let miredTemperatureW: Int?
 }
 
 struct DrivingLightControlDescriptor: Sendable, Equatable {

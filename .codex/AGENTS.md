@@ -1,130 +1,207 @@
-# Agents Overview — Swift Home Automation Application
+# MoDyt Agent Guide
 
-This repository implements an iOS/iPadOS/macOS application for controlling a DeltaDore box using a functional programming architecture and strong testability guarantees.  
-Agents working with this repo (AI assistants, automation tools, or new team members) should understand and apply:
+MoDyt is an Apple-platform home automation app for Delta Dore gateways.
 
-- Functional design principles (immutability, pure functions, higher order functions, side effects, composition)
-- How we structure side effects via dependency injection
-- SOLID principles applied in a Swift + functional programming context
-- Testability via injecting functions and capabilities
-- Our Git workflow (linear history, feature branches, fast-forward merges)
+The repository contains:
+- an Xcode app project with the `MoDyt` scheme
+- local Swift packages in `Packages/`
+- a Swift Testing test target in `MoDytTests`
 
-> This high-level overview provides context. Read the doc and find detailed procedural steps and examples through dedicated **Agent Skills**:
-- `$functional-programming-developer` for guidance about architecture, layers, testability, design patterns, dependency injection and functional programming best practices in Swift.
-- `$git-user` for guidance about Git workflow.
-- `$imagegen` for guidance about image generation using the OpenAI API.
-- `$mobile-ios-design` for guidance about how to design mobile apps UI components, about the UX best practices and patterns.
-- `$security-threat-model` for guidance about cybersecurity and threat modeling.
-- `$swift-concurrency-developer` for guidance about the best practices when doing async/concurrent programming in Swift.
-- `$swift-testing-expert` for guidance about testing strategies and best practices in Swift.
-- `$swiftui-expert` for guidance about patterns, syntax, strategy and best practices to write UI components in SwiftUI.
+This file should stay stable and structural. Put volatile implementation learnings in `.codex/KNOWLEDGE_BASE.md`, and remove stale entries when they no longer match the code.
 
----
+## Read Order For A Fresh Session
 
-## Structure
+1. Read `.codex/KNOWLEDGE_BASE.md`.
+2. Read `MoDyt/App/App/MoDytApp.swift`.
+3. Read `MoDyt/App/App/DI/AppCompositionRoot.swift`.
+4. Read `MoDyt/App/App/DI/DependencyBag.swift`.
+5. Read `MoDyt/App/Navigation/AppRoot/Views/AppRootView.swift`.
+6. Read `MoDyt/App/Navigation/MainView/Views/MainView.swift`.
+7. Then move to the feature or package directly related to the task.
 
-- The project is an Xcode project with one production target `MoDyt` and one unit tests target `MoDytTests`.
-- All the local dependencies are Swift Packages in the `Packages` folder.
-- The Swift Package `Packages/DeltaDoreClient` should be used to interface with the home automation box. Read the `Packages/DeltaDoreClient/README.md` file for more context about it.
-- The Swift Package `Packages/Persistence` should be used when you need to persist data in a database like SQLite. Read the `Packages/Persistence/README.md` file for more context about it.
+## Project Map
 
----
+### App Boot And Composition
 
-## Session Memory
+- `MoDyt/App/App/MoDytApp.swift`
+  - app entry point
+  - creates `AppCompositionRoot.live()`
+- `MoDyt/App/App/DI/`
+  - app-level dependency composition
+  - `DependencyBag` owns concrete live dependencies
+  - `*StoreFactory` types build stores from narrow capabilities
+  - `EnvironmentValues` entries expose factories to views
 
-- At the start of each session, read `.codex/KNOWLEDGE_BASE.md` before making changes.
-- Keep `.codex/KNOWLEDGE_BASE.md` updated with new mistakes to avoid, practical commands, architectural guidance, and coding preferences discovered during implementation.
+### Navigation Shell
 
----
+- `MoDyt/App/Navigation/AppRoot/`
+  - top-level route between authentication and runtime
+- `MoDyt/App/Navigation/MainView/`
+  - authenticated shell
+  - tab container, gateway lifecycle handling, disconnect propagation
 
-## Plan
+### Features
 
-For long reasoning operations and complex tasks we do an execution plan upfront and ask for validation.
-When executing the plan, you can use parallel tasks/sub-agents to optimize the execution and ask sub-agents to challenge themselves and the main agent.
+- `MoDyt/App/Features/<Feature>/`
+  - most features are split into `Views/` and `Stores/`
+  - some features also have `Models/` or `Projectors/`
+- Dashboard slices live under `MoDyt/App/Features/Dashboard/`
+  - card container: shared dashboard card shell and favorite toggling
+  - device-specific slices: `Light`, `Shutter`, `HeatPump`, `Thermostat`, `Temperature`, `Sunlight`, `Smoke`, `EnergyConsumption`, `SceneExecution`
 
----
+### Shared App Code
 
-## Functional Architecture Philosophy
+- `MoDyt/App/Models/`
+  - shared domain models used across features and repositories
+- `MoDyt/App/Repositories/`
+  - source-of-truth and IO-facing repository layer
+  - includes gateway-message ingestion via `TydomMessageRepositoryRouter`
+- `MoDyt/App/StoreTools/`
+  - `StartableStore`, `Transition`, async task helpers
+- `MoDyt/App/UIComponents/`
+  - reusable SwiftUI building blocks
+  - `WithStoreView` owns store lifetime and calls `start()` once
+- `MoDyt/App/Extensions/`
+  - focused cross-cutting extensions and async helpers
 
-**North Star**  
-We partition code into:
+### Tests
 
-1. **Inert Domain** — immutable data (`struct`/`enum`), no side effects  
-2. **Pure Computations** — deterministic pure functions (input → output)  
-3. **Actions/Effects** — side effects (network, hardware, IO) at the edges
+- `MoDytTests/`
+  - app tests use Swift Testing
+  - prefer one focused file per store, projector, or repository behavior
 
-**Key Concepts**  
-- Immutability by default  
-- Pure functions everywhere possible  
-- Composition over inheritance  
-- Higher-order functions and partial application (or curry when this apply)
-- Lazy/thunked dependencies for expensive resources
+### Local Packages
 
-We apply SOLID in a Swift FP context:
+- `Packages/DeltaDoreClient`
+  - Delta Dore connection flows, gateway commands, decoded message stream, CLI
+- `Packages/Persistence`
+  - SQLite-backed generic DAO and table schema layer
+- `Packages/Regulate`
+  - debounce/throttle utilities used by the app
 
-- **S**ingle Responsibility: small functions that performs one thing, narrow types
-- **O**pen/Closed: extend via composition, not inheritance (when possible)
-- **L**iskov: injected functions uphold contracts
-- **I**nterface Segregation: tiny capability structs or functions, not fat protocols
-- **D**ependency Inversion: domain depends on capabilities, not implementations
+## Runtime Architecture
 
-These emphasize modularity without unnecessary abstractions.
+### Boot Flow
 
-This aligns with modern functional design patterns that emphasize clarity, testability, and correctness.
+- `MoDytApp` creates the composition root.
+- `AppRootView` routes to:
+  - `AuthenticationRootView` before authentication
+  - `MainView` after authentication
+- `MainView` owns the tab shell and forwards app lifecycle changes to `MainStore`.
 
-- Use Enums as a namespace for related free functions.
-- A function should be max 30 lines of code, split it otherwise (use composition).
-- A file should be max 300 lines of code, split it otherwise (use composition and extensions).
-- When working in a swift package, types visibility is important, by default types should not be visible from the outside (internal), a type should be public only if it is part of the public API used by the end client.
+### Dependency Composition
 
----
+- Live dependencies are assembled in `DependencyBag`.
+- `AppCompositionRoot` turns the bag into feature factories.
+- Views read factories from `EnvironmentValues`.
+- Views create stores through `WithStoreView`.
+- Stores do not create other stores.
 
-## Testability Patterns
+### Store Pattern
 
-We favor **function injection instead of object mocking**:
+Store shape is intentionally consistent:
+- `State`
+- `Event`
+- `Effect`
+- nested `StateMachine.reduce(...)`
+- injected effect executors or narrow capability structs
+- `send(_:)` mutates state through the reducer, then handles effects
 
-- Capability structs of closures (e.g., network client, clock, logger)
-- Use of higher order function
-- Inject only what a unit needs (small slices)
-- Pure core logic that can be tested with no environment dependencies
-- We focus on unit tests (not integration tests).
-- Always use the Swift Testing framework and use the Given, When, Then pattern
+Rules:
+- reducers stay pure
+- side effects happen only in effect handling
+- prefer closures first, capability structs second, protocols only at external boundaries
+- long-lived or authoritative state belongs in repositories, not views
 
----
+### Repository And Gateway Flow
 
-## Git Workflow Summary
+- `MainStoreDI.swift` builds `MainRuntime`, which is responsible for:
+  - starting repositories
+  - starting the gateway message stream
+  - sending the initial gateway bootstrap requests
+  - reconnect and disconnect orchestration
+- `TydomMessageRepositoryRouter` converts decoded gateway messages into repository updates.
+- `DeviceRepository`, `GroupRepository`, and `SceneRepository` persist app data through `Persistence`.
 
-We use the Git CLI.
+## How To Route A Change
 
-We adopt a **GitHub Flow** style:
+### UI-Only Change
 
-- One long-lived `main` branch
-- Short-lived feature/fix branches
-- Frequent rebasing from `main`
-- Fast-forward merges only
-- Destructive operations are forbidden unless explicit (reset --hard, clean, restore, rm, …)
+- Start in the relevant `Views/` folder.
+- Check `UIComponents/` before creating a new shared component.
+- Preserve current visual language unless the task explicitly changes design direction.
 
-This yields a clean, linear history and makes `git bisect` and blame more effective.
+### Feature Behavior Change
 
---
+- Read the feature `Store` first.
+- Then read the matching DI file in `MoDyt/App/App/DI/`.
+- Then inspect the view that owns the store.
 
-## How to run and test
+### Gateway Or Message Handling Change
 
-After each change, make sure the code compiles:
-- In the context of a Swift package, we use the Swift CLI with commands like `swift build` or `swift test`
-- If this is a full Xcode project, we can use the XCodeBuildMCP server.
+- Start in:
+  - `MoDyt/App/App/DI/MainStoreDI.swift`
+  - `MoDyt/App/Repositories/TydomMessageRepositoryRouter.swift`
+  - `Packages/DeltaDoreClient`
 
---
+### Persistence Or Source-Of-Truth Change
 
-## Swift documentation
+- Start in `MoDyt/App/Repositories/`.
+- Touch `Packages/Persistence` only when the generic SQLite layer itself must change.
 
-When you need guidance about the Swift language or Apple coding guides:
-- use the Cupertino MCP server to access the officiel Swift documentation.
-_ use the Sosumi MCP server to access the officiel Swift documentation.
+### New Dashboard Card Type
 
----
+1. Add normalized device-specific parsing in a focused dashboard store helper, usually a `Device+...` file under `MoDyt/App/Features/Dashboard/<Feature>/Stores/`.
+2. Add the feature `Store`.
+3. Add the feature `View`.
+4. Add the factory wiring in `MoDyt/App/App/DI/`.
+5. Inject the factory through `AppCompositionRoot`.
+6. Route the card in `DashboardDeviceCardView`.
+7. Add dedicated tests in `MoDytTests`.
 
-## Knowledge base
+## Coding Guidance
 
-You maintain a knowledge base for mistakes to avoid, tips and tricks, architectural guidance, coding preferences in `.codex/KNOWLEDGE_BASE.md`.
-Read that knowledge base at the start of each session and add new entries as you learn things.
+- Favor functional core / imperative shell.
+- Prefer composition over inheritance.
+- Keep dependencies narrow and feature-scoped.
+- Use enums as namespaces for related pure helpers when a namespace is useful.
+- Aim for small functions and small files.
+  - guideline: function around 30 lines max
+  - guideline: file around 300 lines max
+- In Swift packages, keep visibility `internal` by default and make types `public` only when part of the package API.
+- Prefer minimal blast radius changes over wide refactors unless the task explicitly requires restructuring.
+- Remove dead wiring when you touch an area.
+
+## Testing Guidance
+
+- Use Swift Testing for app tests.
+- Prefer Given / When / Then structure.
+- Add or update tests whenever reducer logic, effect routing, descriptor parsing, or repository semantics change.
+- Prefer targeted validation while iterating, then broaden if needed.
+
+## Validation
+
+### App
+
+- Prefer XcodeBuildMCP for app validation.
+- Project: `MoDyt.xcodeproj`
+- Main app scheme: `MoDyt`
+- Other available schemes: `DeltaDoreCLI`, `DeltaDoreClient`, `Persistence`, `Regulate`
+
+### Packages
+
+- For package-local work, use Swift CLI from the package directory:
+  - `swift build`
+  - `swift test`
+
+## Skills To Prefer When Relevant
+
+- `swift-functional-architecture`
+- `swift-concurrency`
+- `swift-testing-expert`
+- `swiftui-expert`
+- `mobile-ios-design`
+- `git-user`
+- `security-threat-model`
+
+If this guide and the code disagree, trust the code, then update this guide or the knowledge base so the next session starts from the correct model.

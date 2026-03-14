@@ -1,378 +1,494 @@
 import Foundation
 import Observation
 
-struct SingleLightPendingPresentation: Sendable, Equatable {
-    let normalizedLevel: Double
-    let isOn: Bool
-    let normalizedColor: Double
+struct SingleLightControlContext: Sendable, Equatable {
+    let deviceId: DeviceIdentifier
+    let levelSignalName: String
+    let rawLevelRange: ClosedRange<Double>
+    let color: SingleLightColorContext?
 }
 
-struct SingleLightPendingCommand: Sendable, Equatable {
-    let command: SingleLightGatewayCommand
-    let presentation: SingleLightPendingPresentation
-    let expectedPowerState: Bool?
-    let expectedLevel: Int?
-    let expectedColor: Int?
+struct SingleLightColorContext: Sendable, Equatable {
+    let signalName: String
+    let modeSignalName: String?
+    let modeValue: String?
+    let temperatureSignalName: String?
+}
 
-    func matches(_ descriptor: DrivingLightControlDescriptor?) -> Bool {
-        guard let descriptor else { return false }
+struct SingleLightValue: Sendable, Equatable {
+    var normalizedLevel: Double
+    var color: SingleLightColorValue?
 
-        if let expectedPowerState, descriptor.isOn != expectedPowerState {
-            return false
-        }
-
-        if let expectedLevel,
-           Int(descriptor.level.rounded()) != expectedLevel {
-            return false
-        }
-
-        if let expectedColor,
-           Int((descriptor.color?.value ?? Double.nan).rounded()) != expectedColor {
-            return false
-        }
-
-        return true
+    var isOn: Bool {
+        normalizedLevel > 0.0001
     }
 }
 
-enum SingleLightState: Sendable, Equatable {
-    case featureIsIdle(deviceId: DeviceIdentifier, descriptor: DrivingLightControlDescriptor?)
-    case featureIsStarted(deviceId: DeviceIdentifier, descriptor: DrivingLightControlDescriptor?)
-    case commandIsPending(
-        deviceId: DeviceIdentifier,
-        descriptor: DrivingLightControlDescriptor?,
-        pendingCommand: SingleLightPendingCommand
+struct SingleLightColorValue: Sendable, Equatable {
+    let preset: LightColorPreset
+    let packedXY: Int
+    let miredTemperatureW: Int?
+}
+
+struct SingleLightColorHold: Sendable {
+    let timerTask: Task<Void, Never>?
+    let lastObservedColor: SingleLightColorValue?
+}
+
+private func makeSingleLightColorValue(
+    for preset: LightColorPreset
+) -> SingleLightColorValue {
+    SingleLightColorValue(
+        preset: preset,
+        packedXY: preset.packedXY,
+        miredTemperatureW: preset.miredTemperatureW
+    )
+}
+
+extension SingleLightColorHold: Equatable {
+    static func == (lhs: SingleLightColorHold, rhs: SingleLightColorHold) -> Bool {
+        lhs.lastObservedColor == rhs.lastObservedColor
+    }
+}
+
+enum SingleLightState: Sendable {
+    case idle(deviceId: DeviceIdentifier)
+    case unavailable(deviceId: DeviceIdentifier)
+    case ready(
+        context: SingleLightControlContext,
+        value: SingleLightValue,
+        colorHold: SingleLightColorHold?
     )
 
     var deviceId: DeviceIdentifier {
         switch self {
-        case .featureIsIdle(let deviceId, _),
-             .featureIsStarted(let deviceId, _),
-             .commandIsPending(let deviceId, _, _):
+        case .idle(let deviceId), .unavailable(let deviceId):
             return deviceId
+        case .ready(let context, _, _):
+            return context.deviceId
         }
     }
 
-    var descriptor: DrivingLightControlDescriptor? {
-        switch self {
-        case .featureIsIdle(_, let descriptor),
-             .featureIsStarted(_, let descriptor),
-             .commandIsPending(_, let descriptor, _):
-            return descriptor
-        }
+    var context: SingleLightControlContext? {
+        guard case .ready(let context, _, _) = self else { return nil }
+        return context
     }
 
-    var pendingCommand: SingleLightPendingCommand? {
-        guard case .commandIsPending(_, _, let pendingCommand) = self else { return nil }
-        return pendingCommand
+    var value: SingleLightValue? {
+        guard case .ready(_, let value, _) = self else { return nil }
+        return value
     }
 
-    var displayedNormalizedLevel: Double {
-        pendingCommand?.presentation.normalizedLevel
-            ?? descriptor?.normalizedLevel
-            ?? 0
-    }
-
-    var displayedIsOn: Bool {
-        pendingCommand?.presentation.isOn
-            ?? descriptor?.isOn
-            ?? false
-    }
-
-    var displayedNormalizedColor: Double {
-        pendingCommand?.presentation.normalizedColor
-            ?? descriptor?.normalizedColor
-            ?? DrivingLightControlDescriptor.defaultNormalizedColor
+    var colorHold: SingleLightColorHold? {
+        guard case .ready(_, _, let colorHold) = self else { return nil }
+        return colorHold
     }
 }
 
-enum SingleLightEvent: Sendable, Equatable {
-    case descriptorWasReceived(DrivingLightControlDescriptor?)
+extension SingleLightState: Equatable {
+    static func == (lhs: SingleLightState, rhs: SingleLightState) -> Bool {
+        switch (lhs, rhs) {
+        case let (.idle(lhsDeviceId), .idle(rhsDeviceId)):
+            return lhsDeviceId == rhsDeviceId
+
+        case let (.unavailable(lhsDeviceId), .unavailable(rhsDeviceId)):
+            return lhsDeviceId == rhsDeviceId
+
+        case let (
+            .ready(lhsContext, lhsValue, lhsColorHold),
+            .ready(rhsContext, rhsValue, rhsColorHold)
+        ):
+            return lhsContext == rhsContext
+                && lhsValue == rhsValue
+                && lhsColorHold == rhsColorHold
+
+        default:
+            return false
+        }
+    }
+}
+
+enum SingleLightEvent: Sendable {
+    case started
+    case gatewayDescriptorWasReceived(DrivingLightControlDescriptor?)
     case levelWasCommitted(Double)
-    case colorWasCommitted(Double)
-    case powerWasSet(Bool)
+    case powerWasToggled
+    case presetWasSelected(LightColorPreset)
+    case colorHoldTimerWasCreated(task: Task<Void, Never>)
+    case colorHoldExpired
 }
 
-enum SingleLightEffect: Sendable, Equatable {
-    case sendCommand(SingleLightGatewayCommand)
+extension SingleLightEvent: Equatable {
+    static func == (lhs: SingleLightEvent, rhs: SingleLightEvent) -> Bool {
+        switch (lhs, rhs) {
+        case (.started, .started):
+            return true
+
+        case let (
+            .gatewayDescriptorWasReceived(lhsDescriptor),
+            .gatewayDescriptorWasReceived(rhsDescriptor)
+        ):
+            return lhsDescriptor == rhsDescriptor
+
+        case let (.levelWasCommitted(lhsLevel), .levelWasCommitted(rhsLevel)):
+            return lhsLevel == rhsLevel
+
+        case (.powerWasToggled, .powerWasToggled):
+            return true
+
+        case let (.presetWasSelected(lhsPreset), .presetWasSelected(rhsPreset)):
+            return lhsPreset == rhsPreset
+
+        case (.colorHoldTimerWasCreated, .colorHoldTimerWasCreated):
+            return true
+
+        case (.colorHoldExpired, .colorHoldExpired):
+            return true
+
+        default:
+            return false
+        }
+    }
+}
+
+enum SingleLightEffect: Sendable {
+    case observeGateway
+    case sendLevel(LightGatewayCommandRequest)
+    case sendColor(LightGatewayColorCommandRequest)
+    case startColorHold
+    case cancelColorHold(task: Task<Void, Never>?)
+}
+
+extension SingleLightEffect: Equatable {
+    static func == (lhs: SingleLightEffect, rhs: SingleLightEffect) -> Bool {
+        switch (lhs, rhs) {
+        case (.observeGateway, .observeGateway):
+            return true
+
+        case let (.sendLevel(lhsRequest), .sendLevel(rhsRequest)):
+            return lhsRequest == rhsRequest
+
+        case let (.sendColor(lhsRequest), .sendColor(rhsRequest)):
+            return lhsRequest == rhsRequest
+
+        case (.startColorHold, .startColorHold):
+            return true
+
+        case (.cancelColorHold, .cancelColorHold):
+            return true
+
+        default:
+            return false
+        }
+    }
 }
 
 @Observable
 @MainActor
 final class SingleLightStore: StartableStore {
+    static let defaultColorHoldDuration: Duration = .seconds(60)
+
     struct StateMachine {
         static func reduce(
             _ state: SingleLightState,
             _ event: SingleLightEvent
         ) -> Transition<SingleLightState, SingleLightEffect> {
-            var state = state
+            switch event {
+            case .started:
+                return .init(state: state, effects: [.observeGateway])
 
-            switch (state, event) {
-            case let (.featureIsIdle(deviceId, _), .descriptorWasReceived(descriptor)):
-                state = .featureIsStarted(deviceId: deviceId, descriptor: descriptor)
-                return .init(state: state)
+            case .gatewayDescriptorWasReceived(let descriptor):
+                return reduceGatewayDescriptorWasReceived(
+                    from: state,
+                    descriptor: descriptor
+                )
 
-            case let (.featureIsStarted(deviceId, _), .descriptorWasReceived(descriptor)):
-                state = .featureIsStarted(deviceId: deviceId, descriptor: descriptor)
-                return .init(state: state)
+            case .levelWasCommitted(let normalizedLevel):
+                guard case .ready(let context, let value, let colorHold) = state else {
+                    return .init(state: state)
+                }
 
-            case let (.commandIsPending(deviceId, _, pendingCommand), .descriptorWasReceived(descriptor)):
-                if pendingCommand.matches(descriptor) {
-                    state = .featureIsStarted(deviceId: deviceId, descriptor: descriptor)
-                } else {
-                    state = .commandIsPending(
-                        deviceId: deviceId,
-                        descriptor: descriptor,
-                        pendingCommand: pendingCommand
+                let clampedNormalizedLevel = min(max(normalizedLevel, 0), 1)
+                let rawLevel = rawLevel(
+                    forNormalizedLevel: clampedNormalizedLevel,
+                    in: context.rawLevelRange
+                )
+                let nextState = SingleLightState.ready(
+                    context: context,
+                    value: SingleLightValue(
+                        normalizedLevel: normalizedLevelValue(
+                            forRawLevel: rawLevel,
+                            in: context.rawLevelRange
+                        ),
+                        color: value.color
+                    ),
+                    colorHold: colorHold
+                )
+
+                return .init(
+                    state: nextState,
+                    effects: [
+                        .sendLevel(
+                            LightGatewayCommandRequest(
+                                deviceId: context.deviceId,
+                                signalName: context.levelSignalName,
+                                value: .int(rawLevel)
+                            )
+                        )
+                    ]
+                )
+
+            case .powerWasToggled:
+                guard case .ready(_, let value, _) = state else {
+                    return .init(state: state)
+                }
+
+                return reduce(
+                    state,
+                    .levelWasCommitted(value.isOn ? 0 : 1)
+                )
+
+            case .presetWasSelected(let preset):
+                guard case .ready(let context, var value, let colorHold) = state,
+                      let colorContext = context.color else {
+                    return .init(state: state)
+                }
+
+                let selectedColor = makeSingleLightColorValue(for: preset)
+                value.color = selectedColor
+                let nextColorHold = SingleLightColorHold(
+                    timerTask: nil,
+                    lastObservedColor: nil
+                )
+
+                return .init(
+                    state: .ready(
+                        context: context,
+                        value: value,
+                        colorHold: nextColorHold
+                    ),
+                    effects: [
+                        .sendColor(
+                            LightGatewayColorCommandRequest(
+                                deviceId: context.deviceId,
+                                signalName: colorContext.signalName,
+                                value: .int(selectedColor.packedXY),
+                                colorModeSignalName: colorContext.modeSignalName,
+                                colorModeValue: colorContext.modeValue,
+                                temperatureSignalName: nil,
+                                temperatureValue: nil
+                            )
+                        ),
+                        .cancelColorHold(task: colorHold?.timerTask),
+                        .startColorHold,
+                    ]
+                )
+
+            case .colorHoldTimerWasCreated(let task):
+                guard case .ready(let context, let value, let colorHold?) = state else {
+                    return .init(
+                        state: state,
+                        effects: [.cancelColorHold(task: task)]
                     )
                 }
-                return .init(state: state)
 
-            case let (.featureIsStarted(deviceId, descriptor), .levelWasCommitted(normalizedLevel)),
-                 let (.commandIsPending(deviceId, descriptor, _), .levelWasCommitted(normalizedLevel)):
-                let nextState = setLevel(
-                    state: state,
-                    deviceId: deviceId,
-                    descriptor: descriptor,
-                    normalizedLevel: normalizedLevel
+                let nextColorHold = SingleLightColorHold(
+                    timerTask: task,
+                    lastObservedColor: colorHold.lastObservedColor
                 )
+
                 return .init(
-                    state: nextState,
-                    effects: effect(for: nextState)
+                    state: .ready(
+                        context: context,
+                        value: value,
+                        colorHold: nextColorHold
+                    )
                 )
 
-            case let (.featureIsStarted(deviceId, descriptor), .powerWasSet(isOn)),
-                 let (.commandIsPending(deviceId, descriptor, _), .powerWasSet(isOn)):
-                let nextState = setPower(
-                    state: state,
-                    deviceId: deviceId,
-                    descriptor: descriptor,
-                    isOn: isOn
-                )
+            case .colorHoldExpired:
+                guard case .ready(let context, var value, let colorHold?) = state else {
+                    return .init(state: state)
+                }
+
+                if let lastObservedColor = colorHold.lastObservedColor {
+                    value.color = lastObservedColor
+                }
+
                 return .init(
-                    state: nextState,
-                    effects: effect(for: nextState)
+                    state: .ready(
+                        context: context,
+                        value: value,
+                        colorHold: nil
+                    )
                 )
-
-            case let (.featureIsStarted(deviceId, descriptor), .colorWasCommitted(normalizedColor)),
-                 let (.commandIsPending(deviceId, descriptor, _), .colorWasCommitted(normalizedColor)):
-                let nextState = setColor(
-                    state: state,
-                    deviceId: deviceId,
-                    descriptor: descriptor,
-                    normalizedColor: normalizedColor
-                )
-                return .init(
-                    state: nextState,
-                    effects: effect(for: nextState)
-                )
-
-            default:
-                return .init(state: state)
             }
         }
 
-        private static func effect(for state: SingleLightState) -> [SingleLightEffect] {
-            guard case .commandIsPending(_, _, let pendingCommand) = state else {
-                return []
-            }
-            return [.sendCommand(pendingCommand.command)]
-        }
+        private static func reduceGatewayDescriptorWasReceived(
+            from previousState: SingleLightState,
+            descriptor: DrivingLightControlDescriptor?
+        ) -> Transition<SingleLightState, SingleLightEffect> {
+            let deviceId = previousState.deviceId
 
-        private static func setLevel(
-            state: SingleLightState,
-            deviceId: DeviceIdentifier,
-            descriptor: DrivingLightControlDescriptor?,
-            normalizedLevel: Double
-        ) -> SingleLightState {
             guard let descriptor,
-                  let levelKey = descriptor.levelKey else { return state }
-
-            let rawLevel = descriptor.rawLevel(forNormalizedLevel: normalizedLevel)
-            let request = LightGatewayCommandRequest(
-                deviceId: deviceId,
-                signalName: levelKey,
-                value: .int(rawLevel)
-            )
-            let command = SingleLightGatewayCommand.data(request)
-            let pendingCommand = SingleLightPendingCommand(
-                command: command,
-                presentation: .init(
-                    normalizedLevel: descriptor.normalizedLevel(forRawLevel: rawLevel),
-                    isOn: descriptor.powerKey == nil ? descriptor.isLit(level: rawLevel) : descriptor.isOn,
-                    normalizedColor: descriptor.normalizedColor
-                ),
-                expectedPowerState: nil,
-                expectedLevel: rawLevel,
-                expectedColor: nil
-            )
-            return .commandIsPending(
-                deviceId: deviceId,
-                descriptor: descriptor,
-                pendingCommand: pendingCommand
-            )
-        }
-
-        private static func setPower(
-            state: SingleLightState,
-            deviceId: DeviceIdentifier,
-            descriptor: DrivingLightControlDescriptor?,
-            isOn: Bool
-        ) -> SingleLightState {
-            guard let descriptor else { return state }
-
-            if let powerKey = descriptor.powerKey {
-                let request = LightGatewayCommandRequest(
-                    deviceId: deviceId,
-                    signalName: powerKey,
-                    value: .bool(isOn)
-                )
-                let command = SingleLightGatewayCommand.data(request)
-                let pendingCommand = SingleLightPendingCommand(
-                    command: command,
-                    presentation: .init(
-                        normalizedLevel: descriptor.normalizedLevel,
-                        isOn: isOn,
-                        normalizedColor: descriptor.normalizedColor
-                    ),
-                    expectedPowerState: isOn,
-                    expectedLevel: nil,
-                    expectedColor: nil
-                )
-                return .commandIsPending(
-                    deviceId: deviceId,
-                    descriptor: descriptor,
-                    pendingCommand: pendingCommand
+                  let levelSignalName = descriptor.levelKey else {
+                let effects = previousState.colorHold.map {
+                    [SingleLightEffect.cancelColorHold(task: $0.timerTask)]
+                } ?? []
+                return .init(
+                    state: .unavailable(deviceId: deviceId),
+                    effects: effects
                 )
             }
 
-            guard let levelKey = descriptor.levelKey else { return state }
-
-            let rawLevel = isOn ? descriptor.maximumLevel : descriptor.minimumLevel
-            let request = LightGatewayCommandRequest(
+            let previousContext = previousState.context
+            let context = SingleLightControlContext(
                 deviceId: deviceId,
-                signalName: levelKey,
-                value: .int(rawLevel)
+                levelSignalName: levelSignalName,
+                rawLevelRange: descriptor.range,
+                color: descriptor.color.map(colorContext(from:))
+                    ?? previousContext?.color
             )
-            let command = SingleLightGatewayCommand.data(request)
-            let pendingCommand = SingleLightPendingCommand(
-                command: command,
-                presentation: .init(
-                    normalizedLevel: descriptor.normalizedLevel(forRawLevel: rawLevel),
-                    isOn: isOn,
-                    normalizedColor: descriptor.normalizedColor
-                ),
-                expectedPowerState: nil,
-                expectedLevel: rawLevel,
-                expectedColor: nil
-            )
-            return .commandIsPending(
-                deviceId: deviceId,
-                descriptor: descriptor,
-                pendingCommand: pendingCommand
-            )
-        }
+            let observedColor = observedColorValue(from: descriptor.color)
 
-        private static func setColor(
-            state: SingleLightState,
-            deviceId: DeviceIdentifier,
-            descriptor: DrivingLightControlDescriptor?,
-            normalizedColor: Double
-        ) -> SingleLightState {
-            guard let descriptor,
-                  let color = descriptor.color else { return state }
-
-            let rawColor = color.rawValue(forNormalizedValue: normalizedColor)
-            let command = SingleLightGatewayCommand.color(
-                LightGatewayColorCommandRequest(
-                    deviceId: deviceId,
-                    signalName: color.key,
-                    value: .int(rawColor),
-                    colorModeSignalName: color.modeKey,
-                    colorModeValue: color.modeValue
+            if case .ready(_, let previousValue, let colorHold?) = previousState {
+                let nextColorHold = SingleLightColorHold(
+                    timerTask: colorHold.timerTask,
+                    lastObservedColor: observedColor ?? colorHold.lastObservedColor
                 )
-            )
-            let pendingCommand = SingleLightPendingCommand(
-                command: command,
-                presentation: .init(
+                let nextValue = SingleLightValue(
                     normalizedLevel: descriptor.normalizedLevel,
-                    isOn: descriptor.isOn,
-                    normalizedColor: color.normalizedValue(forRawValue: rawColor)
-                ),
-                expectedPowerState: nil,
-                expectedLevel: nil,
-                expectedColor: rawColor
+                    color: previousValue.color
+                )
+
+                return .init(
+                    state: .ready(
+                        context: context,
+                        value: nextValue,
+                        colorHold: nextColorHold
+                    )
+                )
+            }
+
+            let value = SingleLightValue(
+                normalizedLevel: descriptor.normalizedLevel,
+                color: observedColor ?? previousState.value?.color
             )
-            return .commandIsPending(
-                deviceId: deviceId,
-                descriptor: descriptor,
-                pendingCommand: pendingCommand
+
+            return .init(
+                state: .ready(
+                    context: context,
+                    value: value,
+                    colorHold: nil
+                )
             )
+        }
+
+        private static func colorContext(
+            from descriptor: DrivingLightColorDescriptor
+        ) -> SingleLightColorContext {
+            SingleLightColorContext(
+                signalName: descriptor.key,
+                modeSignalName: descriptor.modeKey,
+                modeValue: descriptor.modeValue,
+                temperatureSignalName: descriptor.temperatureKey
+            )
+        }
+
+        private static func observedColorValue(
+            from descriptor: DrivingLightColorDescriptor?
+        ) -> SingleLightColorValue? {
+            guard let descriptor,
+                  let preset = DrivingLightColorDescriptor.packedXYCalibration.nearestPreset(
+                    forPackedXY: Int(descriptor.value.rounded())
+                  ) else {
+                return nil
+            }
+
+            return makeSingleLightColorValue(for: preset)
+        }
+
+        private static func rawLevel(
+            forNormalizedLevel normalizedLevel: Double,
+            in range: ClosedRange<Double>
+        ) -> Int {
+            let rawValue = range.lowerBound + ((range.upperBound - range.lowerBound) * normalizedLevel)
+            return Int(rawValue.rounded())
+        }
+
+        private static func normalizedLevelValue(
+            forRawLevel rawLevel: Int,
+            in range: ClosedRange<Double>
+        ) -> Double {
+            let clampedLevel = min(max(Double(rawLevel), range.lowerBound), range.upperBound)
+            let span = range.upperBound - range.lowerBound
+            guard span > 0 else { return 0 }
+            return min(max((clampedLevel - range.lowerBound) / span, 0), 1)
         }
     }
 
     private(set) var state: SingleLightState
 
-    var descriptor: DrivingLightControlDescriptor? {
-        state.descriptor
-    }
-
     var displayedNormalizedLevel: Double {
-        state.displayedNormalizedLevel
+        state.value?.normalizedLevel ?? 0
     }
 
     var displayedIsOn: Bool {
-        state.displayedIsOn
+        state.value?.isOn ?? false
+    }
+
+    var selectedPreset: LightColorPreset? {
+        state.value?.color?.preset
+    }
+
+    var selectedPresetKind: LightColorPreset.Kind? {
+        selectedPreset?.kind
     }
 
     var displayedNormalizedColor: Double {
-        state.displayedNormalizedColor
+        selectedPreset?.normalizedValue ?? DrivingLightControlDescriptor.defaultNormalizedColor
     }
 
     var isInteractionEnabled: Bool {
-        descriptor != nil
+        state.context != nil
     }
 
     var isColorInteractionEnabled: Bool {
-        descriptor?.color != nil
+        state.context?.color != nil
     }
 
     private let observeLight: ObserveSingleLightEffectExecutor
     private let sendCommand: SendSingleLightCommandEffectExecutor
+    private let colorHoldDuration: Duration
+    private let sleep: @Sendable (Duration) async throws -> Void
     private var observationTask: Task<Void, Never>?
     private var hasStarted = false
 
     init(
         deviceId: DeviceIdentifier,
         observeLight: ObserveSingleLightEffectExecutor,
-        sendCommand: SendSingleLightCommandEffectExecutor
+        sendCommand: SendSingleLightCommandEffectExecutor,
+        colorHoldDuration: Duration = SingleLightStore.defaultColorHoldDuration,
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { duration in
+            try await Task.sleep(for: duration)
+        }
     ) {
-        self.state = .featureIsIdle(deviceId: deviceId, descriptor: nil)
+        self.state = .idle(deviceId: deviceId)
         self.observeLight = observeLight
         self.sendCommand = sendCommand
+        self.colorHoldDuration = colorHoldDuration
+        self.sleep = sleep
     }
 
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
-        replaceTask(
-            &observationTask,
-            with: makeTrackedStreamTask(
-                operation: { [observeLight] in
-                    await observeLight()
-                },
-                onEvent: { [weak self] event in
-                    self?.send(event)
-                },
-                onFinish: { [weak self] in
-                    self?.observationTask = nil
-                }
-            )
-        )
+        send(.started)
     }
 
     isolated deinit {
         observationTask?.cancel()
+        state.colorHold?.timerTask?.cancel()
     }
 
     func send(_ event: SingleLightEvent) {
@@ -384,11 +500,62 @@ final class SingleLightStore: StartableStore {
     private func handle(_ effects: [SingleLightEffect]) {
         for effect in effects {
             switch effect {
-            case .sendCommand(let command):
+            case .observeGateway:
+                guard observationTask == nil else { continue }
+                replaceTask(
+                    &observationTask,
+                    with: makeTrackedStreamTask(
+                        operation: { [observeLight] in
+                            await observeLight()
+                        },
+                        onEvent: { [weak self] event in
+                            self?.send(event)
+                        },
+                        onFinish: { [weak self] in
+                            self?.observationTask = nil
+                        }
+                    )
+                )
+
+            case .sendLevel(let request):
                 launchFireAndForgetTask { [sendCommand] in
-                    await sendCommand(command)
+                    await sendCommand(.data(request))
                 }
+
+            case .sendColor(let request):
+                launchFireAndForgetTask { [sendCommand] in
+                    await sendCommand(.color(request))
+                }
+
+            case .startColorHold:
+                startColorHoldIfNeeded()
+
+            case .cancelColorHold(let task):
+                task?.cancel()
             }
         }
+    }
+
+    private func startColorHoldIfNeeded() {
+        guard case .ready(_, _, let colorHold?) = state,
+              colorHold.timerTask == nil else {
+            return
+        }
+
+        let holdTask = makeTrackedEventTask(
+            operation: { [colorHoldDuration, sleep] in
+                do {
+                    try await sleep(colorHoldDuration)
+                    return .colorHoldExpired
+                } catch {
+                    return nil
+                }
+            },
+            onEvent: { [weak self] event in
+                self?.send(event)
+            }
+        )
+
+        send(.colorHoldTimerWasCreated(task: holdTask))
     }
 }

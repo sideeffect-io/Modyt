@@ -3,6 +3,7 @@ import SwiftUI
 enum GlassCardTone {
     case surface
     case inset
+    case controlInset
 }
 
 extension View {
@@ -28,6 +29,14 @@ private struct FauxGlassCardModifier: ViewModifier {
     let interactive: Bool
     let tone: GlassCardTone
 
+    private var isInsetTone: Bool {
+        tone != .surface
+    }
+
+    private var usesElevatedLightContrast: Bool {
+        colorScheme == .light && tone == .controlInset
+    }
+
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 
@@ -40,28 +49,36 @@ private struct FauxGlassCardModifier: ViewModifier {
                     .overlay { shape.fill(bottomVignette) }
                     .overlay {
                         shape.strokeBorder(
-                            Color.white.opacity(colorScheme == .dark ? (tone == .inset ? 0.06 : 0.07) : (tone == .inset ? 0.12 : 0.24)),
-                            lineWidth: tone == .inset ? 0.95 : 0.8
+                            Color.white.opacity(
+                                colorScheme == .dark
+                                    ? (isInsetTone ? 0.06 : 0.07)
+                                    : (usesElevatedLightContrast ? 0.16 : (isInsetTone ? 0.12 : 0.24))
+                            ),
+                            lineWidth: isInsetTone ? 0.95 : 0.8
                         )
                     }
                     .overlay {
                         shape.strokeBorder(
-                            Color.black.opacity(colorScheme == .dark ? (tone == .inset ? 0.30 : 0.17) : (tone == .inset ? 0.012 : 0.001)),
-                            lineWidth: tone == .inset ? 0.8 : 0.5
+                            Color.black.opacity(
+                                colorScheme == .dark
+                                    ? (isInsetTone ? 0.30 : 0.17)
+                                    : (usesElevatedLightContrast ? 0.03 : (isInsetTone ? 0.012 : 0.001))
+                            ),
+                            lineWidth: isInsetTone ? 0.8 : 0.5
                         )
                     }
                     .shadow(
                         color: Color.black.opacity(
                             colorScheme == .dark
-                                ? (tone == .inset ? 0.0 : 0.24)
-                                : (tone == .inset ? 0.012 : 0.045)
+                                ? (isInsetTone ? 0.0 : 0.24)
+                                : (usesElevatedLightContrast ? 0.024 : (isInsetTone ? 0.012 : 0.045))
                         ),
                         radius: interactive
-                            ? (tone == .inset ? (colorScheme == .dark ? 0 : 2.1) : (colorScheme == .dark ? 10 : 5.1))
+                            ? (isInsetTone ? (colorScheme == .dark ? 0 : 2.1) : (colorScheme == .dark ? 10 : 5.1))
                             : (colorScheme == .dark ? 0 : 2.2),
                         x: 0,
                         y: interactive
-                            ? (tone == .inset ? (colorScheme == .dark ? 0 : 1.0) : (colorScheme == .dark ? 0 : 2.1))
+                            ? (isInsetTone ? (colorScheme == .dark ? 0 : 1.0) : (colorScheme == .dark ? 0 : 2.1))
                             : (colorScheme == .dark ? 0 : 1.0)
                     )
             }
@@ -69,7 +86,7 @@ private struct FauxGlassCardModifier: ViewModifier {
 
     private var baseTint: AnyShapeStyle {
         if colorScheme == .dark {
-            if tone == .inset {
+            if isInsetTone {
                 return AnyShapeStyle(
                     Color(red: 0.055, green: 0.15, blue: 0.21)
                         .opacity(interactive ? 0.83 : 0.73)
@@ -82,13 +99,20 @@ private struct FauxGlassCardModifier: ViewModifier {
             )
         }
 
+        if usesElevatedLightContrast {
+            return AnyShapeStyle(
+                Color(red: 0.82, green: 0.85, blue: 0.89)
+                    .opacity(interactive ? 0.62 : 0.58)
+            )
+        }
+
         return AnyShapeStyle(
             Color(
-                red: tone == .inset ? 0.91 : 1.0,
-                green: tone == .inset ? 0.92 : 1.0,
-                blue: tone == .inset ? 0.96 : 1.0
+                red: isInsetTone ? 0.91 : 1.0,
+                green: isInsetTone ? 0.92 : 1.0,
+                blue: isInsetTone ? 0.96 : 1.0
             )
-            .opacity(interactive ? (tone == .inset ? 0.33 : 0.64) : (tone == .inset ? 0.29 : 0.58))
+            .opacity(interactive ? (isInsetTone ? 0.33 : 0.64) : (isInsetTone ? 0.29 : 0.58))
         )
     }
 
@@ -96,13 +120,19 @@ private struct FauxGlassCardModifier: ViewModifier {
         if colorScheme == .dark {
             return AnyShapeStyle(
                 Color.white.opacity(
-                    tone == .inset ? (interactive ? 0.005 : 0.003) : (interactive ? 0.018 : 0.012)
+                    isInsetTone ? (interactive ? 0.005 : 0.003) : (interactive ? 0.018 : 0.012)
                 )
             )
         }
 
+        if usesElevatedLightContrast {
+            return AnyShapeStyle(
+                Color.white.opacity(0.042)
+            )
+        }
+
         return AnyShapeStyle(
-            Color.white.opacity(tone == .inset ? 0.028 : 0.095)
+            Color.white.opacity(isInsetTone ? 0.028 : 0.095)
         )
     }
 
@@ -110,13 +140,19 @@ private struct FauxGlassCardModifier: ViewModifier {
         if colorScheme == .dark {
             return AnyShapeStyle(
                 Color.black.opacity(
-                    tone == .inset ? (interactive ? 0.095 : 0.075) : (interactive ? 0.07 : 0.055)
+                    isInsetTone ? (interactive ? 0.095 : 0.075) : (interactive ? 0.07 : 0.055)
                 )
             )
         }
 
+        if usesElevatedLightContrast {
+            return AnyShapeStyle(
+                Color.black.opacity(0.05)
+            )
+        }
+
         return AnyShapeStyle(
-            Color.black.opacity(tone == .inset ? 0.022 : 0.0)
+            Color.black.opacity(isInsetTone ? 0.022 : 0.0)
         )
     }
 

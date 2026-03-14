@@ -18,6 +18,8 @@ struct LightGatewayColorCommandRequest: Sendable, Equatable {
     let value: LightGatewayCommandValue
     let colorModeSignalName: String?
     let colorModeValue: String?
+    let temperatureSignalName: String?
+    let temperatureValue: LightGatewayCommandValue?
 }
 
 enum SingleLightGatewayCommand: Sendable, Equatable {

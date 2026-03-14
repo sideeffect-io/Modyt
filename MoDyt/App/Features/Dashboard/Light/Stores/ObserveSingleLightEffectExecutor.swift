@@ -16,7 +16,7 @@ struct ObserveSingleLightEffectExecutor: Sendable {
                     let descriptor = device?.drivingLightControlDescriptor()
                     guard descriptor != previousDescriptor else { continue }
 
-                    continuation.yield(.descriptorWasReceived(descriptor))
+                    continuation.yield(.gatewayDescriptorWasReceived(descriptor))
                     previousDescriptor = descriptor
                 }
 

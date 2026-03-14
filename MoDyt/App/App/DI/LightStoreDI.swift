@@ -129,12 +129,38 @@ private nonisolated func gatewayRequests(
     case .data(let request):
         return [request]
     case .color(let request):
-        return [
+        var requests = [LightGatewayCommandRequest]()
+
+        if let colorModeSignalName = request.colorModeSignalName,
+           let colorModeValue = request.colorModeValue {
+            requests.append(
+                LightGatewayCommandRequest(
+                    deviceId: request.deviceId,
+                    signalName: colorModeSignalName,
+                    value: .string(colorModeValue)
+                )
+            )
+        }
+
+        requests.append(
             LightGatewayCommandRequest(
                 deviceId: request.deviceId,
                 signalName: request.signalName,
                 value: request.value
             )
-        ]
+        )
+
+        if let temperatureSignalName = request.temperatureSignalName,
+           let temperatureValue = request.temperatureValue {
+            requests.append(
+                LightGatewayCommandRequest(
+                    deviceId: request.deviceId,
+                    signalName: temperatureSignalName,
+                    value: temperatureValue
+                )
+            )
+        }
+
+        return requests
     }
 }

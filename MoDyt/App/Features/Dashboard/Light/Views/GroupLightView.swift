@@ -75,7 +75,7 @@ struct GroupLightView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            .glassCard(cornerRadius: 18, interactive: true, tone: .inset)
+            .glassCard(cornerRadius: 18, interactive: true, tone: .controlInset)
             .onDisappear {
                 resetAcknowledgement()
             }
