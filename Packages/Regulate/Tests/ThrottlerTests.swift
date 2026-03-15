@@ -10,74 +10,91 @@ import XCTest
 
 final class ThrottlerTests: XCTestCase {
   func test_throttler_outputs_first_value_per_time_interval() async {
-    let hasThrottledTwoValues = expectation(description: "Has throttled 2 values")
-    hasThrottledTwoValues.expectedFulfillmentCount = 2
-
     let spy = Spy<Int>()
+    let scheduler = ManualRegulateScheduler()
 
-    let sut = Task.throttle(dueTime: .milliseconds(100), latest: false) { value in
+    let sut = Task.throttle(
+      dueTime: .milliseconds(100),
+      latest: false,
+      scheduler: scheduler.scheduler
+    ) { value in
       await spy.push(value)
-      hasThrottledTwoValues.fulfill()
     }
 
-    //               T                 T
-    // 0 -- 40 -- 80 -- 120 -- 160 ---------
-    for index in (0...4) {
-      DispatchQueue.global().asyncAfter(deadline: .now().advanced(by: .milliseconds(40 * index))) {
-        sut.push(index)
-      }
-    }
-
-    wait(for: [hasThrottledTwoValues], timeout: 5.0)
+    sut.push(0)
+    await settleRegulateTasks()
+    scheduler.advance(by: .milliseconds(40))
+    sut.push(1)
+    scheduler.advance(by: .milliseconds(40))
+    sut.push(2)
+    scheduler.advance(by: .milliseconds(20))
+    await settleRegulateTasks()
+    sut.push(3)
+    scheduler.advance(by: .milliseconds(40))
+    sut.push(4)
+    scheduler.advance(by: .milliseconds(60))
+    await settleRegulateTasks()
 
     await spy.assertEqual(expected: [0, 3])
+    sut.cancel()
   }
 
   func test_throttler_outputs_last_value_per_time_interval() async {
-    let hasThrottledTwoValues = expectation(description: "Has throttled 2 values")
-    hasThrottledTwoValues.expectedFulfillmentCount = 2
-
     let spy = Spy<Int>()
+    let scheduler = ManualRegulateScheduler()
 
-    let sut = Task.throttle(dueTime: .milliseconds(100), latest: true) { value in
+    let sut = Task.throttle(
+      dueTime: .milliseconds(100),
+      latest: true,
+      scheduler: scheduler.scheduler
+    ) { value in
       await spy.push(value)
-      hasThrottledTwoValues.fulfill()
     }
 
-    //               T                 T
-    // 0 -- 40 -- 80 -- 120 -- 160 ---------
-    for index in (0...4) {
-      DispatchQueue.global().asyncAfter(deadline: .now().advanced(by: .milliseconds(40 * index))) {
-        sut.push(index)
-      }
-    }
-
-    wait(for: [hasThrottledTwoValues], timeout: 5.0)
+    sut.push(0)
+    await settleRegulateTasks()
+    scheduler.advance(by: .milliseconds(40))
+    sut.push(1)
+    scheduler.advance(by: .milliseconds(40))
+    sut.push(2)
+    scheduler.advance(by: .milliseconds(20))
+    await settleRegulateTasks()
+    sut.push(3)
+    scheduler.advance(by: .milliseconds(40))
+    sut.push(4)
+    scheduler.advance(by: .milliseconds(60))
+    await settleRegulateTasks()
 
     await spy.assertEqual(expected: [2, 4])
+    sut.cancel()
   }
 
   func test_throttler_outputs_last_value_per_time_interval_when_no_last() async {
-    let hasThrottledTwoValues = expectation(description: "Has throttled 2 values")
-    hasThrottledTwoValues.expectedFulfillmentCount = 2
-
     let spy = Spy<Int>()
+    let scheduler = ManualRegulateScheduler()
 
-    let sut = Task.throttle(dueTime: .milliseconds(100), latest: true) { value in
+    let sut = Task.throttle(
+      dueTime: .milliseconds(100),
+      latest: true,
+      scheduler: scheduler.scheduler
+    ) { value in
       await spy.push(value)
-      hasThrottledTwoValues.fulfill()
     }
 
-    //               T                 T
-    // 0 -- 40 -- 80 -- 120 ----------------
-    for index in (0...3) {
-      DispatchQueue.global().asyncAfter(deadline: .now().advanced(by: .milliseconds(40 * index))) {
-        sut.push(index)
-      }
-    }
-
-    wait(for: [hasThrottledTwoValues], timeout: 5.0)
+    sut.push(0)
+    await settleRegulateTasks()
+    scheduler.advance(by: .milliseconds(40))
+    sut.push(1)
+    scheduler.advance(by: .milliseconds(40))
+    sut.push(2)
+    scheduler.advance(by: .milliseconds(20))
+    await settleRegulateTasks()
+    scheduler.advance(by: .milliseconds(20))
+    sut.push(3)
+    scheduler.advance(by: .milliseconds(80))
+    await settleRegulateTasks()
 
     await spy.assertEqual(expected: [2, 3])
+    sut.cancel()
   }
 }

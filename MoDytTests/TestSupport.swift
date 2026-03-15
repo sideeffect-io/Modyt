@@ -50,7 +50,7 @@ func testTemporarySQLitePath(_ directoryName: String) -> String {
 
 func testFirstValue<S: AsyncSequence & Sendable>(
     from stream: S,
-    timeoutNanoseconds: UInt64 = 1_000_000_000
+    timeoutCycles: Int = 200
 ) async -> S.Element? where S.Element: Sendable {
     await withTaskGroup(of: S.Element?.self) { group in
         group.addTask {
@@ -63,13 +63,121 @@ func testFirstValue<S: AsyncSequence & Sendable>(
         }
 
         group.addTask {
-            try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+            for _ in 0..<timeoutCycles {
+                await Task.yield()
+            }
             return nil
         }
 
         let first = await group.next() ?? nil
         group.cancelAll()
         return first
+    }
+}
+
+actor ManualTestClock {
+    private struct SleepRequest {
+        let id: UUID
+        let deadlineNanoseconds: UInt64
+        let order: UInt64
+        let continuation: CheckedContinuation<Void, Error>
+    }
+
+    private var nowDate: Date
+    private var nowNanoseconds: UInt64
+    private var pendingSleepsByID: [UUID: SleepRequest] = [:]
+    private var orderSeed: UInt64 = 0
+
+    init(now: Date = Date(timeIntervalSince1970: 0)) {
+        self.nowDate = now
+        self.nowNanoseconds = 0
+    }
+
+    func now() -> Date {
+        nowDate
+    }
+
+    func dispatchNow() -> DispatchTime {
+        DispatchTime(uptimeNanoseconds: nowNanoseconds)
+    }
+
+    func sleep(for duration: Duration) async throws {
+        try await sleep(nanoseconds: duration.nanoseconds)
+    }
+
+    func sleep(nanoseconds: UInt64) async throws {
+        guard nanoseconds > 0 else { return }
+        try Task.checkCancellation()
+
+        let requestID = UUID()
+        let order = orderSeed
+        orderSeed += 1
+        let deadlineNanoseconds = nowNanoseconds + nanoseconds
+
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+
+                pendingSleepsByID[requestID] = SleepRequest(
+                    id: requestID,
+                    deadlineNanoseconds: deadlineNanoseconds,
+                    order: order,
+                    continuation: continuation
+                )
+            }
+        } onCancel: {
+            Task {
+                await self.cancelSleep(id: requestID)
+            }
+        }
+    }
+
+    func advance(by duration: Duration) {
+        advance(nanoseconds: duration.nanoseconds, timeInterval: duration.timeInterval)
+    }
+
+    func advance(by interval: DispatchTimeInterval) {
+        let nanoseconds = interval.nanoseconds
+        advance(
+            nanoseconds: nanoseconds,
+            timeInterval: TimeInterval(nanoseconds) / 1_000_000_000
+        )
+    }
+
+    private func advance(nanoseconds: UInt64, timeInterval: TimeInterval) {
+        guard nanoseconds > 0 else { return }
+
+        nowNanoseconds += nanoseconds
+        nowDate = nowDate.addingTimeInterval(timeInterval)
+
+        let dueRequests = pendingSleepsByID.values
+            .filter { $0.deadlineNanoseconds <= nowNanoseconds }
+            .sorted { lhs, rhs in
+                if lhs.deadlineNanoseconds != rhs.deadlineNanoseconds {
+                    return lhs.deadlineNanoseconds < rhs.deadlineNanoseconds
+                }
+                return lhs.order < rhs.order
+            }
+
+        for request in dueRequests {
+            pendingSleepsByID.removeValue(forKey: request.id)
+            request.continuation.resume()
+        }
+    }
+
+    func pendingSleepCount() -> Int {
+        pendingSleepsByID.count
+    }
+
+    private func cancelSleep(id: UUID) {
+        guard let request = pendingSleepsByID.removeValue(forKey: id) else {
+            return
+        }
+
+        request.continuation.resume(throwing: CancellationError())
     }
 }
 
@@ -186,6 +294,45 @@ actor TestRecorder<Value: Sendable> {
 
     func values() -> [Value] {
         entries
+    }
+}
+
+private extension Duration {
+    var timeInterval: TimeInterval {
+        let components = self.components
+        let seconds = TimeInterval(components.seconds)
+        let attoseconds = TimeInterval(components.attoseconds)
+        return seconds + (attoseconds / 1_000_000_000_000_000_000)
+    }
+
+    var nanoseconds: UInt64 {
+        let components = self.components
+        guard components.seconds > 0 || components.attoseconds > 0 else {
+            return 0
+        }
+
+        let seconds = UInt64(max(components.seconds, 0))
+        let attoseconds = UInt64(max(components.attoseconds, 0))
+        return (seconds * 1_000_000_000) + (attoseconds / 1_000_000_000)
+    }
+}
+
+private extension DispatchTimeInterval {
+    var nanoseconds: UInt64 {
+        switch self {
+        case .nanoseconds(let value) where value >= 0:
+            return UInt64(value)
+        case .microseconds(let value) where value >= 0:
+            return UInt64(value) * 1_000
+        case .milliseconds(let value) where value >= 0:
+            return UInt64(value) * 1_000_000
+        case .seconds(let value) where value >= 0:
+            return UInt64(value) * 1_000_000_000
+        case .never:
+            return .zero
+        default:
+            return .zero
+        }
     }
 }
 

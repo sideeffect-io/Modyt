@@ -17,9 +17,15 @@ public extension Task where Failure == Never {
   static func throttle(
     dueTime: DispatchTimeInterval,
     latest: Bool = true,
+    scheduler: RegulateScheduler = .live,
     output: @Sendable @escaping (Success) async -> Void
   ) -> some Regulator<Success> {
-    Throttler(dueTime: dueTime, latest: latest, output: output)
+    Throttler(
+      dueTime: dueTime,
+      latest: latest,
+      scheduler: scheduler,
+      output: output
+    )
   }
 }
 
@@ -88,6 +94,7 @@ public final class Throttler<Value>: @unchecked Sendable, ObservableObject, Regu
   public var dueTime: DispatchTimeInterval
   
   private let latest: Bool
+  private let scheduler: RegulateScheduler
   private let lock: os_unfair_lock_t = UnsafeMutablePointer<os_unfair_lock_s>.allocate(capacity: 1)
   private var stateMachine = StateMachine()
   private var task: Task<Void, Never>?
@@ -104,11 +111,13 @@ public final class Throttler<Value>: @unchecked Sendable, ObservableObject, Regu
   public init(
     dueTime: DispatchTimeInterval,
     latest: Bool = true,
+    scheduler: RegulateScheduler = .live,
     output: (@Sendable (Value) async -> Void)? = nil
   ) {
     self.lock.initialize(to: os_unfair_lock())
     self.dueTime = dueTime
     self.latest = latest
+    self.scheduler = scheduler
     self.output = output
   }
 
@@ -125,13 +134,17 @@ public final class Throttler<Value>: @unchecked Sendable, ObservableObject, Regu
 
         await withTaskGroup(of: Void.self) { group in
           loop: while true {
-            try? await Task.sleep(nanoseconds: self.dueTime.nanoseconds)
+            do {
+              try await self.scheduler.sleep(self.dueTime.nanoseconds)
+            } catch {
+              break loop
+            }
 
-            var hasTickedOutput: StateMachine.HasTickedOutput
+            guard !Task.isCancelled else {
+              break loop
+            }
 
-            os_unfair_lock_lock(self.lock)
-            hasTickedOutput = self.stateMachine.hasTicked()
-            os_unfair_lock_unlock(self.lock)
+            let hasTickedOutput = self.didTick()
 
             switch hasTickedOutput {
               case .finishThrottling:
@@ -150,6 +163,12 @@ public final class Throttler<Value>: @unchecked Sendable, ObservableObject, Regu
 
   public func cancel() {
     self.task?.cancel()
+  }
+
+  private func didTick() -> StateMachine.HasTickedOutput {
+    os_unfair_lock_lock(self.lock)
+    defer { os_unfair_lock_unlock(self.lock) }
+    return self.stateMachine.hasTicked()
   }
 
   deinit {

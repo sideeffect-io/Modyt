@@ -894,9 +894,13 @@ struct SingleLightStoreTests {
     func presetSelectionBuffersIntermediateGatewayColorThenAppliesItAfterTheConfiguredHoldWindow() async {
         let streamBox = DeviceStreamBox()
         let commands = RecordedLightGatewayCommands()
+        let testTime = ManualTestClock()
         let store = makeStore(
             streamBox: streamBox,
-            commands: commands
+            commands: commands,
+            sleep: { duration in
+                try await testTime.sleep(for: duration)
+            }
         )
 
         streamBox.yield(
@@ -947,8 +951,11 @@ struct SingleLightStoreTests {
             store.selectedPresetKind == committedPreset.kind
                 && abs(store.displayedNormalizedColor - committedNormalizedColor) < 0.0001
         })
+        #expect(await waitUntilAsync {
+            await testTime.pendingSleepCount() == 1
+        })
 
-        try? await Task.sleep(for: .milliseconds(50))
+        await testTime.advance(by: .milliseconds(50))
 
         #expect(await waitUntil {
             store.selectedPresetKind == intermediatePreset.kind
@@ -1076,7 +1083,13 @@ struct SingleLightStoreTests {
     @Test
     func repeatedPresetSelectionsCancelAndReplaceThePreviousHold() async {
         let streamBox = DeviceStreamBox()
-        let store = makeStore(streamBox: streamBox)
+        let testTime = ManualTestClock()
+        let store = makeStore(
+            streamBox: streamBox,
+            sleep: { duration in
+                try await testTime.sleep(for: duration)
+            }
+        )
 
         streamBox.yield(
             makeLightDevice(
@@ -1126,8 +1139,11 @@ struct SingleLightStoreTests {
         #expect(await waitUntil {
             store.selectedPresetKind == intermediatePreset.kind
         })
+        #expect(await waitUntilAsync {
+            await testTime.pendingSleepCount() == 1
+        })
 
-        try? await Task.sleep(for: .milliseconds(50))
+        await testTime.advance(by: .milliseconds(50))
 
         #expect(await waitUntil {
             store.selectedPresetKind == .pink
@@ -1198,8 +1214,10 @@ struct SingleLightStoreTests {
     private func makeStore(
         streamBox: DeviceStreamBox,
         commands: RecordedLightGatewayCommands = RecordedLightGatewayCommands(),
-        colorHoldDuration: Duration? = nil
+        colorHoldDuration: Duration? = nil,
+        sleep: (@Sendable (Duration) async throws -> Void)? = nil
     ) -> SingleLightStore {
+        let testTime = ManualTestClock()
         let store = SingleLightStore(
             deviceId: deviceId,
             observeLight: .init(
@@ -1210,7 +1228,10 @@ struct SingleLightStoreTests {
                     await commands.record(request)
                 }
             ),
-            colorHoldDuration: colorHoldDuration ?? testColorHoldDuration
+            colorHoldDuration: colorHoldDuration ?? testColorHoldDuration,
+            sleep: sleep ?? { duration in
+                try await testTime.sleep(for: duration)
+            }
         )
         store.start()
         return store
@@ -1347,12 +1368,13 @@ private actor RecordedLightGatewayCommands {
 private actor HoldSleepRecorder {
     private var startCount = 0
     private var cancellationCount = 0
+    private let testTime = ManualTestClock()
 
     func sleep(_ duration: Duration) async throws {
         startCount += 1
 
         do {
-            try await Task.sleep(for: duration)
+            try await testTime.sleep(for: duration)
         } catch {
             cancellationCount += 1
             throw error

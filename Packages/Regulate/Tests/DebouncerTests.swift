@@ -10,22 +10,33 @@ import XCTest
 
 final class DebouncerTests: XCTestCase {
   func test_debouncer_discards_intermediates_values_and_outputs_last_value() async {
-    let hasDebounced = expectation(description: "Has debounced a value")
     let spy = Spy<Int>()
+    let scheduler = ManualRegulateScheduler()
 
-    let sut = Task.debounce(dueTime: .milliseconds(200)) { value in
+    let sut = Task.debounce(
+      dueTime: .milliseconds(200),
+      scheduler: scheduler.scheduler
+    ) { value in
       await spy.push(value)
-      hasDebounced.fulfill()
     }
 
-    for index in (0...4) {
-      DispatchQueue.global().asyncAfter(deadline: .now().advanced(by: .milliseconds(100 * index))) {
-        sut.push(index)
-      }
-    }
+    sut.push(0)
+    scheduler.advance(by: .milliseconds(100))
+    sut.push(1)
+    scheduler.advance(by: .milliseconds(100))
+    sut.push(2)
+    scheduler.advance(by: .milliseconds(100))
+    sut.push(3)
+    scheduler.advance(by: .milliseconds(100))
+    sut.push(4)
+    scheduler.advance(by: .milliseconds(199))
+    await settleRegulateTasks()
+    await spy.assertEqual(expected: [])
 
-    wait(for: [hasDebounced], timeout: 5.0)
+    scheduler.advance(by: .milliseconds(1))
+    await settleRegulateTasks()
 
     await spy.assertEqual(expected: [4])
+    sut.cancel()
   }
 }

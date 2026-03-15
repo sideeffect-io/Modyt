@@ -50,12 +50,15 @@ struct SingleLightView: View {
 
     @ViewBuilder
     private func gaugeAndPowerControl(store: SingleLightStore) -> some View {
+        let displayedNormalizedLevel = draftNormalizedLevel ?? store.displayedNormalizedLevel
+
         ZStack {
             LightGaugeControl(
                 colorScheme: colorScheme,
-                normalizedValue: draftNormalizedLevel ?? store.displayedNormalizedLevel,
+                normalizedValue: displayedNormalizedLevel,
                 isOn: store.displayedIsOn,
                 isEnabled: store.isInteractionEnabled,
+                animatesValueChanges: draftNormalizedLevel == nil,
                 onValueChanged: { draftNormalizedLevel = $0 },
                 onEditingEnded: { normalizedValue in
                     draftNormalizedLevel = nil
@@ -131,6 +134,7 @@ private struct LightGaugeControl: View {
     let normalizedValue: Double
     let isOn: Bool
     let isEnabled: Bool
+    let animatesValueChanges: Bool
     let onValueChanged: (Double) -> Void
     let onEditingEnded: (Double) -> Void
 
@@ -165,6 +169,10 @@ private struct LightGaugeControl: View {
 
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .animation(
+                animatesValueChanges ? Self.valueChangeAnimation : nil,
+                value: clampedNormalizedValue
+            )
             .contentShape(Circle())
             .gesture(
                 DragGesture(minimumDistance: 0)
@@ -214,6 +222,7 @@ private struct LightGaugeControl: View {
     private static let maximumAngle: Double = 150
     private static let startAngle: Double = minimumAngle
     private static let sweepAngle: Double = 300
+    private static let valueChangeAnimation = Animation.easeInOut(duration: 0.28)
 
     private static let onGradient = AngularGradient(
         colors: [Color.yellow, AppColors.ember, Color.yellow],

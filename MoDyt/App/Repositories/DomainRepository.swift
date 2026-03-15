@@ -252,14 +252,10 @@ actor DomainRepository<Item: DomainType, Upsert: DomainUpsert> where Item.ID == 
         continuations[observerID] = continuation
 
         if let snapshot {
-            if snapshot.isEmpty == false {
-                continuation.yield(snapshot)
-            }
+            continuation.yield(snapshot)
         } else {
             snapshot = initialSnapshot
-            if initialSnapshot.isEmpty == false {
-                continuation.yield(initialSnapshot)
-            }
+            continuation.yield(initialSnapshot)
         }
 
         continuation.onTermination = { [repository = self] _ in

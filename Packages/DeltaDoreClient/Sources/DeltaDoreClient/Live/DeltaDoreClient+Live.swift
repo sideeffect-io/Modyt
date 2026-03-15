@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 public extension DeltaDoreClient.Dependencies {
     static func live(
@@ -6,14 +7,24 @@ public extension DeltaDoreClient.Dependencies {
         gatewayMacService: String = "io.sideeffect.deltadoreclient.gateway-mac",
         cloudCredentialService: String = "io.sideeffect.deltadoreclient.cloud-credentials",
         remoteHost: String = "mediation.tydom.com",
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        log: @escaping @Sendable (String) -> Void = { message in
+#if DEBUG
+            Logger(
+                subsystem: "io.sideeffect.deltadoreclient",
+                category: "Diagnostics"
+            )
+            .debug("\(message, privacy: .public)")
+#endif
+        }
     ) -> DeltaDoreClient.Dependencies {
         let environment = TydomConnectionResolver.Environment.live(
             credentialService: credentialService,
             gatewayMacService: gatewayMacService,
             cloudCredentialService: cloudCredentialService,
             remoteHost: remoteHost,
-            now: now
+            now: now,
+            log: log
         )
         let resolver = TydomConnectionResolver(environment: environment)
 
@@ -23,6 +34,7 @@ public extension DeltaDoreClient.Dependencies {
             }
             let connection = TydomConnection(
                 configuration: resolution.configuration,
+                log: log,
                 onDisconnect: resolution.onDisconnect
             )
             try await connectAndValidate(
@@ -85,7 +97,16 @@ public extension DeltaDoreClient {
         gatewayMacService: String = "io.sideeffect.deltadoreclient.gateway-mac",
         cloudCredentialService: String = "io.sideeffect.deltadoreclient.cloud-credentials",
         remoteHost: String = "mediation.tydom.com",
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        log: @escaping @Sendable (String) -> Void = { message in
+#if DEBUG
+            Logger(
+                subsystem: "io.sideeffect.deltadoreclient",
+                category: "Diagnostics"
+            )
+            .debug("\(message, privacy: .public)")
+#endif
+        }
     ) -> DeltaDoreClient {
         DeltaDoreClient(
             dependencies: .live(
@@ -93,7 +114,8 @@ public extension DeltaDoreClient {
                 gatewayMacService: gatewayMacService,
                 cloudCredentialService: cloudCredentialService,
                 remoteHost: remoteHost,
-                now: now
+                now: now,
+                log: log
             )
         )
     }
@@ -131,6 +153,10 @@ private func probeConnectionWithRetry(
             )
             return true
         } catch {
+            if let connectionError = error as? TydomConnection.ConnectionError,
+               connectionError == .notConnected {
+                return false
+            }
             if attempt == 0 {
                 try? await Task.sleep(nanoseconds: 200_000_000)
             }

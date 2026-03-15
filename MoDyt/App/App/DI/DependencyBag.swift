@@ -1,5 +1,11 @@
 import Foundation
+import OSLog
 import DeltaDoreClient
+
+private let dependencyBagLogger = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "io.sideeffect.MoDyt",
+    category: "Persistence"
+)
 
 struct DependencyBag: Sendable {
     let localStorageDatasources: LocalStorageDatasources
@@ -9,7 +15,9 @@ struct DependencyBag: Sendable {
     static func live(
         databasePath: String = databaseURL.path,
         now: @escaping @Sendable () -> Date = Date.init,
-        log: @escaping @Sendable (String) -> Void = { print($0) }
+        log: @escaping @Sendable (String) -> Void = { message in
+            dependencyBagLogger.error("\(message, privacy: .public)")
+        }
     ) -> DependencyBag {
         let localStorageDatasources = makeLocalStorageDatasources(
             databasePath: databasePath,

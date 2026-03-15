@@ -231,10 +231,10 @@ final class SingleShutterStore: StartableStore {
         ) -> Transition<SingleShutterState, SingleShutterEffect> {
             switch (state, event) {
             case let (.featureIsIdle(deviceId, _, pendingLocalTarget), .positionWasReceived(position)):
-                return reducePositionWhileIdle(
+                return reduceKnownPositionWithOptionalTarget(
                     deviceId: deviceId,
                     position: position,
-                    pendingLocalTarget: pendingLocalTarget
+                    target: pendingLocalTarget
                 )
 
             case let (.featureIsIdle(deviceId, position, _), .pendingLocalTargetWasObserved(target)):
@@ -247,14 +247,14 @@ final class SingleShutterStore: StartableStore {
                 )
 
             case let (.featureIsStarted(deviceId, _, pendingLocalTarget), .positionWasReceived(position)):
-                return reducePositionWhileStarted(
+                return reduceKnownPositionWithOptionalTarget(
                     deviceId: deviceId,
                     position: position,
-                    pendingLocalTarget: pendingLocalTarget
+                    target: pendingLocalTarget
                 )
 
             case let (.featureIsStarted(deviceId, position, _), .pendingLocalTargetWasObserved(target)):
-                return reduceObservedPendingLocalTarget(
+                return reduceKnownPositionWithOptionalTarget(
                     deviceId: deviceId,
                     position: position,
                     target: target
@@ -454,83 +454,7 @@ final class SingleShutterStore: StartableStore {
             }
         }
 
-        private static func reducePositionWhileIdle(
-            deviceId: DeviceIdentifier,
-            position: Int,
-            pendingLocalTarget: Int?
-        ) -> Transition<SingleShutterState, SingleShutterEffect> {
-            guard let pendingLocalTarget else {
-                return .init(
-                    state: .featureIsStarted(
-                        deviceId: deviceId,
-                        position: position,
-                        pendingLocalTarget: nil
-                    )
-                )
-            }
-
-            if Self.hasReachedTarget(position: position, target: pendingLocalTarget) {
-                return .init(
-                    state: .featureIsStarted(
-                        deviceId: deviceId,
-                        position: position,
-                        pendingLocalTarget: nil
-                    ),
-                    effects: [.persistTarget(deviceId: deviceId, target: nil)]
-                )
-            }
-
-            return .init(
-                state: .shutterIsMovingToLocalTarget(
-                    deviceId: deviceId,
-                    position: position,
-                    target: pendingLocalTarget,
-                    timeoutTask: nil,
-                    ignoresNextMatchingPosition: true
-                ),
-                effects: [.startTimeout]
-            )
-        }
-
-        private static func reducePositionWhileStarted(
-            deviceId: DeviceIdentifier,
-            position: Int,
-            pendingLocalTarget: Int?
-        ) -> Transition<SingleShutterState, SingleShutterEffect> {
-            guard let pendingLocalTarget else {
-                return .init(
-                    state: .featureIsStarted(
-                        deviceId: deviceId,
-                        position: position,
-                        pendingLocalTarget: nil
-                    )
-                )
-            }
-
-            if Self.hasReachedTarget(position: position, target: pendingLocalTarget) {
-                return .init(
-                    state: .featureIsStarted(
-                        deviceId: deviceId,
-                        position: position,
-                        pendingLocalTarget: nil
-                    ),
-                    effects: [.persistTarget(deviceId: deviceId, target: nil)]
-                )
-            }
-
-            return .init(
-                state: .shutterIsMovingToLocalTarget(
-                    deviceId: deviceId,
-                    position: position,
-                    target: pendingLocalTarget,
-                    timeoutTask: nil,
-                    ignoresNextMatchingPosition: true
-                ),
-                effects: [.startTimeout]
-            )
-        }
-
-        private static func reduceObservedPendingLocalTarget(
+        private static func reduceKnownPositionWithOptionalTarget(
             deviceId: DeviceIdentifier,
             position: Int,
             target: Int?

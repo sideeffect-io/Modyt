@@ -97,7 +97,7 @@ struct DeviceRepositoryTests {
     }
 
     @Test
-    func observeByIDsDoesNotEmitWhenDatabaseIsEmpty() async throws {
+    func observeByIDsEmitsEmptySnapshotWhenDatabaseIsEmpty() async throws {
         let databasePath = temporarySQLitePath()
         defer {
             try? FileManager.default.removeItem(atPath: databasePath)
@@ -109,10 +109,10 @@ struct DeviceRepositoryTests {
         let stream = await repository.observeByIDs([.init(deviceId: 10, endpointId: 1)])
         let first = await firstValue(
             from: stream,
-            timeoutNanoseconds: 150_000_000
+            timeoutCycles: 50
         )
 
-        #expect(first == nil)
+        #expect(first == [])
     }
 
     @Test
@@ -158,7 +158,7 @@ struct DeviceRepositoryTests {
 
     private func firstValue<S: AsyncSequence & Sendable>(
         from stream: S,
-        timeoutNanoseconds: UInt64 = 1_000_000_000
+        timeoutCycles: Int = 200
     ) async -> S.Element? where S.Element: Sendable {
         await withTaskGroup(of: S.Element?.self) { group in
             group.addTask {
@@ -171,7 +171,9 @@ struct DeviceRepositoryTests {
             }
 
             group.addTask {
-                try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+                for _ in 0..<timeoutCycles {
+                    await Task.yield()
+                }
                 return nil
             }
 

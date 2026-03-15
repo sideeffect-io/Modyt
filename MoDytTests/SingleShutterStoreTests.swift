@@ -413,12 +413,13 @@ struct SingleShutterStoreEffectTests {
     func initialPendingLocalTargetStartsLocalTargetMovement() async {
         let streamBox = DeviceStreamBox()
         let sleepDurations = RecordedSleepDurations()
+        let testTime = ManualTestClock()
 
         let store = makeStore(
             streamBox: streamBox,
             sleep: { duration in
                 await sleepDurations.record(duration)
-                try await Task.sleep(for: .seconds(5))
+                try await testTime.sleep(for: duration)
             }
         )
         store.start()
@@ -530,12 +531,13 @@ struct SingleShutterStoreEffectTests {
     func observingPendingLocalTargetFromAnotherCardKeepsGaugeAndTargetSeparate() async {
         let streamBox = DeviceStreamBox()
         let sleepDurations = RecordedSleepDurations()
+        let testTime = ManualTestClock()
 
         let store = makeStore(
             streamBox: streamBox,
             sleep: { duration in
                 await sleepDurations.record(duration)
-                try await Task.sleep(for: .seconds(5))
+                try await testTime.sleep(for: duration)
             }
         )
         store.start()
@@ -572,11 +574,96 @@ struct SingleShutterStoreEffectTests {
     }
 
     @Test
+    func externallyObservedMatchingEchoFrameCompletesOnSecondMatchingFrame() async {
+        let streamBox = DeviceStreamBox()
+        let targets = RecordedSingleShutterTargets()
+        let timeoutLifecycle = TimeoutLifecycleRecorder()
+        let testTime = ManualTestClock()
+
+        let store = makeStore(
+            streamBox: streamBox,
+            sleep: { duration in
+                await timeoutLifecycle.didStart()
+                do {
+                    try await testTime.sleep(for: duration)
+                } catch {
+                    await timeoutLifecycle.didCancel()
+                    throw error
+                }
+            },
+            persistTarget: { deviceId, target in
+                await targets.record(deviceId: deviceId, target: target)
+            }
+        )
+        store.start()
+
+        streamBox.yield(makeShutter(identifier: id10, position: 100, target: nil))
+        let didStart = await waitUntil {
+            store.state == .featureIsStarted(
+                deviceId: id10,
+                position: 100,
+                pendingLocalTarget: nil
+            )
+        }
+        #expect(didStart)
+
+        streamBox.yield(makeShutter(identifier: id10, position: 100, target: 75))
+        let didObserveTarget = await waitUntil {
+            store.state == .shutterIsMovingToLocalTarget(
+                deviceId: id10,
+                position: 100,
+                target: 75,
+                ignoresNextMatchingPosition: true
+            )
+        }
+        #expect(didObserveTarget)
+
+        let timeoutStarted = await waitUntilAsync {
+            await timeoutLifecycle.startCount() == 1
+        }
+        #expect(timeoutStarted)
+
+        streamBox.yield(makeShutter(identifier: id10, position: 75, target: 75))
+        let didIgnoreEchoFrame = await waitUntil {
+            store.state == .shutterIsMovingToLocalTarget(
+                deviceId: id10,
+                position: 100,
+                target: 75,
+                ignoresNextMatchingPosition: false
+            )
+        }
+        #expect(didIgnoreEchoFrame)
+
+        streamBox.yield(makeShutter(identifier: id10, position: 75, target: 75))
+        let didFinishMove = await waitUntil {
+            store.state == .featureIsStarted(
+                deviceId: id10,
+                position: 75,
+                pendingLocalTarget: nil
+            )
+        }
+        #expect(didFinishMove)
+
+        let timeoutCancelled = await waitUntilAsync {
+            await timeoutLifecycle.cancelCount() >= 1
+        }
+        #expect(timeoutCancelled)
+
+        let didPersistClearedTarget = await waitUntilAsync {
+            await targets.values() == [
+                .init(deviceId: id10, target: nil)
+            ]
+        }
+        #expect(didPersistClearedTarget)
+    }
+
+    @Test
     func targetWasSetInAppSendsCommandStartsTimeoutAndPersistsTarget() async {
         let streamBox = DeviceStreamBox()
         let commands = RecordedSingleShutterCommands()
         let targets = RecordedSingleShutterTargets()
         let sleepDurations = RecordedSleepDurations()
+        let testTime = ManualTestClock()
 
         let store = makeStore(
             streamBox: streamBox,
@@ -585,7 +672,7 @@ struct SingleShutterStoreEffectTests {
             },
             sleep: { duration in
                 await sleepDurations.record(duration)
-                try await Task.sleep(for: .seconds(5))
+                try await testTime.sleep(for: duration)
             },
             persistTarget: { deviceId, target in
                 await targets.record(deviceId: deviceId, target: target)
@@ -647,16 +734,17 @@ struct SingleShutterStoreEffectTests {
         let commands = RecordedSingleShutterCommands()
         let targets = RecordedSingleShutterTargets()
         let timeoutLifecycle = TimeoutLifecycleRecorder()
+        let testTime = ManualTestClock()
 
         let store = makeStore(
             streamBox: streamBox,
             sendCommand: { deviceId, position in
                 await commands.record(deviceId: deviceId, position: position)
             },
-            sleep: { _ in
+            sleep: { duration in
                 await timeoutLifecycle.didStart()
                 do {
-                    try await Task.sleep(for: .seconds(5))
+                    try await testTime.sleep(for: duration)
                 } catch {
                     await timeoutLifecycle.didCancel()
                     throw error
@@ -721,13 +809,14 @@ struct SingleShutterStoreEffectTests {
         let streamBox = DeviceStreamBox()
         let targets = RecordedSingleShutterTargets()
         let timeoutLifecycle = TimeoutLifecycleRecorder()
+        let testTime = ManualTestClock()
 
         let store = makeStore(
             streamBox: streamBox,
-            sleep: { _ in
+            sleep: { duration in
                 await timeoutLifecycle.didStart()
                 do {
-                    try await Task.sleep(for: .seconds(5))
+                    try await testTime.sleep(for: duration)
                 } catch {
                     await timeoutLifecycle.didCancel()
                     throw error
@@ -820,12 +909,11 @@ struct SingleShutterStoreEffectTests {
     private func makeStore(
         streamBox: DeviceStreamBox,
         sendCommand: @escaping @Sendable (DeviceIdentifier, Int) async -> Void = { _, _ in },
-        sleep: @escaping @Sendable (Duration) async throws -> Void = { _ in
-            try await Task.sleep(for: .seconds(5))
-        },
+        sleep: (@Sendable (Duration) async throws -> Void)? = nil,
         persistTarget: @escaping @Sendable (DeviceIdentifier, Int?) async -> Void = { _, _ in }
     ) -> SingleShutterStore {
-        SingleShutterStore(
+        let testTime = ManualTestClock()
+        return SingleShutterStore(
             deviceId: id10,
             observeDevice: .init(
                 observeDevice: { _ in streamBox.stream }
@@ -834,7 +922,9 @@ struct SingleShutterStoreEffectTests {
                 sendCommand: sendCommand
             ),
             startTimeout: .init(
-                sleep: sleep
+                sleep: sleep ?? { duration in
+                    try await testTime.sleep(for: duration)
+                }
             ),
             persistTarget: .init(
                 persistTarget: persistTarget

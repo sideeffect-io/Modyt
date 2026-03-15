@@ -145,12 +145,24 @@ public struct DeltaDoreClient: Sendable {
 
     public func renewStoredConnectionIfNeeded(
         preferLocal: Bool = true,
-        livenessTimeout: TimeInterval = 2.0
+        livenessTimeout: TimeInterval = 2.0,
+        skipLivenessProbe: Bool = false
     ) async throws -> StoredConnectionRenewalResult {
-        if let currentConnection = await runtimeSession.currentConnection(),
+        if skipLivenessProbe == false,
+           let currentConnection = await runtimeSession.currentConnection(),
            await dependencies.probeConnection(currentConnection, livenessTimeout) {
-            await currentConnection.setAppActive(true)
-            return .unchanged
+            if preferLocal {
+                switch await currentConnection.mode() {
+                case .local:
+                    await currentConnection.setAppActive(true)
+                    return .unchanged
+                case .remote:
+                    break
+                }
+            } else {
+                await currentConnection.setAppActive(true)
+                return .unchanged
+            }
         }
 
         let session = try await renewStoredConnection(preferLocal: preferLocal)

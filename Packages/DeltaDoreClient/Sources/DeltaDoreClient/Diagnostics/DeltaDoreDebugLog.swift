@@ -1,17 +1,19 @@
 import Foundation
+import OSLog
 
 enum DeltaDoreDebugLog {
+    private static let logger = Logger(
+        subsystem: "io.sideeffect.deltadoreclient",
+        category: "Diagnostics"
+    )
+
     static func log(_ message: @autoclosure () -> String) {
 #if DEBUG
         let text = message()
         if shouldSuppress(text) {
             return
         }
-        let line = "[DeltaDoreClient] \(text)\n"
-        guard let data = line.data(using: .utf8) else {
-            return
-        }
-        FileHandle.standardError.write(data)
+        logger.debug("\(text, privacy: .public)")
 #endif
     }
 

@@ -17,6 +17,19 @@ struct ObserveSingleShutterEffectExecutor: Sendable {
                         position: device?.shutterPosition ?? 0,
                         pendingLocalTarget: device?.shutterTargetPosition
                     )
+                    let shouldEmitPositionEvent: Bool
+
+                    if let previousSnapshot {
+                        let isRepeatedMatchingTargetFrame =
+                            previousSnapshot.position == snapshot.position
+                            && previousSnapshot.pendingLocalTarget == snapshot.pendingLocalTarget
+                            && snapshot.pendingLocalTarget == snapshot.position
+                        shouldEmitPositionEvent =
+                            previousSnapshot.position != snapshot.position
+                            || isRepeatedMatchingTargetFrame
+                    } else {
+                        shouldEmitPositionEvent = true
+                    }
 
                     if let previousSnapshot {
                         if previousSnapshot.pendingLocalTarget != snapshot.pendingLocalTarget {
@@ -24,7 +37,7 @@ struct ObserveSingleShutterEffectExecutor: Sendable {
                                 .pendingLocalTargetWasObserved(target: snapshot.pendingLocalTarget)
                             )
                         }
-                        if previousSnapshot.position != snapshot.position {
+                        if shouldEmitPositionEvent {
                             continuation.yield(.positionWasReceived(position: snapshot.position))
                         }
                     } else {
@@ -33,7 +46,9 @@ struct ObserveSingleShutterEffectExecutor: Sendable {
                                 .pendingLocalTargetWasObserved(target: snapshot.pendingLocalTarget)
                             )
                         }
-                        continuation.yield(.positionWasReceived(position: snapshot.position))
+                        if shouldEmitPositionEvent {
+                            continuation.yield(.positionWasReceived(position: snapshot.position))
+                        }
                     }
 
                     previousSnapshot = snapshot

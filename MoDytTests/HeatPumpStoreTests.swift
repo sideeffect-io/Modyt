@@ -115,10 +115,11 @@ struct HeatPumpStoreEffectTests {
             streamBox: streamBox,
             identifier: .init(deviceId: 42, endpointId: 1),
             makeTransactionID: { "tx-1" },
-            setPointDebounceInterval: .milliseconds(0)
-        ) { command in
-            await commands.record(command)
-        }
+            setPointDebounceInterval: .milliseconds(0),
+            executeSetPointCommand: { command in
+                await commands.record(command)
+            }
+        )
         store.start()
 
         streamBox.yield(
@@ -159,14 +160,17 @@ struct HeatPumpStoreEffectTests {
         let streamBox = DeviceStreamBox()
         let commands = RecordedGatewayCommands()
         let transactionIDs = TransactionIDSequence(ids: ["tx-1", "tx-2", "tx-3", "tx-4"])
+        let regulator = ControlledHeatPumpSetPointRegulator()
         let store = makeStore(
             streamBox: streamBox,
             identifier: .init(deviceId: 42, endpointId: 1),
             makeTransactionID: { await transactionIDs.next() },
-            setPointDebounceInterval: .milliseconds(120)
-        ) { command in
-            await commands.record(command)
-        }
+            setPointDebounceInterval: .milliseconds(120),
+            makeSetPointRegulator: regulator.makeRegulator,
+            executeSetPointCommand: { command in
+                await commands.record(command)
+            }
+        )
         store.start()
 
         streamBox.yield(
@@ -192,10 +196,12 @@ struct HeatPumpStoreEffectTests {
 
         store.send(.newSetPointWasReceived(21.5))
         #expect(store.state == .setPointIsBeingSet(HeatPumpValues(temperature: 20.0, setPoint: 21.5)))
-
-        try await Task.sleep(for: .milliseconds(40))
         #expect(await commands.values().isEmpty)
-        try await Task.sleep(for: .milliseconds(400))
+        #expect(regulator.recordedPushCount() == 3)
+        #expect(regulator.latestPushedValue() == 21.5)
+        #expect(regulator.recordedIntervals().map(\.nanoseconds) == [120_000_000])
+
+        await regulator.emitLatest()
 
         let didComplete = await waitUntil(cycles: 120) {
             store.state == .featureIsStarted(HeatPumpValues(temperature: 20.0, setPoint: 21.5))
@@ -244,6 +250,10 @@ struct HeatPumpStoreEffectTests {
         identifier: DeviceIdentifier,
         makeTransactionID: @escaping @Sendable () async -> String = { "test-transaction-id" },
         setPointDebounceInterval: DispatchTimeInterval = .seconds(2),
+        makeSetPointRegulator: @escaping @MainActor @Sendable (
+            DispatchTimeInterval,
+            @escaping @Sendable (Double) async -> Void
+        ) -> HeatPumpSetPointRegulator = HeatPumpSetPointRegulator.live,
         executeSetPointCommand: @escaping @Sendable (HeatPumpGatewayCommand) async -> Void = { _ in }
     ) -> HeatPumpStore {
         HeatPumpStore(
@@ -254,8 +264,75 @@ struct HeatPumpStoreEffectTests {
                 executeSetPointCommand: executeSetPointCommand,
                 makeTransactionID: makeTransactionID
             ),
-            setPointDebounceInterval: setPointDebounceInterval
+            setPointDebounceInterval: setPointDebounceInterval,
+            makeSetPointRegulator: makeSetPointRegulator
         )
+    }
+}
+
+@MainActor
+private final class ControlledHeatPumpSetPointRegulator {
+    private var latestValue: Double?
+    private var output: (@Sendable (Double) async -> Void)?
+    private var intervals: [DispatchTimeInterval] = []
+    private var pushCount = 0
+
+    func makeRegulator(
+        dueTime: DispatchTimeInterval,
+        output: @escaping @Sendable (Double) async -> Void
+    ) -> HeatPumpSetPointRegulator {
+        self.intervals.append(dueTime)
+        self.output = output
+
+        return HeatPumpSetPointRegulator(
+            push: { [weak self] value in
+                self?.pushCount += 1
+                self?.latestValue = value
+            },
+            cancel: { [weak self] in
+                self?.latestValue = nil
+            }
+        )
+    }
+
+    func emitLatest() async {
+        guard let latestValue, let output else {
+            return
+        }
+
+        self.latestValue = nil
+        await output(latestValue)
+    }
+
+    func latestPushedValue() -> Double? {
+        latestValue
+    }
+
+    func recordedIntervals() -> [DispatchTimeInterval] {
+        intervals
+    }
+
+    func recordedPushCount() -> Int {
+        pushCount
+    }
+}
+
+private extension DispatchTimeInterval {
+    var nanoseconds: UInt64 {
+        switch self {
+        case .nanoseconds(let value) where value >= 0:
+            return UInt64(value)
+        case .microseconds(let value) where value >= 0:
+            return UInt64(value) * 1_000
+        case .milliseconds(let value) where value >= 0:
+            return UInt64(value) * 1_000_000
+        case .seconds(let value) where value >= 0:
+            return UInt64(value) * 1_000_000_000
+        case .never:
+            return .zero
+        default:
+            return .zero
+        }
     }
 }
 

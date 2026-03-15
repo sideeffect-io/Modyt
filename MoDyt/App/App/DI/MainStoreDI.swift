@@ -148,8 +148,16 @@ actor MainRuntime {
     func checkGatewayConnection() async -> MainEvent? {
         let isAlive = await gatewayClient.isCurrentConnectionAlive(timeout: 2.0)
         if isAlive {
-            await gatewayClient.setCurrentConnectionAppActive(true)
-            return nil
+            if let mode = await gatewayClient.currentConnectionMode() {
+                switch mode {
+                case .local:
+                    await gatewayClient.setCurrentConnectionAppActive(true)
+                    return nil
+                case .remote:
+                    cancelMessageStream()
+                    return .reconnectionWasRequested
+                }
+            }
         }
 
         cancelMessageStream()
@@ -160,7 +168,8 @@ actor MainRuntime {
         do {
             _ = try await gatewayClient.renewStoredConnectionIfNeeded(
                 preferLocal: true,
-                livenessTimeout: 2.0
+                livenessTimeout: 2.0,
+                skipLivenessProbe: true
             )
             try await prepareGatewayHandling(restartStream: true)
             await gatewayClient.setCurrentConnectionAppActive(true)

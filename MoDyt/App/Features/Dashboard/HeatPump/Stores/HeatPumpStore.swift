@@ -49,6 +49,30 @@ struct HeatPumpGatewayCommand: Sendable, Equatable {
     let transactionId: String
 }
 
+struct HeatPumpSetPointRegulator: Sendable {
+    let push: @MainActor @Sendable (Double) -> Void
+    let cancel: @MainActor @Sendable () -> Void
+
+    static func live(
+        dueTime: DispatchTimeInterval,
+        output: @escaping @Sendable (Double) async -> Void
+    ) -> Self {
+        let throttler = Throttler<Double>(
+            dueTime: dueTime,
+            output: output
+        )
+
+        return Self(
+            push: { value in
+                throttler.push(value)
+            },
+            cancel: {
+                throttler.cancel()
+            }
+        )
+    }
+}
+
 @Observable
 @MainActor
 final class HeatPumpStore: StartableStore {
@@ -125,8 +149,13 @@ final class HeatPumpStore: StartableStore {
 
     private let observeHeatPump: ObserveHeatPumpEffectExecutor
     private let executeSetPoint: ExecuteHeatPumpSetPointEffectExecutor
+    private let setPointDebounceInterval: DispatchTimeInterval
+    private let makeSetPointRegulator: @MainActor @Sendable (
+        DispatchTimeInterval,
+        @escaping @Sendable (Double) async -> Void
+    ) -> HeatPumpSetPointRegulator
     private var observationTask: Task<Void, Never>?
-    private let setPointThrottler: Throttler<Double>
+    private var setPointRegulator: HeatPumpSetPointRegulator?
     private var commandContext: CommandContext?
     private var hasStarted = false
 
@@ -152,15 +181,16 @@ final class HeatPumpStore: StartableStore {
     init(
         observeHeatPump: ObserveHeatPumpEffectExecutor,
         executeSetPoint: ExecuteHeatPumpSetPointEffectExecutor,
-        setPointDebounceInterval: DispatchTimeInterval = .seconds(2)
+        setPointDebounceInterval: DispatchTimeInterval = .seconds(2),
+        makeSetPointRegulator: @escaping @MainActor @Sendable (
+            DispatchTimeInterval,
+            @escaping @Sendable (Double) async -> Void
+        ) -> HeatPumpSetPointRegulator = HeatPumpSetPointRegulator.live
     ) {
         self.observeHeatPump = observeHeatPump
         self.executeSetPoint = executeSetPoint
-        self.setPointThrottler = Throttler(dueTime: setPointDebounceInterval)
-        self.setPointThrottler.output = { [weak self] value in
-            guard let self else { return }
-            await self.executeDebouncedSetPoint(value)
-        }
+        self.setPointDebounceInterval = setPointDebounceInterval
+        self.makeSetPointRegulator = makeSetPointRegulator
     }
 
     func start() {
@@ -190,7 +220,7 @@ final class HeatPumpStore: StartableStore {
 
     isolated deinit {
         observationTask?.cancel()
-        setPointThrottler.cancel()
+        setPointRegulator?.cancel()
     }
 
     func send(_ event: HeatPumpEvent) {
@@ -208,7 +238,7 @@ final class HeatPumpStore: StartableStore {
     private func handle(_ effect: HeatPumpEffect) {
         switch effect {
         case .updateSetPoint(let setPoint):
-            setPointThrottler.push(setPoint)
+            ensureSetPointRegulator().push(setPoint)
         }
     }
 
@@ -219,6 +249,21 @@ final class HeatPumpStore: StartableStore {
         ) {
             send(event)
         }
+    }
+
+    private func ensureSetPointRegulator() -> HeatPumpSetPointRegulator {
+        if let setPointRegulator {
+            return setPointRegulator
+        }
+
+        let regulator = makeSetPointRegulator(
+            setPointDebounceInterval
+        ) { [weak self] value in
+            guard let self else { return }
+            await self.executeDebouncedSetPoint(value)
+        }
+        setPointRegulator = regulator
+        return regulator
     }
 
     nonisolated static func resolveObservedDevice(

@@ -15,9 +15,14 @@ public extension Task where Failure == Never {
   /// - Returns: the debounced regulator
   static func debounce(
     dueTime: DispatchTimeInterval,
+    scheduler: RegulateScheduler = .live,
     output: @Sendable @escaping (Success) async -> Void
   ) -> some Regulator<Success> {
-    Debouncer(dueTime: dueTime, output: output)
+    Debouncer(
+      dueTime: dueTime,
+      scheduler: scheduler,
+      output: output
+    )
   }
 }
 
@@ -82,6 +87,7 @@ public final class Debouncer<Value>: @unchecked Sendable, ObservableObject, Regu
   public var output: (@Sendable (Value) async -> Void)?
   public var dueTime: DispatchTimeInterval
 
+  private let scheduler: RegulateScheduler
   private let lock: os_unfair_lock_t = UnsafeMutablePointer<os_unfair_lock_s>.allocate(capacity: 1)
   private var stateMachine = StateMachine()
   private var task: Task<Void, Never>?
@@ -96,15 +102,20 @@ public final class Debouncer<Value>: @unchecked Sendable, ObservableObject, Regu
   ///   - output: the block to execute once the regulation is done
   public init(
     dueTime: DispatchTimeInterval,
+    scheduler: RegulateScheduler = .live,
     output: (@Sendable (Value) async -> Void)? = nil
   ) {
     self.lock.initialize(to: os_unfair_lock())
     self.dueTime = dueTime
+    self.scheduler = scheduler
     self.output = output
   }
 
   public func push(_ value: Value) {
-    let newValue = DueValue(value: value, dueTime: DispatchTime.now().advanced(by: dueTime))
+    let newValue = DueValue(
+      value: value,
+      dueTime: self.scheduler.now().advanced(by: dueTime)
+    )
     var shouldStartADebounce = false
 
     os_unfair_lock_lock(self.lock)
@@ -119,18 +130,23 @@ public final class Debouncer<Value>: @unchecked Sendable, ObservableObject, Regu
         var currentValue = value
 
       loop: while true {
-        try? await Task.sleep(nanoseconds: timeToSleep)
+        do {
+          try await self.scheduler.sleep(timeToSleep)
+        } catch {
+          break loop
+        }
 
-        var output: StateMachine.HasDebouncedOutput
-        os_unfair_lock_lock(self.lock)
-        output = self.stateMachine.hasDebouncedCurrentValue()
-        os_unfair_lock_unlock(self.lock)
+        guard !Task.isCancelled else {
+          break loop
+        }
+
+        let output = self.hasDebouncedCurrentValue()
 
         switch output {
           case .finishDebouncing:
             break loop
           case .continueDebouncing(let value):
-            timeToSleep = DispatchTime.now().distance(to: value.dueTime).nanoseconds
+            timeToSleep = self.scheduler.now().distance(to: value.dueTime).nanoseconds
             currentValue = value.value
             continue loop
         }
@@ -143,6 +159,12 @@ public final class Debouncer<Value>: @unchecked Sendable, ObservableObject, Regu
 
   public func cancel() {
     self.task?.cancel()
+  }
+
+  private func hasDebouncedCurrentValue() -> StateMachine.HasDebouncedOutput {
+    os_unfair_lock_lock(self.lock)
+    defer { os_unfair_lock_unlock(self.lock) }
+    return self.stateMachine.hasDebouncedCurrentValue()
   }
 
   deinit {

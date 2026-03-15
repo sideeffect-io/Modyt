@@ -141,6 +141,45 @@ struct FavoriteRepositoryTests {
         #expect(try await fixture.deviceRepository.get(.init(deviceId: 9, endpointId: 1))?.isFavorite == false)
         #expect(try await fixture.sceneRepository.get("scene-9")?.isFavorite == false)
     }
+
+    @Test
+    func observeAllEmitsFavoriteAddedAfterInitialEmptySnapshot() async throws {
+        let fixture = RepositoryFixture(directoryName: "favorite-repository-tests")
+        defer { fixture.cleanup() }
+
+        try await fixture.seedDevice(
+            id: .init(deviceId: 42, endpointId: 1),
+            name: "Kitchen Light"
+        )
+
+        let stream = await fixture.favoriteRepository.observeAll()
+        let recorder = FavoriteObservationRecorder()
+        let collectionTask = Task {
+            for await favorites in stream {
+                await recorder.record(favorites)
+            }
+        }
+        defer { collectionTask.cancel() }
+
+        let receivedInitial = await testWaitUntilAsync {
+            await recorder.values().count >= 1
+        }
+        #expect(receivedInitial)
+        #expect(await recorder.values().first == [])
+
+        try await fixture.favoriteRepository.toggleFavorite(
+            .device(identifier: .init(deviceId: 42, endpointId: 1))
+        )
+
+        let receivedUpdated = await testWaitUntilAsync {
+            await recorder.values().count >= 2
+        }
+        #expect(receivedUpdated)
+        #expect(await recorder.values().last?.map(\.type) == [
+            .device(identifier: .init(deviceId: 42, endpointId: 1))
+        ])
+    }
+
 }
 
 private struct RepositoryFixture {
@@ -220,5 +259,17 @@ private struct RepositoryFixture {
                 isGatewayInternal: false
             )
         ])
+    }
+}
+
+private actor FavoriteObservationRecorder {
+    private var snapshots: [[FavoriteItem]] = []
+
+    func record(_ favorites: [FavoriteItem]) {
+        snapshots.append(favorites)
+    }
+
+    func values() -> [[FavoriteItem]] {
+        snapshots
     }
 }
