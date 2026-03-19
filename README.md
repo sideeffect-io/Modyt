@@ -137,6 +137,8 @@ Encapsulates Tydom authentication and connectivity:
 - inspect stored-vs-new credential flow
 - fetch sites from cloud credentials
 - connect locally or remotely
+- for stored `.auto`, try the cached local IP first and only fall back to discovery when the cache is missing or stale
+- for stored `.forceLocal`, try the cached local IP first and only use discovery if the cached host is missing or has failed
 - decode gateway messages
 - expose a CLI for protocol/debug workflows
 

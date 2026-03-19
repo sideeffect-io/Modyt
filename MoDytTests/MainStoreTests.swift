@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Testing
+@testable import DeltaDoreClient
 @testable import MoDyt
 
 struct MainReducerTransitionTests {
@@ -419,6 +420,119 @@ struct MainGatewayDataRequestPipelineTests {
     }
 }
 
+struct MainRuntimeTests {
+    @Test
+    func foregroundLocalHealthCheckUsesSingleShortProbe() async throws {
+        let databasePath = testTemporarySQLitePath("MainRuntimeTests-local-probe")
+        defer { try? FileManager.default.removeItem(atPath: databasePath) }
+
+        let localConnection = makeMainRuntimeConnection(mode: .local(host: "192.168.1.10"))
+        let probeTimeouts = Recorder<TimeInterval>()
+        let gatewayClient = makeMainRuntimeGatewayClient(
+            connectStored: { _ in
+                DeltaDoreClient.ConnectionSession(connection: localConnection)
+            },
+            probeConnectionOnce: { _, timeout in
+                await probeTimeouts.append(timeout)
+                return true
+            }
+        )
+        _ = try await gatewayClient.connectWithStoredCredentials(options: .init(mode: .auto))
+
+        let runtime = MainRuntime(
+            gatewayClient: gatewayClient,
+            router: makeMainRuntimeRouter(databasePath: databasePath),
+            requestGatewayData: {}
+        )
+
+        let event = await runtime.checkGatewayConnection()
+
+        #expect(event == nil)
+        #expect(await probeTimeouts.values() == [0.35])
+    }
+
+    @Test
+    func foregroundRemoteConnectionRequestsReconnectWithoutProbing() async throws {
+        let databasePath = testTemporarySQLitePath("MainRuntimeTests-remote-reconnect")
+        defer { try? FileManager.default.removeItem(atPath: databasePath) }
+
+        let remoteConnection = makeMainRuntimeConnection(mode: .remote(host: "mediation.tydom.com"))
+        let probeCalls = Counter()
+        let gatewayClient = makeMainRuntimeGatewayClient(
+            connectStored: { _ in
+                DeltaDoreClient.ConnectionSession(connection: remoteConnection)
+            },
+            probeConnectionOnce: { _, _ in
+                await probeCalls.increment()
+                return true
+            }
+        )
+        _ = try await gatewayClient.connectWithStoredCredentials(options: .init(mode: .forceRemote))
+
+        let runtime = MainRuntime(
+            gatewayClient: gatewayClient,
+            router: makeMainRuntimeRouter(databasePath: databasePath),
+            requestGatewayData: {}
+        )
+
+        let event = await runtime.checkGatewayConnection()
+
+        #expect(event == .reconnectionWasRequested)
+        #expect(await probeCalls.value() == 0)
+    }
+
+    @Test
+    func reconnectToGatewayUsesStoredRenewalWithoutSecondProbe() async throws {
+        let databasePath = testTemporarySQLitePath("MainRuntimeTests-reconnect")
+        defer { try? FileManager.default.removeItem(atPath: databasePath) }
+
+        let currentRemoteConnection = makeMainRuntimeConnection(mode: .remote(host: "current.tydom.com"))
+        let recoveredLocalConnection = makeMainRuntimeConnection(mode: .local(host: "192.168.1.10"))
+        let modes = Recorder<String>()
+        let probeCalls = Counter()
+        let requestCalls = Counter()
+        let gatewayClient = makeMainRuntimeGatewayClient(
+            connectStored: { options in
+                switch options.mode {
+                case .forceRemote:
+                    await modes.append("forceRemote")
+                    return DeltaDoreClient.ConnectionSession(connection: currentRemoteConnection)
+                case .auto:
+                    await modes.append("auto")
+                    return DeltaDoreClient.ConnectionSession(connection: recoveredLocalConnection)
+                case .forceLocal:
+                    throw MainRuntimeTestFailure.unexpectedLocalReconnect
+                }
+            },
+            probeConnection: { _, _ in
+                await probeCalls.increment()
+                return false
+            },
+            probeConnectionOnce: { _, _ in
+                await probeCalls.increment()
+                return false
+            }
+        )
+        _ = try await gatewayClient.connectWithStoredCredentials(options: .init(mode: .forceRemote))
+
+        let runtime = MainRuntime(
+            gatewayClient: gatewayClient,
+            router: makeMainRuntimeRouter(databasePath: databasePath),
+            requestGatewayData: {
+                await requestCalls.increment()
+            }
+        )
+
+        let event = await runtime.reconnectToGateway()
+
+        #expect(event == .reconnectionWasSuccessful)
+        #expect(await modes.values() == ["forceRemote", "auto"])
+        #expect(await probeCalls.value() == 0)
+        #expect(await requestCalls.value() == 1)
+        #expect(await gatewayClient.currentConnectionMode() == .local(host: "192.168.1.10"))
+    }
+}
+
 struct MainViewPresentationStateTests {
     struct MappingCase: Sendable {
         let state: MainFeatureState
@@ -582,4 +696,55 @@ private func waitUntilAsync(
         await Task.yield()
     }
     return await condition()
+}
+
+private enum MainRuntimeTestFailure: Error {
+    case unexpectedStoredConnect
+    case unexpectedLocalReconnect
+}
+
+private func makeMainRuntimeGatewayClient(
+    connectStored: @escaping @Sendable (DeltaDoreClient.StoredCredentialsFlowOptions) async throws -> DeltaDoreClient.ConnectionSession = { _ in
+        throw MainRuntimeTestFailure.unexpectedStoredConnect
+    },
+    probeConnection: @escaping @Sendable (TydomConnection, TimeInterval) async -> Bool = { _, _ in false },
+    probeConnectionOnce: @escaping @Sendable (TydomConnection, TimeInterval) async -> Bool = { _, _ in false }
+) -> DeltaDoreClient {
+    DeltaDoreClient(
+        dependencies: .init(
+            inspectFlow: { .connectWithStoredCredentials },
+            connectStored: connectStored,
+            connectNew: { _, _ in
+                throw MainRuntimeTestFailure.unexpectedStoredConnect
+            },
+            listSites: { _ in [] },
+            listSitesPayload: { _ in Data() },
+            clearStoredData: {},
+            probeConnection: probeConnection,
+            probeConnectionOnce: probeConnectionOnce
+        )
+    )
+}
+
+private func makeMainRuntimeRouter(
+    databasePath: String
+) -> TydomMessageRepositoryRouter {
+    TydomMessageRepositoryRouter(
+        deviceRepository: DeviceRepository.makeDeviceRepository(databasePath: databasePath),
+        groupRepository: GroupRepository.makeGroupRepository(databasePath: databasePath),
+        sceneRepository: SceneRepository.makeSceneRepository(databasePath: databasePath),
+        ackRepository: ACKRepository()
+    )
+}
+
+private func makeMainRuntimeConnection(
+    mode: TydomConnection.Configuration.Mode
+) -> TydomConnection {
+    TydomConnection(
+        configuration: .init(
+            mode: mode,
+            mac: "AA:BB:CC:DD:EE:FF",
+            password: "pass"
+        )
+    )
 }

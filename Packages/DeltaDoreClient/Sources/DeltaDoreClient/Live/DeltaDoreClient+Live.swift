@@ -39,7 +39,8 @@ public extension DeltaDoreClient.Dependencies {
             )
             try await connectAndValidate(
                 connection,
-                configuration: resolution.configuration
+                configuration: resolution.configuration,
+                log: log
             )
             return DeltaDoreClient.ConnectionSession(connection: connection)
         }
@@ -47,13 +48,13 @@ public extension DeltaDoreClient.Dependencies {
         return DeltaDoreClient.Dependencies(
             inspectFlow: {
                 guard let mac = try? await environment.gatewayMacStore.load() else {
-                    return .connectWithNewCredentials
+                    return DeltaDoreClient.ConnectionFlowStatus.connectWithNewCredentials
                 }
                 let gatewayId = TydomMac.normalize(mac)
                 if let _ = try? await environment.credentialStore.load(gatewayId) {
-                    return .connectWithStoredCredentials
+                    return DeltaDoreClient.ConnectionFlowStatus.connectWithStoredCredentials
                 }
-                return .connectWithNewCredentials
+                return DeltaDoreClient.ConnectionFlowStatus.connectWithNewCredentials
             },
             connectStored: { options in
                 let resolverOptions = makeStoredResolverOptions(for: options.mode)
@@ -86,6 +87,9 @@ public extension DeltaDoreClient.Dependencies {
             },
             probeConnection: { connection, timeout in
                 await probeConnectionWithRetry(connection, timeout: timeout)
+            },
+            probeConnectionOnce: { connection, timeout in
+                await probeConnectionWithoutRetry(connection, timeout: timeout)
             }
         )
     }
@@ -124,19 +128,11 @@ public extension DeltaDoreClient {
 func makeStoredResolverOptions(
     for mode: DeltaDoreClient.StoredCredentialsFlowOptions.Mode
 ) -> TydomConnectionResolver.Options {
-    let timings: TydomConnectionResolver.Options.Timings
-    switch mode {
-    case .auto, .forceLocal:
-        timings = .storedLocalPreferredFlow
-    case .forceRemote:
-        timings = .silentStoredFlow
-    }
-
     return TydomConnectionResolver.Options(
         mode: mapStoredMode(mode),
         credentialPolicy: .useStoredDataOnly,
-        timings: timings,
-        preferFreshLocalDiscovery: mode == .auto
+        timings: .silentStoredFlow,
+        preferFreshLocalDiscovery: false
     )
 }
 
@@ -165,18 +161,44 @@ private func probeConnectionWithRetry(
     return false
 }
 
+private func probeConnectionWithoutRetry(
+    _ connection: TydomConnection,
+    timeout: TimeInterval
+) async -> Bool {
+    do {
+        try await probeConnectionLiveness(using: connection, timeout: timeout)
+        return true
+    } catch {
+        if let connectionError = error as? TydomConnection.ConnectionError,
+           connectionError == .notConnected {
+            return false
+        }
+        return false
+    }
+}
+
 func connectAndValidate(
     _ connection: TydomConnection,
-    configuration: TydomConnection.Configuration
+    configuration: TydomConnection.Configuration,
+    log: @escaping @Sendable (String) -> Void = { _ in }
 ) async throws {
     let validationTimeout = validationTimeout(for: configuration)
+    let clock = ContinuousClock()
     do {
         try await connection.connect(
             startReceiving: false,
             requestTimeout: validationTimeout
         )
+        let webSocketOpenStart = clock.now
         try await connection.waitForWebSocketOpen(timeout: validationTimeout)
+        log(
+            "WebSocket open host=\(configuration.host) elapsed=\(clock.now - webSocketOpenStart)"
+        )
+        let pingStart = clock.now
         _ = try await connection.pingAndWaitForResponse(timeout: validationTimeout)
+        log(
+            "Ping validation host=\(configuration.host) elapsed=\(clock.now - pingStart)"
+        )
         await connection.startStreamingIfNeeded()
     } catch {
         await connection.disconnect(shouldNotifyOnDisconnect: false)

@@ -73,13 +73,15 @@ import Testing
     #expect(signal != nil)
 }
 
-@Test func storedResolverOptions_autoUsesFreshValidatedLocalDiscovery() {
+@Test func storedResolverOptions_autoUsesCachedIPFirstSilentTimings() {
     let options = makeStoredResolverOptions(for: .auto)
 
     #expect(options.mode == .auto)
-    #expect(options.timings == .storedLocalPreferredFlow)
-    #expect(options.preferFreshLocalDiscovery)
-    #expect(!options.allowUnvalidatedLocalFallback)
+    #expect(options.timings == .silentStoredFlow)
+    #expect(options.timings.cachedLocalConnectTimeout == 3.0)
+    #expect(options.timings.localConnectTimeout == 1.5)
+    #expect(options.preferFreshLocalDiscovery == false)
+    #expect(options.allowUnvalidatedLocalFallback)
 }
 
 @Test func validationTimeout_usesFullConfiguredTimeoutForNominalLocalConnection() {

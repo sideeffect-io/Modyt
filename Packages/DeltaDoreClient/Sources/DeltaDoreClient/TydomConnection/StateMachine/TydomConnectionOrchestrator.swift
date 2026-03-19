@@ -4,7 +4,7 @@ public struct TydomConnectionOrchestrator: Sendable {
     public struct Dependencies: Sendable {
         public let loadCredentials: @Sendable () async -> TydomGatewayCredentials?
         public let saveCredentials: @Sendable (_ credentials: TydomGatewayCredentials) async -> Void
-        public let discoverLocal: @Sendable () async -> [TydomLocalGateway]
+        public let discoverLocal: @Sendable (_ excludingHost: String?) async -> [TydomLocalGateway]
         public let connectLocal: @Sendable (_ host: String) async -> TydomConnection?
         public let connectRemote: @Sendable () async -> TydomConnection?
         public let emitDecision: @Sendable (_ decision: TydomConnectionState.Decision) async -> Void
@@ -12,7 +12,7 @@ public struct TydomConnectionOrchestrator: Sendable {
         public init(
             loadCredentials: @escaping @Sendable () async -> TydomGatewayCredentials?,
             saveCredentials: @escaping @Sendable (_ credentials: TydomGatewayCredentials) async -> Void,
-            discoverLocal: @escaping @Sendable () async -> [TydomLocalGateway],
+            discoverLocal: @escaping @Sendable (_ excludingHost: String?) async -> [TydomLocalGateway],
             connectLocal: @escaping @Sendable (_ host: String) async -> TydomConnection?,
             connectRemote: @escaping @Sendable () async -> TydomConnection?,
             emitDecision: @escaping @Sendable (_ decision: TydomConnectionState.Decision) async -> Void
@@ -59,10 +59,10 @@ public struct TydomConnectionOrchestrator: Sendable {
                 if let connection {
                     await handle(event: .localConnectResult(success: true, host: host, connection: connection), state: &state)
                 } else {
-                    await handle(event: .cachedIPFailed, state: &state)
+                    await handle(event: .cachedIPFailed(host), state: &state)
                 }
-            case .discoverLocal:
-                let candidates = await dependencies.discoverLocal()
+            case .discoverLocal(let excludingHost):
+                let candidates = await dependencies.discoverLocal(excludingHost)
                 await handle(event: .localDiscoveryFound(candidates), state: &state)
             case .connectLocal(let host):
                 let connection = await dependencies.connectLocal(host)

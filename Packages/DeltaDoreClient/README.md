@@ -50,8 +50,11 @@ let session = try await client.connectWithStoredCredentials(
 ```
 
 Behavior:
-- Uses stored gateway credentials and cached local IP (if any).
-- Attempts local connection first, then remote fallback.
+- Uses stored gateway credentials and the cached local IP when available.
+- In `.auto`, tries the cached local IP first.
+- In `.forceLocal`, also tries the cached local IP first before falling back to discovery.
+- Runs local discovery only when no cached IP is present or the cached IP connect fails.
+- Falls back to remote only after local options are exhausted.
 - If remote fails, stored data is cleared and an error is returned.
 
 ## New credentials flow
@@ -96,6 +99,8 @@ Local gateway discovery relies on:
 - Cached local IP (if present).
 - Subnet probe (TCP scan on configured ports).
 - Optional WebSocket `/info` validation.
+
+For stored `.auto`, discovery is a fallback path, not the first step.
 
 Bonjour/mDNS is not used.
 

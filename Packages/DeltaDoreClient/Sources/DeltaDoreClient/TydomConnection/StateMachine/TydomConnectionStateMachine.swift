@@ -84,7 +84,7 @@ public enum TydomConnectionEvent: Sendable, Equatable {
     case clearOverride
     case credentialsLoaded(TydomGatewayCredentials?)
     case credentialsSaved(TydomGatewayCredentials)
-    case cachedIPFailed
+    case cachedIPFailed(String)
     case localDiscoveryFound([TydomLocalGateway])
     case localConnectResult(success: Bool, host: String?, connection: TydomConnection?)
     case remoteConnectResult(success: Bool, connection: TydomConnection?)
@@ -101,8 +101,8 @@ public enum TydomConnectionEvent: Sendable, Equatable {
             return a == b
         case (.credentialsSaved(let a), .credentialsSaved(let b)):
             return a == b
-        case (.cachedIPFailed, .cachedIPFailed):
-            return true
+        case (.cachedIPFailed(let a), .cachedIPFailed(let b)):
+            return a == b
         case (.localDiscoveryFound(let a), .localDiscoveryFound(let b)):
             return a == b
         case (.localConnectResult(let successA, let hostA, _),
@@ -123,7 +123,7 @@ public enum TydomConnectionAction: Sendable, Equatable {
     case loadCredentials
     case saveCredentials(TydomGatewayCredentials)
     case tryCachedIP(String)
-    case discoverLocal
+    case discoverLocal(excludingHost: String?)
     case connectLocal(String)
     case connectRemote
     case emitDecision(TydomConnectionState.Decision)
@@ -229,6 +229,25 @@ public struct TydomConnectionStateMachine {
             }
 
             if state.override == .forceLocal {
+                if let cached = credentials.cachedLocalIP, cached.isEmpty == false {
+                    let decision = TydomConnectionState.Decision(
+                        mode: .local(host: cached),
+                        reason: .overrideLocal
+                    )
+                    return (
+                        TydomConnectionState(
+                            phase: .tryingCachedIP,
+                            override: state.override,
+                            credentials: credentials,
+                            selectedGatewayMac: credentials.mac,
+                            lastDecision: decision,
+                            lastError: nil,
+                            connectedConnection: state.connectedConnection
+                        ),
+                        [.emitDecision(decision), .tryCachedIP(cached)]
+                    )
+                }
+
                 let decision = TydomConnectionState.Decision(
                     mode: .local(host: credentials.cachedLocalIP ?? ""),
                     reason: .overrideLocal
@@ -243,7 +262,7 @@ public struct TydomConnectionStateMachine {
                         lastError: nil,
                         connectedConnection: state.connectedConnection
                     ),
-                    [.emitDecision(decision), .discoverLocal]
+                    [.emitDecision(decision), .discoverLocal(excludingHost: nil)]
                 )
             }
 
@@ -276,10 +295,10 @@ public struct TydomConnectionStateMachine {
                     lastError: nil,
                     connectedConnection: state.connectedConnection
                 ),
-                [.discoverLocal]
+                [.discoverLocal(excludingHost: nil)]
             )
 
-        case .cachedIPFailed:
+        case .cachedIPFailed(let failedHost):
             guard let credentials = state.credentials else {
                 let decision = TydomConnectionState.Decision(
                     mode: .remote(),
@@ -308,7 +327,7 @@ public struct TydomConnectionStateMachine {
                     lastError: nil,
                     connectedConnection: state.connectedConnection
                 ),
-                [.discoverLocal]
+                [.discoverLocal(excludingHost: failedHost)]
             )
 
         case .localDiscoveryFound(let candidates):
@@ -382,6 +401,10 @@ public struct TydomConnectionStateMachine {
 
         case .localConnectResult(let success, let host, let connection):
             if success, let host {
+                let decision = TydomConnectionState.Decision(
+                    mode: .local(host: host),
+                    reason: .localConnected
+                )
                 guard let credentials = state.credentials else {
                     return (
                         TydomConnectionState(
@@ -389,7 +412,7 @@ public struct TydomConnectionStateMachine {
                             override: state.override,
                             credentials: state.credentials,
                             selectedGatewayMac: state.selectedGatewayMac,
-                            lastDecision: state.lastDecision,
+                            lastDecision: decision,
                             lastError: nil,
                             pendingLocalCandidates: [],
                             connectedConnection: connection ?? state.connectedConnection
@@ -409,7 +432,7 @@ public struct TydomConnectionStateMachine {
                         override: state.override,
                         credentials: updated,
                         selectedGatewayMac: credentials.mac,
-                        lastDecision: state.lastDecision,
+                        lastDecision: decision,
                         lastError: nil,
                         pendingLocalCandidates: [],
                         connectedConnection: connection ?? state.connectedConnection
@@ -468,17 +491,21 @@ public struct TydomConnectionStateMachine {
 
         case .remoteConnectResult(let success, let connection):
             if success {
+                let decision = TydomConnectionState.Decision(
+                    mode: .remote(),
+                    reason: .remoteConnected
+                )
                 return (
                     TydomConnectionState(
                         phase: .connected,
                         override: state.override,
                         credentials: state.credentials,
                         selectedGatewayMac: state.selectedGatewayMac,
-                        lastDecision: state.lastDecision,
+                        lastDecision: decision,
                         lastError: nil,
                         connectedConnection: connection ?? state.connectedConnection
                     ),
-                    []
+                    [.emitDecision(decision)]
                 )
             }
             let decision = TydomConnectionState.Decision(

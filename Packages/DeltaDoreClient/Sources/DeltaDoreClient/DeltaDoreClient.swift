@@ -53,6 +53,7 @@ public struct DeltaDoreClient: Sendable {
         public var listSitesPayload: @Sendable (TydomConnection.CloudCredentials) async throws -> Data
         public var clearStoredData: @Sendable () async -> Void
         public var probeConnection: @Sendable (TydomConnection, TimeInterval) async -> Bool
+        public var probeConnectionOnce: @Sendable (TydomConnection, TimeInterval) async -> Bool
 
         public init(
             inspectFlow: @escaping @Sendable () async -> ConnectionFlowStatus,
@@ -61,7 +62,8 @@ public struct DeltaDoreClient: Sendable {
             listSites: @escaping @Sendable (TydomConnection.CloudCredentials) async throws -> [Site],
             listSitesPayload: @escaping @Sendable (TydomConnection.CloudCredentials) async throws -> Data,
             clearStoredData: @escaping @Sendable () async -> Void,
-            probeConnection: @escaping @Sendable (TydomConnection, TimeInterval) async -> Bool
+            probeConnection: @escaping @Sendable (TydomConnection, TimeInterval) async -> Bool,
+            probeConnectionOnce: (@Sendable (TydomConnection, TimeInterval) async -> Bool)? = nil
         ) {
             self.inspectFlow = inspectFlow
             self.connectStored = connectStored
@@ -70,6 +72,7 @@ public struct DeltaDoreClient: Sendable {
             self.listSitesPayload = listSitesPayload
             self.clearStoredData = clearStoredData
             self.probeConnection = probeConnection
+            self.probeConnectionOnce = probeConnectionOnce ?? probeConnection
         }
 
     }
@@ -171,9 +174,15 @@ public struct DeltaDoreClient: Sendable {
         return .reconnected
     }
 
-    public func isCurrentConnectionAlive(timeout: TimeInterval = 2.0) async -> Bool {
+    public func isCurrentConnectionAlive(
+        timeout: TimeInterval = 2.0,
+        retry: Bool = true
+    ) async -> Bool {
         guard let connection = await runtimeSession.currentConnection() else { return false }
-        return await dependencies.probeConnection(connection, timeout)
+        if retry {
+            return await dependencies.probeConnection(connection, timeout)
+        }
+        return await dependencies.probeConnectionOnce(connection, timeout)
     }
 
     public func disconnectCurrentConnection() async {

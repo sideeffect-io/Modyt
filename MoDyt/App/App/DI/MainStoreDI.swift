@@ -98,6 +98,7 @@ actor MainRuntime {
     private let gatewayClient: DeltaDoreClient
     private let router: TydomMessageRepositoryRouter
     private let log: @Sendable (String) -> Void
+    private let requestGatewayDataEffect: @Sendable () async throws -> Void
 
     private var messageStreamTask: Task<Void, Never>?
     private var messageStreamObservation = MainMessageStreamObservationState()
@@ -106,11 +107,24 @@ actor MainRuntime {
     init(
         gatewayClient: DeltaDoreClient,
         router: TydomMessageRepositoryRouter,
-        log: @escaping @Sendable (String) -> Void = { _ in }
+        log: @escaping @Sendable (String) -> Void = { _ in },
+        requestGatewayData: (@Sendable () async throws -> Void)? = nil
     ) {
         self.gatewayClient = gatewayClient
         self.router = router
         self.log = log
+        self.requestGatewayDataEffect = requestGatewayData ?? {
+            let pipeline = MainGatewayDataRequestPipeline(
+                requests: MainGatewayDataRequestPipeline.defaultRequests,
+                makeTransactionID: {
+                    TydomCommand.defaultTransactionId()
+                },
+                sendText: { text in
+                    try await gatewayClient.send(text: text)
+                }
+            )
+            try await pipeline.run()
+        }
     }
 
     deinit {
@@ -146,22 +160,35 @@ actor MainRuntime {
     }
 
     func checkGatewayConnection() async -> MainEvent? {
-        let isAlive = await gatewayClient.isCurrentConnectionAlive(timeout: 2.0)
-        if isAlive {
-            if let mode = await gatewayClient.currentConnectionMode() {
-                switch mode {
-                case .local:
-                    await gatewayClient.setCurrentConnectionAppActive(true)
-                    return nil
-                case .remote:
-                    cancelMessageStream()
-                    return .reconnectionWasRequested
-                }
-            }
+        guard let mode = await gatewayClient.currentConnectionMode() else {
+            log("MainRuntime foreground health probe skipped reason=no-current-connection")
+            cancelMessageStream()
+            return .reconnectionWasRequested
         }
 
-        cancelMessageStream()
-        return .reconnectionWasRequested
+        switch mode {
+        case .remote:
+            log("MainRuntime foreground health probe skipped reason=remote-connection")
+            cancelMessageStream()
+            return .reconnectionWasRequested
+        case .local:
+            let clock = ContinuousClock()
+            let start = clock.now
+            let isAlive = await gatewayClient.isCurrentConnectionAlive(
+                timeout: 0.35,
+                retry: false
+            )
+            log(
+                "MainRuntime foreground health probe mode=local alive=\(isAlive) elapsed=\(clock.now - start)"
+            )
+            if isAlive {
+                await gatewayClient.setCurrentConnectionAppActive(true)
+                return nil
+            }
+
+            cancelMessageStream()
+            return .reconnectionWasRequested
+        }
     }
 
     func reconnectToGateway() async -> MainEvent {
@@ -184,16 +211,7 @@ actor MainRuntime {
     }
 
     private func requestGatewayData() async throws {
-        let pipeline = MainGatewayDataRequestPipeline(
-            requests: MainGatewayDataRequestPipeline.defaultRequests,
-            makeTransactionID: {
-                TydomCommand.defaultTransactionId()
-            },
-            sendText: { text in
-                try await self.gatewayClient.send(text: text)
-            }
-        )
-        try await pipeline.run()
+        try await requestGatewayDataEffect()
     }
 
     private func prepareGatewayHandling(restartStream: Bool) async throws {

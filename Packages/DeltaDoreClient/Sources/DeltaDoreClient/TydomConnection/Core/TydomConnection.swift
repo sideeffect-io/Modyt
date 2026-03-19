@@ -127,10 +127,13 @@ public actor TydomConnection {
     ) async throws {
         guard socketTask == nil else { return }
         log("Connecting to \(configuration.webSocketURL.absoluteString)")
+        let connectTimeout = requestTimeout ?? configuration.timeout
+        let connectDeadline = makeConnectDeadline(timeout: connectTimeout)
+        let webSocketRequestTimeout: TimeInterval = 24 * 60 * 60
 
         let passwordSession = dependencies.makeSession(
             configuration.allowInsecureTLS,
-            configuration.timeout,
+            connectTimeout,
             nil
         )
         let password = try await resolvePassword(using: passwordSession)
@@ -138,12 +141,13 @@ public actor TydomConnection {
 
         let handshakeSession = dependencies.makeSession(
             configuration.allowInsecureTLS,
-            configuration.timeout,
+            connectTimeout,
             nil
         )
         let challenge = try await fetchDigestChallenge(
             using: handshakeSession,
-            randomBytes: dependencies.randomBytes
+            randomBytes: dependencies.randomBytes,
+            deadline: connectDeadline
         )
         dependencies.invalidateSession(handshakeSession)
 
@@ -162,13 +166,7 @@ public actor TydomConnection {
         self.session = session
 
         var request = URLRequest(url: configuration.webSocketURL)
-        if let requestTimeout {
-            request.timeoutInterval = requestTimeout
-        } else if shouldStartReceiving {
-            request.timeoutInterval = 24 * 60 * 60
-        } else {
-            request.timeoutInterval = configuration.timeout
-        }
+        request.timeoutInterval = webSocketRequestTimeout
         request.setValue(authorization, forHTTPHeaderField: "Authorization")
 
         let task = session.webSocketTask(with: request)
@@ -310,26 +308,6 @@ public actor TydomConnection {
                 connection.cancel()
                 gate.resumeOnce(continuation, result: .failure(ConnectionError.receiveFailed))
             }
-        }
-    }
-
-    private func fetchDigestChallengeNetwork(
-        tlsOptions: NWProtocolTLS.Options,
-        includeUpgradeHeaders: Bool
-    ) async throws -> DigestChallenge {
-        do {
-            return try await fetchDigestChallengeNetwork(
-                tlsOptions: tlsOptions,
-                includeUpgradeHeaders: includeUpgradeHeaders,
-                timeout: configuration.timeout
-            )
-        } catch {
-            DeltaDoreDebugLog.log("Digest challenge with upgrade failed error=\(error)")
-            return try await fetchDigestChallengeNetwork(
-                tlsOptions: tlsOptions,
-                includeUpgradeHeaders: false,
-                timeout: configuration.timeout
-            )
         }
     }
 
@@ -559,15 +537,11 @@ public actor TydomConnection {
         }
     }
 
-    private func makeWebSocketSession(forProbe: Bool) -> URLSession {
+    private func makeWebSocketSession(forProbe _: Bool) -> URLSession {
         let sessionConfig = URLSessionConfiguration.default
-        if forProbe {
-            sessionConfig.timeoutIntervalForRequest = configuration.timeout
-            sessionConfig.timeoutIntervalForResource = configuration.timeout
-        } else {
-            sessionConfig.timeoutIntervalForRequest = 24 * 60 * 60
-            sessionConfig.timeoutIntervalForResource = 24 * 60 * 60
-        }
+        let webSocketSessionTimeout: TimeInterval = 24 * 60 * 60
+        sessionConfig.timeoutIntervalForRequest = webSocketSessionTimeout
+        sessionConfig.timeoutIntervalForResource = webSocketSessionTimeout
         if #available(iOS 13.0, macOS 10.15, tvOS 13.0, watchOS 6.0, *) {
             if configuration.allowInsecureTLS {
                 sessionConfig.tlsMinimumSupportedProtocolVersion = .TLSv12
@@ -619,25 +593,34 @@ public actor TydomConnection {
 
     private func fetchDigestChallenge(
         using session: URLSession,
-        randomBytes: @Sendable (Int) -> [UInt8]
+        randomBytes: @Sendable (Int) -> [UInt8],
+        deadline: ContinuousClock.Instant
     ) async throws -> DigestChallenge {
         do {
             return try await fetchDigestChallenge(
                 using: session,
                 randomBytes: randomBytes,
-                includeUpgradeHeaders: true
+                includeUpgradeHeaders: true,
+                timeout: try remainingConnectTimeout(until: deadline)
             )
         } catch {
             DeltaDoreDebugLog.log("Digest challenge with upgrade failed error=\(error)")
+            guard shouldRetryDigestChallenge(error: error) else {
+                throw error
+            }
             do {
                 return try await fetchDigestChallenge(
                     using: session,
                     randomBytes: randomBytes,
-                    includeUpgradeHeaders: false
+                    includeUpgradeHeaders: false,
+                    timeout: try remainingConnectTimeout(until: deadline)
                 )
             } catch {
                 DeltaDoreDebugLog.log("Digest challenge without upgrade failed error=\(error)")
-                return try await fetchDigestChallengeNetworkFallback(lastError: error)
+                return try await fetchDigestChallengeNetworkFallback(
+                    lastError: error,
+                    deadline: deadline
+                )
             }
         }
     }
@@ -645,11 +628,12 @@ public actor TydomConnection {
     private func fetchDigestChallenge(
         using session: URLSession,
         randomBytes: @Sendable (Int) -> [UInt8],
-        includeUpgradeHeaders: Bool
+        includeUpgradeHeaders: Bool,
+        timeout: TimeInterval
     ) async throws -> DigestChallenge {
         var request = URLRequest(url: configuration.httpsURL)
         request.httpMethod = "GET"
-        request.timeoutInterval = configuration.timeout
+        request.timeoutInterval = timeout
         let handshakeHeaders = buildHandshakeHeaders(
             randomBytes: randomBytes,
             includeUpgradeHeaders: includeUpgradeHeaders
@@ -697,8 +681,14 @@ public actor TydomConnection {
         return text.isEmpty ? nil : text
     }
 
-    private func fetchDigestChallengeNetworkFallback(lastError: Error) async throws -> DigestChallenge {
+    private func fetchDigestChallengeNetworkFallback(
+        lastError: Error,
+        deadline: ContinuousClock.Instant
+    ) async throws -> DigestChallenge {
 #if canImport(Network)
+        guard shouldRetryDigestChallenge(error: lastError) else {
+            throw lastError
+        }
         DeltaDoreDebugLog.log(
             "Digest challenge URLSession flow failed error=\(lastError). Retrying via NWConnection."
         )
@@ -706,10 +696,23 @@ public actor TydomConnection {
             allowInsecureTLS: configuration.allowInsecureTLS,
             host: configuration.host
         )
-        return try await fetchDigestChallengeNetwork(
-            tlsOptions: tlsOptions,
-            includeUpgradeHeaders: true
-        )
+        do {
+            return try await fetchDigestChallengeNetwork(
+                tlsOptions: tlsOptions,
+                includeUpgradeHeaders: true,
+                timeout: try remainingConnectTimeout(until: deadline)
+            )
+        } catch {
+            DeltaDoreDebugLog.log("Digest challenge with upgrade failed error=\(error)")
+            guard shouldRetryDigestChallenge(error: error) else {
+                throw error
+            }
+            return try await fetchDigestChallengeNetwork(
+                tlsOptions: tlsOptions,
+                includeUpgradeHeaders: false,
+                timeout: try remainingConnectTimeout(until: deadline)
+            )
+        }
 #else
         throw lastError
 #endif
@@ -733,10 +736,41 @@ public actor TydomConnection {
     }
 
     private func shouldRetryDigestChallenge(error: Error) -> Bool {
+        if let connectionError = error as? ConnectionError {
+            switch connectionError {
+            case .missingChallenge, .invalidResponse:
+                return true
+            default:
+                return false
+            }
+        }
         if let urlError = error as? URLError {
-            return urlError.code == .networkConnectionLost
+            switch urlError.code {
+            case .networkConnectionLost, .badServerResponse, .cannotParseResponse:
+                return true
+            default:
+                return false
+            }
         }
         return false
+    }
+
+    private func makeConnectDeadline(timeout: TimeInterval) -> ContinuousClock.Instant {
+        let clock = ContinuousClock()
+        let milliseconds = max(1, Int64((timeout * 1_000).rounded()))
+        return clock.now.advanced(by: .milliseconds(milliseconds))
+    }
+
+    private func remainingConnectTimeout(until deadline: ContinuousClock.Instant) throws -> TimeInterval {
+        let clock = ContinuousClock()
+        let remaining = deadline - clock.now
+        let components = remaining.components
+        let seconds = TimeInterval(components.seconds) +
+            (TimeInterval(components.attoseconds) / 1_000_000_000_000_000_000)
+        guard seconds > 0 else {
+            throw URLError(.timedOut)
+        }
+        return seconds
     }
 
     private func applyOutgoingPrefix(to data: Data) -> Data {

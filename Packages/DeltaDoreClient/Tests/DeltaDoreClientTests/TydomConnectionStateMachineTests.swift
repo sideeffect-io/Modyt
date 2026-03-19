@@ -30,12 +30,38 @@ import Testing
     // When
     let (next, actions) = TydomConnectionStateMachine.reduce(
         state: state,
-        event: .cachedIPFailed
+        event: .cachedIPFailed("192.168.1.10")
     )
 
     // Then
     #expect(next.phase == .discoveringLocal)
-    #expect(actions.contains(.discoverLocal))
+    #expect(actions.contains(.discoverLocal(excludingHost: "192.168.1.10")))
+}
+
+@Test func stateMachine_autoUsesCachedIPBeforeDiscovery() async {
+    // Given
+    let credentials = TydomGatewayCredentials(
+        mac: "AABBCCDDEEFF",
+        password: "pass",
+        cachedLocalIP: "192.168.1.10",
+        updatedAt: Date()
+    )
+    let state = TydomConnectionState(
+        phase: .loadingCredentials,
+        override: .none,
+        credentials: credentials
+    )
+
+    // When
+    let (next, actions) = TydomConnectionStateMachine.reduce(
+        state: state,
+        event: .credentialsLoaded(credentials)
+    )
+
+    // Then
+    #expect(next.phase == .tryingCachedIP)
+    #expect(actions.contains(.tryCachedIP("192.168.1.10")))
+    #expect(actions.contains(.discoverLocal(excludingHost: nil)) == false)
 }
 
 @Test func stateMachine_localFailureFallsBackToRemote() async {
@@ -98,10 +124,10 @@ import Testing
 
     // Then
     #expect(next.phase == .discoveringLocal)
-    #expect(actions.contains(.discoverLocal))
+    #expect(actions.contains(.discoverLocal(excludingHost: nil)))
 }
 
-@Test func stateMachine_overrideLocalUsesFreshDiscoveryEvenWithCachedIP() async {
+@Test func stateMachine_overrideLocalUsesCachedIPBeforeDiscovery() async {
     // Given
     let credentials = TydomGatewayCredentials(
         mac: "AABBCCDDEEFF",
@@ -118,9 +144,9 @@ import Testing
     )
 
     // Then
-    #expect(next.phase == .discoveringLocal)
-    #expect(actions.contains(.discoverLocal))
-    #expect(actions.contains(.tryCachedIP("192.168.1.10")) == false)
+    #expect(next.phase == .tryingCachedIP)
+    #expect(actions.contains(.tryCachedIP("192.168.1.10")))
+    #expect(actions.contains(.discoverLocal(excludingHost: nil)) == false)
 }
 
 @Test func stateMachine_overrideLocalFailsWhenDiscoveryFindsNoGateway() async {

@@ -51,7 +51,8 @@ extension TydomConnectionResolver.Environment {
                 do {
                     try await connectAndValidate(
                         connection,
-                        configuration: configuration
+                        configuration: configuration,
+                        log: log
                     )
                     log("Connect success host=\(configuration.host)")
                     return connection

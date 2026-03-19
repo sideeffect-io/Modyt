@@ -117,6 +117,9 @@ private enum WebSocketProbe {
             return true
         } catch {
             log("Discovery validation upgrade failed host=\(host) error=\(error)")
+            guard shouldRetryPlainProbe(after: error) else {
+                return false
+            }
         }
 
         do {
@@ -201,6 +204,26 @@ private enum WebSocketProbe {
         }
         let text = String(describing: raw)
         return text.isEmpty ? nil : text
+    }
+
+    private static func shouldRetryPlainProbe(after error: Error) -> Bool {
+        if let connectionError = error as? TydomConnection.ConnectionError {
+            switch connectionError {
+            case .missingChallenge, .invalidResponse:
+                return true
+            default:
+                return false
+            }
+        }
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .networkConnectionLost, .badServerResponse, .cannotParseResponse:
+                return true
+            default:
+                return false
+            }
+        }
+        return false
     }
 }
 

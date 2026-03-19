@@ -62,6 +62,7 @@ struct TydomConnectionResolver: Sendable {
             let discoveryTimeout: TimeInterval
             let probeTimeout: TimeInterval
             let infoTimeout: TimeInterval
+            let cachedLocalConnectTimeout: TimeInterval
             let localConnectTimeout: TimeInterval
             let remoteConnectTimeout: TimeInterval
 
@@ -69,12 +70,14 @@ struct TydomConnectionResolver: Sendable {
                 discoveryTimeout: TimeInterval,
                 probeTimeout: TimeInterval,
                 infoTimeout: TimeInterval,
+                cachedLocalConnectTimeout: TimeInterval? = nil,
                 localConnectTimeout: TimeInterval,
                 remoteConnectTimeout: TimeInterval
             ) {
                 self.discoveryTimeout = discoveryTimeout
                 self.probeTimeout = probeTimeout
                 self.infoTimeout = infoTimeout
+                self.cachedLocalConnectTimeout = cachedLocalConnectTimeout ?? localConnectTimeout
                 self.localConnectTimeout = localConnectTimeout
                 self.remoteConnectTimeout = remoteConnectTimeout
             }
@@ -93,6 +96,7 @@ struct TydomConnectionResolver: Sendable {
                 discoveryTimeout: 2.0,
                 probeTimeout: 0.35,
                 infoTimeout: 1.0,
+                cachedLocalConnectTimeout: 3.0,
                 localConnectTimeout: 1.5,
                 remoteConnectTimeout: 6.0
             )
@@ -101,14 +105,18 @@ struct TydomConnectionResolver: Sendable {
                 discoveryTimeout: 2.0,
                 probeTimeout: 0.35,
                 infoTimeout: 10.0,
+                cachedLocalConnectTimeout: 10.0,
                 localConnectTimeout: 10.0,
                 remoteConnectTimeout: 6.0
             )
 
-            func timeout(for mode: TydomConnection.Configuration.Mode) -> TimeInterval {
+            func timeout(
+                for mode: TydomConnection.Configuration.Mode,
+                isCachedDirectHost: Bool = false
+            ) -> TimeInterval {
                 switch mode {
                 case .local:
-                    return localConnectTimeout
+                    return isCachedDirectHost ? cachedLocalConnectTimeout : localConnectTimeout
                 case .remote:
                     return remoteConnectTimeout
                 }
@@ -419,7 +427,7 @@ struct TydomConnectionResolver: Sendable {
         let localHostOverride = options.localHostOverride
         let remoteHost = environment.remoteHost
 
-        let connect: @Sendable (String, TydomGatewayCredentials?, TydomConnection.Configuration.Mode) async -> TydomConnection? = { host, credentials, mode in
+        let connect: @Sendable (String, TydomGatewayCredentials?, TydomConnection.Configuration.Mode, Bool) async -> TydomConnection? = { host, credentials, mode, isCachedDirectHost in
             guard let credentials else { return nil }
             let disconnectGate = ConnectionDisconnectGate()
             let config = TydomConnection.Configuration(
@@ -428,7 +436,10 @@ struct TydomConnectionResolver: Sendable {
                 password: credentials.password,
                 cloudCredentials: nil,
                 allowInsecureTLS: allowInsecureTLS,
-                timeout: timings.timeout(for: mode)
+                timeout: timings.timeout(
+                    for: mode,
+                    isCachedDirectHost: isCachedDirectHost
+                )
             )
             let connection = await self.environment.connect(
                 config,
@@ -454,10 +465,25 @@ struct TydomConnectionResolver: Sendable {
                 try? await self.environment.gatewayMacStore.save(credentials.mac)
                 await cache.set(credentials)
             },
-            discoverLocal: {
+            discoverLocal: { excludingHost in
                 guard let credentials = await cache.get() else { return [] }
+                let clock = ContinuousClock()
+                let start = clock.now
+                let cachedIP = credentials.cachedLocalIP
+                let excludedHosts: Set<String>
+                if let excludingHost, excludingHost.isEmpty == false {
+                    excludedHosts = [excludingHost]
+                } else {
+                    excludedHosts = []
+                }
+                let effectiveCachedIP: String?
+                if excludedHosts.contains(cachedIP ?? "") {
+                    effectiveCachedIP = nil
+                } else {
+                    effectiveCachedIP = cachedIP
+                }
                 self.environment.log(
-                    "Discovery request mac=\(credentials.mac) cachedIP=\(credentials.cachedLocalIP ?? "nil")"
+                    "Discovery request mac=\(credentials.mac) cachedIP=\(effectiveCachedIP ?? "nil") excludingHost=\(excludingHost ?? "nil")"
                 )
                 let config = TydomGatewayDiscoveryConfig(
                     discoveryTimeout: timings.discoveryTimeout,
@@ -468,25 +494,53 @@ struct TydomConnectionResolver: Sendable {
                     infoConcurrency: 32,
                     allowInsecureTLS: allowInsecureTLS ?? true,
                     validateWithInfo: true,
-                    allowUnvalidatedFallback: options.allowUnvalidatedLocalFallback
+                    allowUnvalidatedFallback: excludingHost == nil && options.allowUnvalidatedLocalFallback
                 )
                 let candidates = await discovery.discover(
                     credentials: credentials,
-                    cachedIP: credentials.cachedLocalIP,
+                    cachedIP: effectiveCachedIP,
+                    excludingHosts: excludedHosts,
                     config: config
+                )
+                self.environment.log(
+                    "Discovery finished mac=\(credentials.mac) excludingHost=\(excludingHost ?? "nil") candidates=\(candidates.map(\.host)) elapsed=\(clock.now - start)"
                 )
                 return candidates
             },
             connectLocal: { host in
                 let credentials = await cache.get()
+                let isCachedDirectHost = credentials?.cachedLocalIP == host
+                let clock = ContinuousClock()
+                let start = clock.now
                 if let overrideHost = localHostOverride, overrideHost.isEmpty == false {
-                    return await connect(overrideHost, credentials, .local(host: overrideHost))
+                    return await connect(
+                        overrideHost,
+                        credentials,
+                        .local(host: overrideHost),
+                        false
+                    )
                 }
-                return await connect(host, credentials, .local(host: host))
+                let connection = await connect(
+                    host,
+                    credentials,
+                    .local(host: host),
+                    isCachedDirectHost
+                )
+                if isCachedDirectHost {
+                    self.environment.log(
+                        "Cached local connect host=\(host) success=\(connection != nil) elapsed=\(clock.now - start)"
+                    )
+                }
+                return connection
             },
             connectRemote: {
                 let credentials = await cache.get()
-                return await connect(remoteHost, credentials, .remote(host: remoteHost))
+                return await connect(
+                    remoteHost,
+                    credentials,
+                    .remote(host: remoteHost),
+                    false
+                )
             },
             emitDecision: { decision in
                 if let onDecision = options.onDecision {
@@ -506,13 +560,17 @@ struct TydomConnectionResolver: Sendable {
             let resolvedHost = (options.localHostOverride?.isEmpty == false)
                 ? options.localHostOverride!
                 : host
+            let isCachedDirectHost = credentials.cachedLocalIP == resolvedHost
             return TydomConnection.Configuration(
                 mode: .local(host: resolvedHost),
                 mac: credentials.mac,
                 password: credentials.password,
                 cloudCredentials: nil,
                 allowInsecureTLS: options.allowInsecureTLS,
-                timeout: options.timings.timeout(for: decision.mode)
+                timeout: options.timings.timeout(
+                    for: decision.mode,
+                    isCachedDirectHost: isCachedDirectHost
+                )
             )
         case .remote(let host):
             let resolvedHost = environment.remoteHost.isEmpty == false ? environment.remoteHost : host

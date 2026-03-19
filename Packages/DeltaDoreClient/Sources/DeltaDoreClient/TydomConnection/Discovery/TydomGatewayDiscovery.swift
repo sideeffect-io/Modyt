@@ -86,35 +86,62 @@ public struct TydomGatewayDiscovery: Sendable {
     public func discover(
         credentials: TydomGatewayCredentials,
         cachedIP: String?,
+        excludingHosts: Set<String> = [],
         config: TydomGatewayDiscoveryConfig
     ) async -> [TydomLocalGateway] {
+        let clock = ContinuousClock()
+        let start = clock.now
+        let deadline = start.advanced(by: discoveryDeadlineDuration(seconds: config.discoveryTimeout))
         let normalizedMac = TydomMac.normalize(credentials.mac)
+        let excludedHosts = Set(
+            excludingHosts.compactMap { host in
+                host.isEmpty ? nil : host
+            }
+        )
         dependencies.log(
-            "Discovery start mac=\(normalizedMac) cachedIP=\(cachedIP ?? "nil") timeout=\(config.discoveryTimeout)s probeTimeout=\(config.probeTimeout)s ports=\(config.probePorts)"
+            "Discovery start mac=\(normalizedMac) cachedIP=\(cachedIP ?? "nil") excludingHosts=\(Array(excludedHosts).sorted()) timeout=\(config.discoveryTimeout)s probeTimeout=\(config.probeTimeout)s ports=\(config.probePorts)"
         )
         var candidates: [TydomLocalGateway] = []
 
-        if let cachedIP, cachedIP.isEmpty == false {
+        if let cachedIP, cachedIP.isEmpty == false, excludedHosts.contains(cachedIP) == false {
             candidates.append(
                 TydomLocalGateway(mac: normalizedMac, host: cachedIP, method: .cachedIP)
             )
             if config.validateWithInfo,
-               await probeInfo(host: cachedIP, credentials: credentials, config: config) {
+               let infoTimeout = discoveryRemainingTimeout(
+                   until: deadline,
+                   maximum: config.infoTimeout,
+                   clock: clock
+               ),
+               await probeInfo(
+                   host: cachedIP,
+                   credentials: credentials,
+                   allowInsecureTLS: config.allowInsecureTLS,
+                   timeout: infoTimeout
+               ) {
                 dependencies.log("Discovery cached candidate validated via /info host=\(cachedIP)")
                 return candidates
             }
+        } else if let cachedIP, cachedIP.isEmpty == false {
+            dependencies.log("Discovery cached candidate skipped host=\(cachedIP)")
         }
         if cachedIP?.isEmpty == false {
             dependencies.log("Discovery cached candidate host=\(cachedIP ?? "")")
         }
 
-        let subnetHosts = dependencies.subnetHosts()
+        guard discoveryRemainingTimeout(until: deadline, maximum: config.discoveryTimeout, clock: clock) != nil else {
+            dependencies.log("Discovery deadline reached before subnet scan elapsed=\(discoveryElapsedDescription(start.duration(to: clock.now)))")
+            return uniqueCandidates(candidates)
+        }
+
+        let subnetHosts = dependencies.subnetHosts().filter { excludedHosts.contains($0) == false }
         dependencies.log("Discovery subnet candidates count=\(subnetHosts.count)")
         let probeHosts = await scanOpenPort(
             subnetHosts,
             ports: config.probePorts,
             timeout: config.probeTimeout,
-            maxConcurrent: max(config.probeConcurrency, 1)
+            maxConcurrent: max(config.probeConcurrency, 1),
+            deadline: deadline
         )
         if probeHosts.isEmpty {
             dependencies.log("Discovery subnet probe found 0 responsive hosts")
@@ -128,7 +155,12 @@ public struct TydomGatewayDiscovery: Sendable {
         let unique = uniqueCandidates(candidates)
         dependencies.log("Discovery unique candidates=\(unique.map { "\($0.host)(\($0.method.rawValue))" })")
         if config.validateWithInfo {
-            let validated = await validateCandidates(unique, credentials: credentials, config: config)
+            let validated = await validateCandidates(
+                unique,
+                credentials: credentials,
+                config: config,
+                deadline: deadline
+            )
             if validated.isEmpty == false {
                 dependencies.log("Discovery websocket validation ok hosts=\(validated.map { $0.host })")
                 return validated
@@ -140,7 +172,7 @@ public struct TydomGatewayDiscovery: Sendable {
                 return []
             }
         }
-        dependencies.log("Discovery returning candidates (no websocket verification step)")
+        dependencies.log("Discovery returning candidates (no websocket verification step) elapsed=\(discoveryElapsedDescription(start.duration(to: clock.now)))")
         return unique
     }
 
@@ -159,35 +191,57 @@ public struct TydomGatewayDiscovery: Sendable {
     private func probeInfo(
         host: String,
         credentials: TydomGatewayCredentials,
-        config: TydomGatewayDiscoveryConfig
+        allowInsecureTLS: Bool,
+        timeout: TimeInterval
     ) async -> Bool {
         await dependencies.probeWebSocketInfo(
             host,
             credentials.mac,
             credentials.password,
-            config.allowInsecureTLS,
-            config.infoTimeout
+            allowInsecureTLS,
+            timeout
         )
     }
 
     private func validateCandidates(
         _ candidates: [TydomLocalGateway],
         credentials: TydomGatewayCredentials,
-        config: TydomGatewayDiscoveryConfig
+        config: TydomGatewayDiscoveryConfig,
+        deadline: ContinuousClock.Instant
     ) async -> [TydomLocalGateway] {
         guard candidates.isEmpty == false else { return [] }
         let concurrency = max(config.infoConcurrency, 1)
         let log = dependencies.log
+        let clock = ContinuousClock()
         var iterator = candidates.makeIterator()
         return await withTaskGroup(of: TydomLocalGateway?.self) { group in
+            func enqueue(_ candidate: TydomLocalGateway) {
+                guard let infoTimeout = discoveryRemainingTimeout(
+                    until: deadline,
+                    maximum: config.infoTimeout,
+                    clock: clock
+                ) else {
+                    return
+                }
+                group.addTask {
+                    if Task.isCancelled {
+                        return nil
+                    }
+                    let ok = await probeInfo(
+                        host: candidate.host,
+                        credentials: credentials,
+                        allowInsecureTLS: config.allowInsecureTLS,
+                        timeout: infoTimeout
+                    )
+                    log("Discovery validation host=\(candidate.host) ok=\(ok)")
+                    return ok ? candidate : nil
+                }
+            }
+
             let initial = min(concurrency, candidates.count)
             for _ in 0..<initial {
                 if let candidate = iterator.next() {
-                    group.addTask {
-                        let ok = await probeInfo(host: candidate.host, credentials: credentials, config: config)
-                        log("Discovery validation host=\(candidate.host) ok=\(ok)")
-                        return ok ? candidate : nil
-                    }
+                    enqueue(candidate)
                 }
             }
 
@@ -197,11 +251,7 @@ public struct TydomGatewayDiscovery: Sendable {
                     return [winner]
                 }
                 if let candidate = iterator.next() {
-                    group.addTask {
-                        let ok = await probeInfo(host: candidate.host, credentials: credentials, config: config)
-                        log("Discovery validation host=\(candidate.host) ok=\(ok)")
-                        return ok ? candidate : nil
-                    }
+                    enqueue(candidate)
                 }
             }
 
@@ -213,26 +263,49 @@ public struct TydomGatewayDiscovery: Sendable {
         _ hosts: [String],
         ports: [Int],
         timeout: TimeInterval,
-        maxConcurrent: Int
+        maxConcurrent: Int,
+        deadline: ContinuousClock.Instant
     ) async -> [String] {
         guard hosts.isEmpty == false, ports.isEmpty == false else { return [] }
         let portsToScan = ports
+        let clock = ContinuousClock()
         var results: [String] = []
         var iterator = hosts.makeIterator()
 
         await withTaskGroup(of: String?.self) { group in
+            func enqueue(_ host: String) {
+                guard discoveryRemainingTimeout(
+                    until: deadline,
+                    maximum: timeout,
+                    clock: clock
+                ) != nil else {
+                    return
+                }
+                group.addTask {
+                    if Task.isCancelled {
+                        return nil
+                    }
+                    for port in portsToScan {
+                        guard let probeTimeout = discoveryRemainingTimeout(
+                            until: deadline,
+                            maximum: timeout,
+                            clock: clock
+                        ) else {
+                            return nil
+                        }
+                        let open = await dependencies.probeHost(host, port, probeTimeout)
+                        if open {
+                            return host
+                        }
+                    }
+                    return nil
+                }
+            }
+
             let initial = min(maxConcurrent, hosts.count)
             for _ in 0..<initial {
                 if let host = iterator.next() {
-                    group.addTask {
-                        for port in portsToScan {
-                            let open = await dependencies.probeHost(host, port, timeout)
-                            if open {
-                                return host
-                            }
-                        }
-                        return nil
-                    }
+                    enqueue(host)
                 }
             }
 
@@ -241,15 +314,7 @@ public struct TydomGatewayDiscovery: Sendable {
                     results.append(host)
                 }
                 if let host = iterator.next() {
-                    group.addTask {
-                        for port in portsToScan {
-                            let open = await dependencies.probeHost(host, port, timeout)
-                            if open {
-                                return host
-                            }
-                        }
-                        return nil
-                    }
+                    enqueue(host)
                 }
             }
         }
@@ -257,6 +322,30 @@ public struct TydomGatewayDiscovery: Sendable {
         return Array(Set(results)).sorted()
     }
 
+}
+
+private func discoveryDeadlineDuration(seconds: TimeInterval) -> Duration {
+    .milliseconds(Int64((seconds * 1_000).rounded()))
+}
+
+private func discoveryRemainingTimeout(
+    until deadline: ContinuousClock.Instant,
+    maximum: TimeInterval,
+    clock: ContinuousClock
+) -> TimeInterval? {
+    let remaining = deadline - clock.now
+    let seconds = discoveryDurationSeconds(remaining)
+    guard seconds > 0 else { return nil }
+    return min(maximum, seconds)
+}
+
+private func discoveryDurationSeconds(_ duration: Duration) -> TimeInterval {
+    let components = duration.components
+    return TimeInterval(components.seconds) + (TimeInterval(components.attoseconds) / 1_000_000_000_000_000_000)
+}
+
+private func discoveryElapsedDescription(_ duration: Duration) -> String {
+    String(format: "%.3fs", discoveryDurationSeconds(duration))
 }
 
 actor AsyncSemaphore {
