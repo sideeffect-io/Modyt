@@ -38,6 +38,7 @@ public actor TydomConnection {
     private var keepAliveEnabled = true
     private var webSocketDelegate: InsecureTLSDelegate?
     private var isWebSocketOpen = false
+    private var webSocketCompletionError: Error?
 #if canImport(Network)
     private let nwQueue = DispatchQueue(label: "tydom.nw.websocket")
 #endif
@@ -131,13 +132,33 @@ public actor TydomConnection {
         let connectDeadline = makeConnectDeadline(timeout: connectTimeout)
         let webSocketRequestTimeout: TimeInterval = 24 * 60 * 60
 
-        let passwordSession = dependencies.makeSession(
-            configuration.allowInsecureTLS,
-            connectTimeout,
-            nil
-        )
-        let password = try await resolvePassword(using: passwordSession)
-        dependencies.invalidateSession(passwordSession)
+        let password: String
+        if let configuredPassword = configuration.password {
+            password = configuredPassword
+        } else {
+            let passwordSession = dependencies.makeSession(
+                configuration.allowInsecureTLS,
+                connectTimeout,
+                nil
+            )
+            password = try await resolvePassword(using: passwordSession)
+            dependencies.invalidateSession(passwordSession)
+        }
+
+        if shouldAttemptWebSocketDigestFastPath(startReceiving: shouldStartReceiving) {
+            do {
+                try await connectWebSocketWithDigestChallenge(
+                    password: password,
+                    deadline: connectDeadline
+                )
+                return
+            } catch {
+                log(
+                    "WebSocket digest fast path failed host=\(configuration.host) error=\(error). Falling back to manual digest preflight."
+                )
+                resetPendingConnectAttempt()
+            }
+        }
 
         let handshakeSession = dependencies.makeSession(
             configuration.allowInsecureTLS,
@@ -170,9 +191,8 @@ public actor TydomConnection {
         request.setValue(authorization, forHTTPHeaderField: "Authorization")
 
         let task = session.webSocketTask(with: request)
-        task.resume()
-
         self.socketTask = task
+        task.resume()
         log("WebSocket task resumed.")
         if shouldStartReceiving {
             startReceiving(from: task)
@@ -188,6 +208,7 @@ public actor TydomConnection {
         messageContinuation?.finish()
         rawMessageContinuation?.finish()
         isWebSocketOpen = false
+        webSocketCompletionError = nil
         receiveTask?.cancel()
         receiveTask = nil
         keepAliveTask?.cancel()
@@ -511,7 +532,13 @@ public actor TydomConnection {
         if isWebSocketOpen { return }
         let deadline = Date().addingTimeInterval(timeout)
         while !isWebSocketOpen && Date() < deadline {
+            if let error = webSocketCompletionError {
+                throw error
+            }
             try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        if let error = webSocketCompletionError {
+            throw error
         }
         guard isWebSocketOpen else {
             log("WebSocket open timed out after \(timeout)s")
@@ -538,6 +565,12 @@ public actor TydomConnection {
     }
 
     private func makeWebSocketSession(forProbe _: Bool) -> URLSession {
+        makeWebSocketSession(credential: nil)
+    }
+
+    private func makeWebSocketSession(
+        credential: URLCredential?
+    ) -> URLSession {
         let sessionConfig = URLSessionConfiguration.default
         let webSocketSessionTimeout: TimeInterval = 24 * 60 * 60
         sessionConfig.timeoutIntervalForRequest = webSocketSessionTimeout
@@ -551,17 +584,27 @@ public actor TydomConnection {
         }
         let delegate = InsecureTLSDelegate(
             allowInsecureTLS: configuration.allowInsecureTLS,
-            credential: nil,
-            onWebSocketOpen: { [weak self] _ in
-                Task { await self?.markWebSocketOpen() }
+            credential: credential,
+            onWebSocketOpen: { [weak self] task in
+                Task { await self?.markWebSocketOpen(task) }
+            },
+            onWebSocketComplete: { [weak self] task, error in
+                Task { await self?.markWebSocketComplete(task: task, error: error) }
             }
         )
         webSocketDelegate = delegate
         return URLSession(configuration: sessionConfig, delegate: delegate, delegateQueue: nil)
     }
 
-    private func markWebSocketOpen() {
+    private func markWebSocketOpen(_ task: URLSessionWebSocketTask) {
+        guard socketTask === task else { return }
         isWebSocketOpen = true
+        webSocketCompletionError = nil
+    }
+
+    private func markWebSocketComplete(task: URLSessionTask, error: Error?) {
+        guard socketTask === task, let error else { return }
+        webSocketCompletionError = error
     }
 
     private func handleReceiveFailure(task: URLSessionWebSocketTask) async {
@@ -573,6 +616,55 @@ public actor TydomConnection {
         if socketTask === task {
             socketTask = nil
         }
+    }
+
+    private func shouldAttemptWebSocketDigestFastPath(
+        startReceiving: Bool
+    ) -> Bool {
+        startReceiving == false && configuration.isRemote == false
+    }
+
+    private func connectWebSocketWithDigestChallenge(
+        password: String,
+        deadline: ContinuousClock.Instant
+    ) async throws {
+        let credential = URLCredential(
+            user: configuration.digestUsername,
+            password: password,
+            persistence: .forSession
+        )
+        let session = makeWebSocketSession(credential: credential)
+        self.session = session
+        isWebSocketOpen = false
+        webSocketCompletionError = nil
+
+        var request = URLRequest(url: configuration.webSocketURL)
+        request.timeoutInterval = 24 * 60 * 60
+
+        let task = session.webSocketTask(with: request)
+        socketTask = task
+        task.resume()
+        log("WebSocket task resumed (digest fast path).")
+
+        try await waitForWebSocketOpen(
+            timeout: try remainingConnectTimeout(until: deadline)
+        )
+    }
+
+    private func resetPendingConnectAttempt() {
+        isWebSocketOpen = false
+        webSocketCompletionError = nil
+        receiveTask?.cancel()
+        receiveTask = nil
+        keepAliveTask?.cancel()
+        keepAliveTask = nil
+        socketTask?.cancel(with: .goingAway, reason: nil)
+        socketTask = nil
+        if let session {
+            dependencies.invalidateSession(session)
+        }
+        session = nil
+        webSocketDelegate = nil
     }
 
     private func handleIncoming(_ data: Data) async {
