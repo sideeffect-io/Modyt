@@ -725,7 +725,7 @@ struct LoginView: View {
 
     private var statusBadgeText: String {
         if loginState.isConnecting {
-            return "Connecting"
+            return "Busy"
         }
         if loginState.canConnect {
             return "Ready"
