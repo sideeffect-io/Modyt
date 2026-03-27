@@ -141,41 +141,23 @@ struct LoginView: View {
 
     private func heroPanel(metrics: LayoutMetrics) -> some View {
         VStack(alignment: .leading, spacing: metrics.isWide ? 18 : 14) {
-            VStack(alignment: .leading, spacing: metrics.isCompactHeight ? 10 : 12) {
-                if metrics.isWide {
-                    LoginBadge(
-                        text: "Secure Tydom Access",
-                        systemImage: "lock.shield.fill",
-                        tone: .accent
+            Text("MoDyt")
+                .font(
+                    .system(
+                        metrics.isWide ? .largeTitle : (metrics.isCompactHeight ? .title2 : .title),
+                        design: .rounded
                     )
-                }
+                    .weight(.bold)
+                )
+                .frame(maxWidth: metrics.isWide ? 420 : .infinity, alignment: .leading)
 
-                Text("MoDyt")
-                    .font(
-                        .system(
-                            metrics.isWide ? .largeTitle : (metrics.isCompactHeight ? .title2 : .title),
-                            design: .rounded
-                        )
-                        .weight(.bold)
-                    )
-
-                Text("Control your home with live Tydom data.")
-                    .font(
-                        .system(
-                            metrics.isWide ? .title3 : (metrics.isCompactHeight ? .body : .title3),
-                            design: .rounded
-                        )
-                    )
+            if metrics.isWide {
+                Text("Configurable Delta Dore Tydom dashboard with presets, one-tap actions, and live tracking.")
+                    .font(.system(.body, design: .rounded))
                     .foregroundStyle(.secondary)
-
-                if let supportingText = heroSupportingText(metrics: metrics) {
-                    Text(supportingText)
-                        .font(.system(metrics.isCompactHeight ? .footnote : .body, design: .rounded))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 420, alignment: .leading)
             }
-            .frame(maxWidth: metrics.isWide ? 420 : .infinity, alignment: .leading)
 
             if metrics.isWide {
                 illustrationPanel(metrics: metrics)
@@ -278,18 +260,6 @@ struct LoginView: View {
                     )
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                LoginBadge(
-                    text: "Live site selection",
-                    systemImage: "sparkles",
-                    tone: .neutral
-                )
-                Text("A calmer entry point for larger screens.")
-                    .font(.system(.footnote, design: .rounded).weight(.medium))
-                    .foregroundStyle(.primary.opacity(colorScheme == .dark ? 0.78 : 0.74))
-                    .frame(maxWidth: 220, alignment: .leading)
-            }
-            .padding(20)
         }
         .frame(maxWidth: .infinity)
         .frame(height: metrics.heroHeight)
@@ -376,149 +346,74 @@ struct LoginView: View {
         .animation(.spring(duration: 0.55, bounce: 0.10), value: loginState.sites)
     }
 
-    @ViewBuilder
     private func formHeader(metrics: LayoutMetrics) -> some View {
-        if metrics.isWide {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Sign in")
-                        .font(.system(.title2, design: .rounded).weight(.bold))
-
-                    Text("Use the same credentials and site selection flow you already have today, with a layout that stays balanced on iPhone and iPad.")
-                        .font(.system(.body, design: .rounded))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 0)
-
-                LoginBadge(
-                    text: statusBadgeText,
-                    systemImage: statusBadgeSymbol,
-                    tone: loginState.canConnect ? .accent : .neutral
-                )
-            }
-        } else {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Sign in")
-                    .font(.system(.title3, design: .rounded).weight(.bold))
-
-                Text(compactSignInDescription(metrics: metrics))
-                    .font(.system(metrics.isCompactHeight ? .footnote : .body, design: .rounded))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
+        Text("Sign in")
+            .font(.system(metrics.isWide ? .title2 : .title3, design: .rounded).weight(.bold))
     }
 
     private func credentialsSection(metrics: LayoutMetrics) -> some View {
-        sectionCard(metrics: metrics) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Credentials")
-                    .font(.system(.headline, design: .rounded).weight(.semibold))
-
-                Text("Enter your Delta Dore account details to load the sites available to this login.")
-                    .font(.system(.footnote, design: .rounded))
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(spacing: 14) {
-                CredentialField(
-                    icon: "at",
-                    isFocused: focusedField == .email,
-                    isFilled: loginState.email.isEmpty == false
-                ) {
-                    TextField("Email", text: emailBinding)
+        sectionCard(metrics: metrics, spacing: 14) {
+            CredentialField(
+                icon: "at",
+                isFocused: focusedField == .email,
+                isFilled: loginState.email.isEmpty == false
+            ) {
+                TextField("Email", text: emailBinding)
 #if os(iOS)
-                    .textInputAutocapitalization(.never)
+                .textInputAutocapitalization(.never)
 #endif
-                    .autocorrectionDisabled()
-                    .keyboardType(.emailAddress)
-                    .textContentType(.username)
-                    .submitLabel(.next)
-                    .focused($focusedField, equals: .email)
-                    .onSubmit {
-                        focusedField = .password
-                    }
+                .autocorrectionDisabled()
+                .keyboardType(.emailAddress)
+                .textContentType(.username)
+                .submitLabel(.next)
+                .focused($focusedField, equals: .email)
+                .onSubmit {
+                    focusedField = .password
                 }
-
-                CredentialField(
-                    icon: "key.fill",
-                    isFocused: focusedField == .password,
-                    isFilled: loginState.password.isEmpty == false
-                ) {
-                    SecureField("Password", text: passwordBinding)
-                        .textContentType(.password)
-                        .submitLabel(.go)
-                        .focused($focusedField, equals: .password)
-                        .onSubmit {
-                            loadSites()
-                        }
-                }
-
-                Button {
-                    loadSites()
-                } label: {
-                    HStack(spacing: 12) {
-                        if loginState.isLoadingSites {
-                            ProgressView()
-                                .tint(colorScheme == .dark ? .white : AppColors.slate)
-                        } else {
-                            Image(systemName: loadSitesSymbolName)
-                                .imageScale(.medium)
-                                .contentTransition(.symbolEffect(.replace))
-                                .symbolEffect(.bounce, value: loginState.canLoadSites)
-                                .symbolEffect(.bounce, value: loginState.sites.count)
-                        }
-
-                        Text(loginState.isLoadingSites ? "Loading Sites..." : "Load Sites")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                        if loginState.sites.isEmpty == false {
-                            Text(loginState.sites.count.formatted())
-                                .font(.system(.caption, design: .rounded).weight(.bold))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .contentTransition(.numericText())
-                                .background {
-                                    Capsule(style: .continuous)
-                                        .fill(Color.white.opacity(0.16))
-                                }
-                        }
-                    }
-                }
-                .buttonStyle(SecondaryAuthenticationButtonStyle())
-                .disabled(!loginState.canLoadSites || loginState.isLoadingSites)
             }
+
+            CredentialField(
+                icon: "key.fill",
+                isFocused: focusedField == .password,
+                isFilled: loginState.password.isEmpty == false
+            ) {
+                SecureField("Password", text: passwordBinding)
+                    .textContentType(.password)
+                    .submitLabel(.go)
+                    .focused($focusedField, equals: .password)
+                    .onSubmit {
+                        loadSites()
+                    }
+            }
+
+            Button {
+                loadSites()
+            } label: {
+                HStack(spacing: 12) {
+                    if loginState.isLoadingSites {
+                        ProgressView()
+                            .tint(colorScheme == .dark ? .white : AppColors.slate)
+                    } else {
+                        Image(systemName: loadSitesSymbolName)
+                            .imageScale(.medium)
+                            .contentTransition(.symbolEffect(.replace))
+                            .symbolEffect(.bounce, value: loginState.canLoadSites)
+                            .symbolEffect(.bounce, value: loginState.sites.count)
+                    }
+
+                    Text(loginState.isLoadingSites ? "Loading sites..." : "Load sites")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .buttonStyle(SecondaryAuthenticationButtonStyle())
+            .disabled(!loginState.canLoadSites || loginState.isLoadingSites)
         }
     }
 
     private func sitesSection(metrics: LayoutMetrics) -> some View {
         sectionCard(metrics: metrics) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Site")
-                        .font(.system(.headline, design: .rounded).weight(.semibold))
-
-                    Text(loginState.sites.isEmpty
-                         ? "Load your sites to continue."
-                         : "Pick the site you want to use for this session.")
-                        .font(.system(.footnote, design: .rounded))
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer(minLength: 0)
-
-                Text(loginState.sites.count.formatted())
-                    .font(.system(.caption, design: .rounded).weight(.bold))
-                    .contentTransition(.numericText())
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background {
-                        Capsule(style: .continuous)
-                            .fill(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.48))
-                    }
-            }
+            Text("Site")
+                .font(.system(.headline, design: .rounded).weight(.semibold))
 
             if loginState.sites.isEmpty {
                 HStack(spacing: 16) {
@@ -531,13 +426,8 @@ struct LoginView: View {
                             .foregroundStyle(colorScheme == .dark ? Color.white.opacity(0.82) : AppColors.slate)
                     }
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("No site loaded yet")
-                            .font(.system(.body, design: .rounded).weight(.semibold))
-                        Text("Use your credentials above to fetch the sites available for this account.")
-                            .font(.system(.footnote, design: .rounded))
-                            .foregroundStyle(.secondary)
-                    }
+                    Text("Load sites to continue.")
+                        .font(.system(.body, design: .rounded).weight(.semibold))
 
                     Spacer(minLength: 0)
                 }
@@ -612,20 +502,6 @@ struct LoginView: View {
                 }
 
                 Spacer(minLength: 12)
-
-                Text(isSelected ? "Selected" : site.gatewayCount.formatted())
-                    .font(.system(.caption, design: .rounded).weight(.bold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background {
-                        Capsule(style: .continuous)
-                            .fill(
-                                isSelected
-                                    ? AppColors.ember.opacity(colorScheme == .dark ? 0.18 : 0.20)
-                                    : Color.white.opacity(colorScheme == .dark ? 0.06 : 0.44)
-                            )
-                    }
-                    .foregroundStyle(isSelected ? AppColors.ember : .secondary)
             }
             .padding(14)
             .frame(maxWidth: .infinity)
@@ -683,18 +559,6 @@ struct LoginView: View {
 
                 Text(loginState.isConnecting ? "Connecting..." : "Connect")
                     .frame(maxWidth: .infinity, alignment: .leading)
-
-                if let selectedSiteName {
-                    Text(selectedSiteName)
-                        .font(.system(.caption, design: .rounded).weight(.bold))
-                        .lineLimit(1)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background {
-                            Capsule(style: .continuous)
-                                .fill(Color.white.opacity(0.18))
-                        }
-                }
             }
         }
         .buttonStyle(PrimaryAuthenticationButtonStyle())
@@ -715,38 +579,8 @@ struct LoginView: View {
         )
     }
 
-    private var selectedSiteName: String? {
-        loginState.sites.first(where: { $0.id == loginState.selectedSiteID })?.name
-    }
-
     private var shouldShowCompactActionBar: Bool {
         loginState.canConnect || loginState.isConnecting
-    }
-
-    private var statusBadgeText: String {
-        if loginState.isConnecting {
-            return "Busy"
-        }
-        if loginState.canConnect {
-            return "Ready"
-        }
-        if loginState.sites.isEmpty == false {
-            return "Pick site"
-        }
-        return "Load sites"
-    }
-
-    private var statusBadgeSymbol: String {
-        if loginState.isConnecting {
-            return "bolt.circle.fill"
-        }
-        if loginState.canConnect {
-            return "checkmark.circle.fill"
-        }
-        if loginState.sites.isEmpty == false {
-            return "house.badge"
-        }
-        return "arrow.down.circle.fill"
     }
 
     private var loadSitesSymbolName: String {
@@ -838,26 +672,6 @@ struct LoginView: View {
         }
     }
 
-    private func heroSupportingText(metrics: LayoutMetrics) -> String? {
-        if metrics.isWide {
-            return "Sign in once, load the sites tied to your account, then connect to the right gateway without stretching the whole interface across the screen."
-        }
-
-        if metrics.isCompactHeight {
-            return nil
-        }
-
-        return "Sign in with your Delta Dore account to load your sites and connect to the right gateway."
-    }
-
-    private func compactSignInDescription(metrics: LayoutMetrics) -> String {
-        if metrics.isCompactHeight {
-            return "Use your Delta Dore login to load sites and connect."
-        }
-
-        return "Use your Delta Dore login to load sites, choose the right home, and connect."
-    }
-
     private func loadSites() {
         guard loginState.canLoadSites, !loginState.isLoadingSites else { return }
         store.send(.loadSitesTapped)
@@ -866,76 +680,6 @@ struct LoginView: View {
     private func startAnimationsIfNeeded() {
         guard !hasAnimatedIn else { return }
         hasAnimatedIn = true
-    }
-}
-
-private enum LoginBadgeTone {
-    case neutral
-    case accent
-}
-
-private struct LoginBadge: View {
-    let text: String
-    let systemImage: String
-    let tone: LoginBadgeTone
-
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        Label(text, systemImage: systemImage)
-            .font(.system(.footnote, design: .rounded).weight(.semibold))
-            .foregroundStyle(foregroundColor)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .background {
-                Capsule(style: .continuous)
-                    .fill(backgroundGradient)
-                    .overlay {
-                        Capsule(style: .continuous)
-                            .strokeBorder(borderColor, lineWidth: 1)
-                    }
-            }
-    }
-
-    private var foregroundColor: Color {
-        switch tone {
-        case .neutral:
-            return colorScheme == .dark ? Color.white.opacity(0.84) : AppColors.slate
-        case .accent:
-            return colorScheme == .dark ? Color.white : AppColors.slate
-        }
-    }
-
-    private var backgroundGradient: LinearGradient {
-        switch tone {
-        case .neutral:
-            return LinearGradient(
-                colors: [
-                    Color.white.opacity(colorScheme == .dark ? 0.10 : 0.58),
-                    Color.white.opacity(colorScheme == .dark ? 0.05 : 0.30)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        case .accent:
-            return LinearGradient(
-                colors: [
-                    AppColors.aurora.opacity(colorScheme == .dark ? 0.42 : 0.30),
-                    AppColors.ember.opacity(colorScheme == .dark ? 0.30 : 0.20)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
-    }
-
-    private var borderColor: Color {
-        switch tone {
-        case .neutral:
-            return Color.white.opacity(colorScheme == .dark ? 0.08 : 0.42)
-        case .accent:
-            return Color.white.opacity(colorScheme == .dark ? 0.12 : 0.46)
-        }
     }
 }
 

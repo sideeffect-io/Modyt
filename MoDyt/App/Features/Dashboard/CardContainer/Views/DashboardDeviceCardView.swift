@@ -1,17 +1,23 @@
 import SwiftUI
-import UIKit
 
 struct DashboardDeviceCardView: View {
     @Environment(\.dashboardDeviceCardStoreFactory) private var dashboardDeviceCardStoreFactory
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let favorite: FavoriteItem
+    let isEditing: Bool
+    let editAnimationVersion: Int
+    let onRequestEditMode: () -> Void
 
     @ScaledMetric(relativeTo: .body) private var dashboardCardMinHeight: CGFloat = 194
     @ScaledMetric(relativeTo: .title3) private var cardIconSize: CGFloat = 22
-    @ScaledMetric(relativeTo: .title3) private var cardIconFrame: CGFloat = 36
+    @ScaledMetric(relativeTo: .title3) private var cardIconFrame: CGFloat = 30
+    @ScaledMetric(relativeTo: .title3) private var cardHeaderSpacing: CGFloat = 6
     @ScaledMetric(relativeTo: .title3) private var favoriteButtonInset: CGFloat = 10
     @ScaledMetric(relativeTo: .title3) private var favoriteButtonClearance: CGFloat = 50
+
+    @State private var isWiggling = false
+
+    private let cardCornerRadius: CGFloat = 22
 
     var body: some View {
         WithStoreView(
@@ -40,22 +46,11 @@ struct DashboardDeviceCardView: View {
         for favorite: FavoriteItem,
         onFavoriteTapped: @escaping () -> Void
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            cardHeader(
-                for: favorite,
-                titleLineLimit: 2
-            )
-
+        cardShell(for: favorite, onFavoriteTapped: onFavoriteTapped) {
             Spacer(minLength: 0)
 
             SceneExecutionView(uniqueId: favorite.sceneExecutionUniqueId)
                 .frame(maxWidth: .infinity, alignment: .center)
-        }
-        .padding(16)
-        .frame(minHeight: dashboardCardMinHeight, alignment: .top)
-        .glassCard(cornerRadius: 22)
-        .overlay(alignment: .topTrailing) {
-            favoriteButton(for: favorite, action: onFavoriteTapped)
         }
     }
 
@@ -63,12 +58,7 @@ struct DashboardDeviceCardView: View {
         for favorite: FavoriteItem,
         onFavoriteTapped: @escaping () -> Void
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            cardHeader(
-                for: favorite,
-                titleLineLimit: 2
-            )
-
+        cardShell(for: favorite, onFavoriteTapped: onFavoriteTapped) {
             if let passiveLabel = passiveBodyLabel(for: favorite) {
                 Text(passiveLabel)
                     .font(.system(.caption, design: .rounded))
@@ -77,59 +67,66 @@ struct DashboardDeviceCardView: View {
 
             controlContent(for: favorite)
         }
+    }
+
+    private func cardShell<Content: View>(
+        for favorite: FavoriteItem,
+        onFavoriteTapped: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            cardHeader(for: favorite)
+            content()
+                .allowsHitTesting(!isEditing)
+                .opacity(isEditing ? 0.72 : 1)
+        }
         .padding(16)
         .frame(minHeight: dashboardCardMinHeight, alignment: .top)
-        .glassCard(cornerRadius: 22)
+        .glassCard(cornerRadius: cardCornerRadius)
+        .overlay {
+            if isEditing {
+                RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+                    .fill(.black.opacity(0.05))
+                    .allowsHitTesting(false)
+            }
+        }
         .overlay(alignment: .topTrailing) {
-            favoriteButton(for: favorite, action: onFavoriteTapped)
+            if isEditing {
+                favoriteButton(for: favorite, action: onFavoriteTapped)
+                    .transition(.scale.combined(with: .opacity))
+            }
+        }
+        .contentShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
+        .rotationEffect(.degrees(isEditing ? (isWiggling ? wiggleAngle : -wiggleAngle) : 0))
+        .offset(y: isEditing ? (isWiggling ? -0.6 : 0.6) : 0)
+        .simultaneousGesture(editModeGesture)
+        .onAppear(perform: updateWiggleState)
+        .onChange(of: isEditing) {
+            updateWiggleState()
+        }
+        .onChange(of: editAnimationVersion) {
+            updateWiggleState()
+        }
+        .onChange(of: favorite.id) {
+            updateWiggleState()
         }
     }
 
-    @ViewBuilder
-    private func cardHeader(
-        for favorite: FavoriteItem,
-        titleLineLimit: Int
-    ) -> some View {
-        let effectiveTitleLineLimit = dynamicTypeSize.isAccessibilitySize
-            ? max(titleLineLimit, 3)
-            : titleLineLimit
-
-        if dynamicTypeSize.isAccessibilitySize {
-            multilineHeader(for: favorite, titleLineLimit: effectiveTitleLineLimit)
-                .padding(.trailing, favoriteButtonClearance)
-        } else {
-            SwiftUI.ViewThatFits(in: .horizontal) {
-                compactHeader(for: favorite)
-                multilineHeader(for: favorite, titleLineLimit: effectiveTitleLineLimit)
-            }
-            .padding(.trailing, favoriteButtonClearance)
-        }
+    private func cardHeader(for favorite: FavoriteItem) -> some View {
+        compactHeader(for: favorite)
+            .padding(.trailing, isEditing ? favoriteButtonClearance : 0)
     }
 
     private func compactHeader(for favorite: FavoriteItem) -> some View {
-        HStack(alignment: .center, spacing: 10) {
+        HStack(alignment: .center, spacing: cardHeaderSpacing) {
             headerIcon(for: favorite)
 
             Text(favorite.name)
                 .font(.system(.headline, design: .rounded).weight(.semibold))
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .fixedSize(horizontal: true, vertical: false)
-        }
-    }
-
-    private func multilineHeader(
-        for favorite: FavoriteItem,
-        titleLineLimit: Int
-    ) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            headerIcon(for: favorite)
-            Text(favorite.name)
-                .font(.system(.subheadline, design: .rounded).weight(.semibold))
-                .lineLimit(titleLineLimit)
-                .truncationMode(.tail)
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
+                .minimumScaleFactor(0.8)
+                .allowsTightening(true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -151,6 +148,35 @@ struct DashboardDeviceCardView: View {
             action: action
         )
         .padding(favoriteButtonInset)
+    }
+
+    private var editModeGesture: some Gesture {
+        LongPressGesture(minimumDuration: 0.55, maximumDistance: 12)
+            .onEnded { _ in
+                guard !isEditing else { return }
+                onRequestEditMode()
+            }
+    }
+
+    private var wiggleAngle: Double {
+        favorite.id.hashValue.isMultiple(of: 2) ? 1.15 : -1.15
+    }
+
+    private func updateWiggleState() {
+        guard isEditing else {
+            withAnimation(.easeOut(duration: 0.14)) {
+                isWiggling = false
+            }
+            return
+        }
+
+        withAnimation(
+            .easeInOut(duration: 0.16)
+                .repeatForever(autoreverses: true)
+                .delay(Double(abs(favorite.id.hashValue % 7)) * 0.02)
+        ) {
+            isWiggling = true
+        }
     }
 
     private func iconSystemName(for favorite: FavoriteItem) -> String {

@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 struct SettingsView: View {
     private struct LayoutMetrics {
@@ -49,12 +52,10 @@ struct SettingsView: View {
 
     @Environment(\.settingsStoreFactory) private var settingsStoreFactory
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
 
     let onDidDisconnect: @MainActor () -> Void
 
-    @State private var hasAnimatedIn = false
     @State private var isVisible = false
 
     var body: some View {
@@ -80,7 +81,6 @@ struct SettingsView: View {
             }
             .onAppear {
                 isVisible = true
-                startAnimationsIfNeeded()
                 store.send(.connectionRouteRefreshRequested)
             }
             .onDisappear {
@@ -99,51 +99,44 @@ struct SettingsView: View {
 
     @ViewBuilder
     private func content(store: SettingsStore, metrics: LayoutMetrics) -> some View {
-        if metrics.isWide {
-            HStack(alignment: .bottom, spacing: metrics.columnSpacing) {
-                heroPanel(metrics: metrics)
-                    .frame(maxWidth: metrics.heroWidth, alignment: .leading)
+        if shouldShowHeroPanel {
+            if metrics.isWide {
+                HStack(alignment: .bottom, spacing: metrics.columnSpacing) {
+                    heroPanel(metrics: metrics)
+                        .frame(maxWidth: metrics.heroWidth, alignment: .leading)
 
-                connectionPanel(store: store, metrics: metrics)
-                    .frame(maxWidth: metrics.panelWidth)
+                    connectionPanel(store: store, metrics: metrics)
+                        .frame(maxWidth: metrics.panelWidth)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: metrics.sectionSpacing) {
+                    heroPanel(metrics: metrics)
+                    connectionPanel(store: store, metrics: metrics)
+                }
             }
         } else {
-            VStack(alignment: .leading, spacing: metrics.sectionSpacing) {
-                heroPanel(metrics: metrics)
-                connectionPanel(store: store, metrics: metrics)
-            }
+            connectionPanel(store: store, metrics: metrics)
         }
+    }
+
+    private var shouldShowHeroPanel: Bool {
+#if os(iOS)
+        UIDevice.current.userInterfaceIdiom != .phone
+#else
+        true
+#endif
     }
 
     private func heroPanel(metrics: LayoutMetrics) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            SettingsBadge(
-                text: "Account Session",
-                systemImage: "person.crop.circle.badge.checkmark",
-                tone: .accent
-            )
-
-            VStack(alignment: .leading, spacing: 12) {
-                Text("A calmer settings screen for every orientation.")
-                    .font(.system(metrics.isWide ? .largeTitle : .title2, design: .rounded).weight(.bold))
-
-                Text("Disconnect only when you need a fresh sign-in or want to switch accounts. On iPad and landscape, the screen now stays compact instead of stretching the action edge to edge.")
-                    .font(.system(metrics.isWide ? .title3 : .body, design: .rounded))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text("Manage the current Tydom session and disconnect when you need a fresh sign-in or another account.")
+                .font(.system(metrics.isWide ? .title3 : .body, design: .rounded))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: metrics.isWide ? 440 : .infinity, alignment: .leading)
 
             illustrationPanel(metrics: metrics)
         }
-        .opacity(hasAnimatedIn ? 1 : 0)
-        .offset(
-            x: hasAnimatedIn ? 0 : (metrics.isWide ? -32 : 0),
-            y: hasAnimatedIn ? 0 : 18
-        )
-        .animation(
-            reduceMotion ? nil : .spring(duration: 0.85, bounce: 0.16),
-            value: hasAnimatedIn
-        )
     }
 
     private func illustrationPanel(metrics: LayoutMetrics) -> some View {
@@ -232,18 +225,6 @@ struct SettingsView: View {
                     )
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                SettingsBadge(
-                    text: "Session control",
-                    systemImage: "switch.2",
-                    tone: .neutral
-                )
-                Text("Compact, readable, and easy to reset when you need a new sign-in.")
-                    .font(.system(.footnote, design: .rounded).weight(.medium))
-                    .foregroundStyle(.primary.opacity(colorScheme == .dark ? 0.78 : 0.74))
-                    .frame(maxWidth: 230, alignment: .leading)
-            }
-            .padding(20)
         }
         .frame(maxWidth: .infinity)
         .frame(height: metrics.heroHeight)
@@ -260,7 +241,7 @@ struct SettingsView: View {
                     Text("Connection")
                         .font(.system(.title2, design: .rounded).weight(.bold))
 
-                    Text("Disconnect to switch account or re-run setup. You can sign back in right away and reconnect to the same site or choose another one.")
+                    Text("Disconnect to sign in again or switch account.")
                         .font(.system(.body, design: .rounded))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -277,21 +258,15 @@ struct SettingsView: View {
 
             VStack(spacing: 14) {
                 SettingsInfoCard(
-                    title: "Current route",
+                    title: "Route",
                     message: connectionRouteMessage(for: store.state),
                     systemImage: connectionRouteSymbol(for: store.state)
                 )
 
                 SettingsInfoCard(
-                    title: "What happens next",
-                    message: "The active gateway session closes on this device, then the sign-in flow becomes available immediately.",
+                    title: "After disconnect",
+                    message: "This device returns to sign-in immediately.",
                     systemImage: "rectangle.portrait.and.arrow.right"
-                )
-
-                SettingsInfoCard(
-                    title: "When to use this",
-                    message: "Switch accounts, refresh setup, or clear the current session before handing the device to someone else.",
-                    systemImage: "arrow.trianglehead.2.clockwise.rotate.90"
                 )
             }
 
@@ -327,15 +302,6 @@ struct SettingsView: View {
 
                     Text(store.state.isDisconnecting ? "Disconnecting..." : "Disconnect")
                         .frame(maxWidth: .infinity, alignment: .leading)
-
-                    Text(store.state.isDisconnecting ? "Working" : "One tap")
-                        .font(.system(.caption, design: .rounded).weight(.bold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background {
-                            Capsule(style: .continuous)
-                                .fill(Color.white.opacity(0.18))
-                        }
                 }
             }
             .buttonStyle(SettingsPrimaryActionButtonStyle())
@@ -361,17 +327,6 @@ struct SettingsView: View {
                 )
         }
         .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))
-        .opacity(hasAnimatedIn ? 1 : 0)
-        .offset(
-            x: hasAnimatedIn ? 0 : (metrics.isWide ? 32 : 0),
-            y: hasAnimatedIn ? 0 : 20
-        )
-        .animation(
-            reduceMotion ? nil : .spring(duration: 0.90, bounce: 0.12),
-            value: hasAnimatedIn
-        )
-        .animation(.spring(duration: 0.55, bounce: 0.12), value: store.state.errorMessage)
-        .animation(.spring(duration: 0.55, bounce: 0.10), value: store.state.isDisconnecting)
     }
 
     private func ambientGlow(
@@ -409,16 +364,16 @@ struct SettingsView: View {
 
     private func connectionRouteMessage(for state: SettingsState) -> String {
         if state.isRefreshingConnectionRoute {
-            return "Refreshing the current gateway route for this device."
+            return "Refreshing route."
         }
 
         switch state.connectionRoute {
         case .local(let host):
-            return "Connected on the local network via \(host)."
+            return "Local network via \(host)."
         case .remote(let host):
-            return "Connected through the remote relay via \(host)."
+            return "Remote relay via \(host)."
         case .unavailable:
-            return "No active gateway route is available on this device right now."
+            return "No active route."
         }
     }
 
@@ -470,11 +425,6 @@ struct SettingsView: View {
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
-    }
-
-    private func startAnimationsIfNeeded() {
-        guard !hasAnimatedIn else { return }
-        hasAnimatedIn = true
     }
 }
 
@@ -612,8 +562,6 @@ private struct SettingsPrimaryActionButtonStyle: ButtonStyle {
             }
             .opacity(isEnabled ? 1 : 0.58)
             .scaleEffect(configuration.isPressed ? 0.985 : (isEnabled ? 1 : 0.992))
-            .animation(.snappy(duration: 0.18), value: configuration.isPressed)
-            .animation(.snappy(duration: 0.22), value: isEnabled)
     }
 
     private var backgroundGradient: LinearGradient {

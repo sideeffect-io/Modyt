@@ -1,11 +1,14 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import UIKit
 
 struct DashboardView: View {
     @Environment(\.dashboardStoreFactory) private var dashboardStoreFactory
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var currentPage = 0
+    @State private var isEditing = false
+    @State private var editAnimationVersion = 0
     @State private var dragSource: FavoriteType?
     @State private var dropTarget: FavoriteType?
 
@@ -26,15 +29,35 @@ struct DashboardView: View {
                     store: store,
                     availableSize: proxy.size
                 )
+                .onChange(of: store.state.favorites.map(\.id)) { _, favoriteIDs in
+                    if favoriteIDs.isEmpty {
+                        exitEditMode()
+                    } else if isEditing {
+                        editAnimationVersion &+= 1
+                    }
+                }
                 .navigationTitle("Dashboard")
                 .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            store.send(.refreshRequested)
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button(isEditing ? "Done" : "Edit") {
+                            if isEditing {
+                                exitEditMode()
+                            } else {
+                                enterEditMode()
+                            }
                         }
-                        .accessibilityLabel("Refresh dashboard")
+                        .accessibilityLabel(isEditing ? "Done editing dashboard" : "Edit dashboard")
+                    }
+
+                    ToolbarItem(placement: .topBarTrailing) {
+                        if isEditing == false {
+                            Button {
+                                store.send(.refreshRequested)
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                            .accessibilityLabel("Refresh dashboard")
+                        }
                     }
                 }
             }
@@ -197,8 +220,13 @@ struct DashboardView: View {
         }
     }
 
-    private func favoriteTile(for favorite: FavoriteItem, store: DashboardStore) -> some View {
-        DashboardDeviceCardView(favorite: favorite)
+    private func baseFavoriteTile(for favorite: FavoriteItem) -> some View {
+        DashboardDeviceCardView(
+            favorite: favorite,
+            isEditing: isEditing,
+            editAnimationVersion: editAnimationVersion,
+            onRequestEditMode: enterEditMode
+        )
         .padding(1)
         .transition(
             AnyTransition.asymmetric(
@@ -206,35 +234,67 @@ struct DashboardView: View {
                 removal: .opacity.combined(with: .scale(scale: 0.92))
             )
         )
-        .overlay {
-            if dropTarget == favorite.type {
-                RoundedRectangle(cornerRadius: 22)
-                    .stroke(.white.opacity(0.6), lineWidth: 2)
-            }
-        }
-        .overlay(alignment: .topTrailing) {
-            if dropTarget == favorite.type {
-                Image(systemName: "arrow.left.arrow.right.circle.fill")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(10)
-            }
-        }
-        .onDrag {
-            dragSource = favorite.type
-            return NSItemProvider(object: favorite.id as NSString)
-        }
-        .onDrop(
-            of: [UTType.text],
-            delegate: DashboardCardDropDelegate(
-                target: favorite.type,
-                dragSource: $dragSource,
-                dropTarget: $dropTarget,
-                onReorder: { source, target in
-                    store.send(.reorderFavorite(source, target))
+    }
+
+    @ViewBuilder
+    private func favoriteTile(for favorite: FavoriteItem, store: DashboardStore) -> some View {
+        if isEditing {
+            baseFavoriteTile(for: favorite)
+                .overlay {
+                    if dropTarget == favorite.type {
+                        RoundedRectangle(cornerRadius: 22)
+                            .stroke(.white.opacity(0.6), lineWidth: 2)
+                    }
                 }
-            )
-        )
+                .overlay(alignment: .topTrailing) {
+                    if dropTarget == favorite.type {
+                        Image(systemName: "arrow.left.arrow.right.circle.fill")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(10)
+                    }
+                }
+                .onDrag {
+                    dragSource = favorite.type
+                    return NSItemProvider(object: favorite.id as NSString)
+                }
+                .onDrop(
+                    of: [UTType.text],
+                    delegate: DashboardCardDropDelegate(
+                        target: favorite.type,
+                        dragSource: $dragSource,
+                        dropTarget: $dropTarget,
+                        onReorder: { source, target in
+                            store.send(.reorderFavorite(source, target))
+                        }
+                    )
+                )
+        } else {
+            baseFavoriteTile(for: favorite)
+        }
+    }
+
+    private func enterEditMode() {
+        guard isEditing == false else { return }
+
+        dragSource = nil
+        dropTarget = nil
+        UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+            isEditing = true
+        }
+    }
+
+    private func exitEditMode() {
+        guard isEditing else { return }
+
+        dragSource = nil
+        dropTarget = nil
+
+        withAnimation(.easeInOut(duration: 0.18)) {
+            isEditing = false
+        }
     }
 }
 
