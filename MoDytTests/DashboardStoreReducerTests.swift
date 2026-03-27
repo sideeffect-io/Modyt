@@ -1,3 +1,4 @@
+import SwiftUI
 import Testing
 @testable import MoDyt
 
@@ -86,5 +87,33 @@ struct DashboardStoreReducerTests {
                 )
         )
         #expect(transition.effects.isEmpty)
+    }
+
+    @Test
+    func compactPortraitPaginationUsesSixCardsPerPageWhenTighterChromeCreatesRoom() {
+        let metrics = DashboardPaginationMetrics.make(
+            availableSize: CGSize(width: 390, height: 680),
+            favoriteCount: 7,
+            horizontalSizeClass: .compact
+        )
+
+        #expect(metrics.columnCount == 2)
+        #expect(metrics.rowCount == 3)
+        #expect(metrics.pageSize == 6)
+        #expect(metrics.showsPageIndicator)
+    }
+
+    @Test
+    func compactPortraitPaginationKeepsFourCardsPerPageWhenHeightIsStillTooShort() {
+        let metrics = DashboardPaginationMetrics.make(
+            availableSize: CGSize(width: 390, height: 650),
+            favoriteCount: 7,
+            horizontalSizeClass: .compact
+        )
+
+        #expect(metrics.columnCount == 2)
+        #expect(metrics.rowCount == 2)
+        #expect(metrics.pageSize == 4)
+        #expect(metrics.showsPageIndicator)
     }
 }

@@ -52,21 +52,19 @@ struct GroupShutterView: View {
         WithStoreView(
             store: groupShutterStoreFactory.make(deviceIds: normalizedDeviceIds),
         ) { store in
-            VStack(alignment: .leading, spacing: 12) {
-                groupBadge
+            GeometryReader { proxy in
+                let layoutStyle = ShutterPresetLayoutStyle.make(for: proxy.size.width)
 
-                HStack(alignment: .bottom, spacing: 8) {
-                    ForEach(ShutterPreset.allCases) { preset in
-                        presetButton(preset: preset) {
-                            store.send(.targetWasSetInApp(target: preset.rawValue))
-                        }
-                    }
-                }
+                controlContent(
+                    store: store,
+                    layoutStyle: layoutStyle
+                )
+                .padding(.horizontal, layoutStyle.containerHorizontalPadding)
+                .padding(.vertical, layoutStyle.containerVerticalPadding)
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
+                .glassCard(cornerRadius: 18, interactive: true, tone: .controlInset)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            .glassCard(cornerRadius: 18, interactive: true, tone: .controlInset)
+            .frame(maxWidth: .infinity, alignment: .center)
             .onDisappear {
                 resetAcknowledgement()
             }
@@ -74,19 +72,53 @@ struct GroupShutterView: View {
         .id(storeIdentity)
     }
 
-    private var groupBadge: some View {
+    @ViewBuilder
+    private func controlContent(
+        store: GroupShutterStore,
+        layoutStyle: ShutterPresetLayoutStyle
+    ) -> some View {
+        VStack(alignment: .leading, spacing: layoutStyle.sectionSpacing) {
+            groupBadge(layoutStyle: layoutStyle)
+            presetControls(layoutStyle: layoutStyle) { preset in
+                store.send(.targetWasSetInApp(target: preset.rawValue))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
+
+    @ViewBuilder
+    private func presetControls(
+        layoutStyle: ShutterPresetLayoutStyle,
+        action: @escaping (ShutterPreset) -> Void
+    ) -> some View {
+        HStack(alignment: .bottom, spacing: layoutStyle.presetHorizontalSpacing) {
+            ForEach(ShutterPreset.allCases) { preset in
+                presetButton(
+                    preset: preset,
+                    layoutStyle: layoutStyle
+                ) {
+                    action(preset)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private func groupBadge(layoutStyle: ShutterPresetLayoutStyle) -> some View {
         HStack(spacing: 8) {
             Image(systemName: isShowingAcknowledgement ? "checkmark.seal.fill" : "square.stack.3d.up.fill")
                 .contentTransition(.symbolEffect(.replace))
 
             Text(isShowingAcknowledgement ? acknowledgementTitle : badgeTitle)
                 .lineLimit(1)
+                .minimumScaleFactor(0.82)
+                .allowsTightening(true)
                 .contentTransition(.opacity)
         }
-        .font(.system(.caption2, design: .rounded).weight(.semibold))
+        .font(layoutStyle.badgeFont)
         .foregroundStyle(isShowingAcknowledgement ? Color.green : .secondary)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, layoutStyle.badgeHorizontalPadding)
+        .padding(.vertical, layoutStyle.badgeVerticalPadding)
         .frame(maxWidth: .infinity, alignment: .center)
         .background(
             Capsule(style: .continuous)
@@ -116,6 +148,7 @@ struct GroupShutterView: View {
 
     private func presetButton(
         preset: ShutterPreset,
+        layoutStyle: ShutterPresetLayoutStyle,
         action: @escaping () -> Void
     ) -> some View {
         let isAcknowledging = acknowledgedPreset == preset.rawValue
@@ -147,8 +180,8 @@ struct GroupShutterView: View {
                     .padding(Self.targetTileInset)
 
                 ShutterPresetIcon(openPercentage: preset.rawValue)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 5)
+                    .padding(.horizontal, layoutStyle.iconHorizontalPadding)
+                    .padding(.vertical, layoutStyle.iconVerticalPadding)
             }
             .shadow(
                 color: Self.targetAccent.opacity(Double(0.12 * acknowledgementStrength)),
@@ -157,7 +190,7 @@ struct GroupShutterView: View {
                 y: 2
             )
             .frame(maxWidth: .infinity)
-            .frame(height: 42)
+            .frame(height: layoutStyle.buttonHeight)
             .opacity(0.88)
         }
         .buttonStyle(ShutterPresetButtonStyle())

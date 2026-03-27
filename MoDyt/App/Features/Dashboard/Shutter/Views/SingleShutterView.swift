@@ -34,32 +34,19 @@ struct SingleShutterView: View {
         WithStoreView(
             store: singleShutterStoreFactory.make(deviceId: deviceId),
         ) { store in
-            VStack(spacing: 10) {
-                ShutterLinearGauge(
-                    gaugePosition: store.gaugePosition,
-                    movingTarget: store.movingTarget,
-                    isMoving: store.isMoving,
-                    isDimmed: store.isGaugeDimmed
-                )
-                .frame(height: 24)
-                .accessibilityLabel("Current shutter position")
-                .accessibilityValue("\(store.gaugePosition) percent")
+            GeometryReader { proxy in
+                let layoutStyle = ShutterPresetLayoutStyle.make(for: proxy.size.width)
 
-                HStack(alignment: .bottom, spacing: 8) {
-                    ForEach(ShutterPreset.allCases) { preset in
-                        presetButton(
-                            preset: preset,
-                            movingTarget: store.movingTarget
-                        ) {
-                            store.send(.targetWasSetInApp(target: preset.rawValue))
-                        }
-                    }
-                }
+                controlContent(
+                    store: store,
+                    layoutStyle: layoutStyle
+                )
+                .padding(.horizontal, layoutStyle.containerHorizontalPadding)
+                .padding(.vertical, layoutStyle.containerVerticalPadding)
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
+                .glassCard(cornerRadius: 18, interactive: true, tone: .controlInset)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            .glassCard(cornerRadius: 18, interactive: true, tone: .controlInset)
+            .frame(maxWidth: .infinity, alignment: .center)
             .onDisappear {
                 resetAcknowledgement()
             }
@@ -67,9 +54,56 @@ struct SingleShutterView: View {
         .id(deviceId.storageKey)
     }
 
+    @ViewBuilder
+    private func controlContent(
+        store: SingleShutterStore,
+        layoutStyle: ShutterPresetLayoutStyle
+    ) -> some View {
+        VStack(spacing: layoutStyle.sectionSpacing) {
+            ShutterLinearGauge(
+                gaugePosition: store.gaugePosition,
+                movingTarget: store.movingTarget,
+                isMoving: store.isMoving,
+                isDimmed: store.isGaugeDimmed
+            )
+            .frame(height: 24)
+            .accessibilityLabel("Current shutter position")
+            .accessibilityValue("\(store.gaugePosition) percent")
+
+            presetControls(
+                layoutStyle: layoutStyle,
+                movingTarget: store.movingTarget
+            ) { preset in
+                store.send(.targetWasSetInApp(target: preset.rawValue))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
+
+    @ViewBuilder
+    private func presetControls(
+        layoutStyle: ShutterPresetLayoutStyle,
+        movingTarget: Int?,
+        action: @escaping (ShutterPreset) -> Void
+    ) -> some View {
+        HStack(alignment: .bottom, spacing: layoutStyle.presetHorizontalSpacing) {
+            ForEach(ShutterPreset.allCases) { preset in
+                presetButton(
+                    preset: preset,
+                    movingTarget: movingTarget,
+                    layoutStyle: layoutStyle
+                ) {
+                    action(preset)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
     private func presetButton(
         preset: ShutterPreset,
         movingTarget: Int?,
+        layoutStyle: ShutterPresetLayoutStyle,
         action: @escaping () -> Void
     ) -> some View {
         let isSelected = movingTarget == preset.rawValue
@@ -107,8 +141,8 @@ struct SingleShutterView: View {
                     .padding(Self.targetTileInset)
 
                 ShutterPresetIcon(openPercentage: preset.rawValue)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 5)
+                    .padding(.horizontal, layoutStyle.iconHorizontalPadding)
+                    .padding(.vertical, layoutStyle.iconVerticalPadding)
             }
             .shadow(
                 color: Self.targetAccent.opacity(Double((isSelected ? 0.18 : 0) + (0.12 * acknowledgementStrength))),
@@ -117,7 +151,7 @@ struct SingleShutterView: View {
                 y: 2
             )
             .frame(maxWidth: .infinity)
-            .frame(height: 42)
+            .frame(height: layoutStyle.buttonHeight)
             .opacity(isSelected ? 1 : 0.88)
         }
         .buttonStyle(ShutterPresetButtonStyle())
